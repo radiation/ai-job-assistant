@@ -1,7 +1,56 @@
 [project]
 name = "ai-job-assistant"
 version = "0.1.0"
-description = "Add your description here"
+description = "Foundation slice for an AI-assisted executive job search platform"
 readme = "README.md"
 requires-python = ">=3.14"
-dependencies = []
+dependencies = [
+	"alembic>=1.16.4",
+	"fastapi>=0.116.0",
+	"pydantic-settings>=2.10.1",
+	"psycopg[binary]>=3.2.9",
+	"sqlalchemy>=2.0.42",
+	"uvicorn>=0.35.0",
+]
+
+[dependency-groups]
+dev = [
+	"httpx>=0.28.1",
+	"mypy>=1.17.0",
+	"pytest>=8.4.1",
+	"ruff>=0.12.3",
+]
+
+[project.scripts]
+ai-job-finder-seed = "ai_job_finder.infrastructure.database.seed:main"
+
+[build-system]
+requires = ["setuptools>=75"]
+build-backend = "setuptools.build_meta"
+
+[tool.uv]
+package = true
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py314"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "N", "UP", "B", "A", "C4", "DTZ", "RUF"]
+
+[tool.ruff.format]
+quote-style = "double"
+
+[tool.mypy]
+python_version = "3.14"
+strict = true
+plugins = ["pydantic.mypy", "sqlalchemy.ext.mypy.plugin"]
+mypy_path = ["src"]
+
+[[tool.mypy.overrides]]
+module = ["alembic.*"]
+ignore_missing_imports = true
