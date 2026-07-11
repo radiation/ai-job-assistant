@@ -1,0 +1,84 @@
+{% extends 'base.html' %}
+
+{% block content %}
+  <section class="page-header">
+    <div>
+      <h1>New Job Lead</h1>
+      <p>Manual entry for leads that need human review and synchronous evaluation.</p>
+    </div>
+  </section>
+
+  <section class="panel narrow-panel">
+    <form class="stack-form" method="post" action="/jobs" novalidate>
+      <div class="field-grid">
+        <div class="field-group">
+          <label for="source">Source</label>
+          <select id="source" name="source">
+            {% for option in source_options %}
+              <option value="{{ option.value }}" {% if form_values.source == option.value %}selected{% endif %}>{{ option.value|humanize }}</option>
+            {% endfor %}
+          </select>
+          {% if form_errors.source %}<p class="field-error">{{ form_errors.source }}</p>{% endif %}
+        </div>
+
+        <div class="field-group">
+          <label for="workplace_type">Workplace type</label>
+          <select id="workplace_type" name="workplace_type">
+            <option value="">Not specified</option>
+            {% for option in workplace_options %}
+              <option value="{{ option.value }}" {% if form_values.workplace_type == option.value %}selected{% endif %}>{{ option.value|humanize }}</option>
+            {% endfor %}
+          </select>
+          {% if form_errors.workplace_type %}<p class="field-error">{{ form_errors.workplace_type }}</p>{% endif %}
+        </div>
+
+        <div class="field-group">
+          <label for="company_name">Company name</label>
+          <input id="company_name" name="company_name" value="{{ form_values.company_name }}" />
+          {% if form_errors.company_name %}<p class="field-error">{{ form_errors.company_name }}</p>{% endif %}
+        </div>
+
+        <div class="field-group">
+          <label for="title">Title</label>
+          <input id="title" name="title" value="{{ form_values.title }}" />
+          {% if form_errors.title %}<p class="field-error">{{ form_errors.title }}</p>{% endif %}
+        </div>
+
+        <div class="field-group">
+          <label for="location_text">Location</label>
+          <input id="location_text" name="location_text" value="{{ form_values.location_text }}" />
+          {% if form_errors.location_text %}<p class="field-error">{{ form_errors.location_text }}</p>{% endif %}
+        </div>
+
+        <div class="field-group">
+          <label for="compensation_text">Compensation text</label>
+          <input id="compensation_text" name="compensation_text" value="{{ form_values.compensation_text }}" />
+          {% if form_errors.compensation_text %}<p class="field-error">{{ form_errors.compensation_text }}</p>{% endif %}
+        </div>
+
+        <div class="field-group">
+          <label for="source_url">Source URL</label>
+          <input id="source_url" name="source_url" value="{{ form_values.source_url }}" />
+          {% if form_errors.source_url %}<p class="field-error">{{ form_errors.source_url }}</p>{% endif %}
+        </div>
+
+        <div class="field-group">
+          <label for="external_id">External ID</label>
+          <input id="external_id" name="external_id" value="{{ form_values.external_id }}" />
+          {% if form_errors.external_id %}<p class="field-error">{{ form_errors.external_id }}</p>{% endif %}
+        </div>
+      </div>
+
+      <div class="field-group">
+        <label for="description_raw">Raw description</label>
+        <textarea id="description_raw" name="description_raw" rows="12">{{ form_values.description_raw }}</textarea>
+        {% if form_errors.description_raw %}<p class="field-error">{{ form_errors.description_raw }}</p>{% endif %}
+      </div>
+
+      <div class="actions-row">
+        <button type="submit">Create job lead</button>
+        <a href="/jobs">Cancel</a>
+      </div>
+    </form>
+  </section>
+{% endblock %}

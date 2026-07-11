@@ -1,0 +1,70 @@
+{% extends 'base.html' %}
+
+{% block content %}
+  <section class="page-header">
+    <div>
+      <h1>Career Facts</h1>
+      <p>Read-only evidence inventory grouped by verification status.</p>
+    </div>
+  </section>
+
+  {% if candidate %}
+    <section class="facts-layout">
+      <article class="panel">
+        <h2>Verified facts</h2>
+        {% if verified_facts %}
+          <div class="fact-stack">
+            {% for fact in verified_facts %}
+              <section class="fact-card fact-card-verified">
+                <p class="fact-meta">{{ fact.category|humanize }} · {{ fact.source_organization or 'Unknown source' }}</p>
+                <p>{{ fact.statement }}</p>
+                <dl class="detail-list compact-detail-list">
+                  <div><dt>Metric</dt><dd>{{ fact.metric or 'Not specified' }}</dd></div>
+                  <div><dt>Technologies</dt><dd>{{ fact.technologies|join(', ') or 'Not specified' }}</dd></div>
+                  <div><dt>Leadership scope</dt><dd>{{ fact.leadership_scope or 'Not specified' }}</dd></div>
+                  <div><dt>Business outcome</dt><dd>{{ fact.business_outcome or 'Not specified' }}</dd></div>
+                  <div><dt>Approved wording</dt><dd>{{ fact.approved_wording }}</dd></div>
+                  <div><dt>Verification status</dt><dd>{{ fact.verification_status|humanize }}</dd></div>
+                </dl>
+              </section>
+            {% endfor %}
+          </div>
+        {% else %}
+          {% with title='No verified facts', message='Verified facts are required before job evaluations can succeed.', action_href=None, action_label=None %}
+            {% include 'components/empty_state.html' %}
+          {% endwith %}
+        {% endif %}
+      </article>
+
+      <article class="panel">
+        <h2>Unverified facts</h2>
+        {% if unverified_facts %}
+          <div class="fact-stack">
+            {% for fact in unverified_facts %}
+              <section class="fact-card">
+                <p class="fact-meta">{{ fact.category|humanize }} · {{ fact.source_organization or 'Unknown source' }}</p>
+                <p>{{ fact.statement }}</p>
+                <dl class="detail-list compact-detail-list">
+                  <div><dt>Metric</dt><dd>{{ fact.metric or 'Not specified' }}</dd></div>
+                  <div><dt>Technologies</dt><dd>{{ fact.technologies|join(', ') or 'Not specified' }}</dd></div>
+                  <div><dt>Leadership scope</dt><dd>{{ fact.leadership_scope or 'Not specified' }}</dd></div>
+                  <div><dt>Business outcome</dt><dd>{{ fact.business_outcome or 'Not specified' }}</dd></div>
+                  <div><dt>Approved wording</dt><dd>{{ fact.approved_wording }}</dd></div>
+                  <div><dt>Verification status</dt><dd>{{ fact.verification_status|humanize }}</dd></div>
+                </dl>
+              </section>
+            {% endfor %}
+          </div>
+        {% else %}
+          {% with title='No unverified facts', message='All current facts are already verified or no facts have been recorded yet.', action_href=None, action_label=None %}
+            {% include 'components/empty_state.html' %}
+          {% endwith %}
+        {% endif %}
+      </article>
+    </section>
+  {% else %}
+    {% with title='No candidate profile available', message='Create a candidate profile before reviewing career facts.', action_href='/docs', action_label='Open API docs' %}
+      {% include 'components/empty_state.html' %}
+    {% endwith %}
+  {% endif %}
+{% endblock %}

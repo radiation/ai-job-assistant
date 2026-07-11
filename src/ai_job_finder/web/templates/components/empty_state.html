@@ -1,0 +1,7 @@
+<section class="empty-state">
+  <h2>{{ title }}</h2>
+  <p>{{ message }}</p>
+  {% if action_href and action_label %}
+    <p><a class="button-link" href="{{ action_href }}">{{ action_label }}</a></p>
+  {% endif %}
+</section>

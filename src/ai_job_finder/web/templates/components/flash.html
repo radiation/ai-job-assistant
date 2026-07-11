@@ -1,0 +1,7 @@
+{% if flash_messages %}
+  <section class="flash-stack" aria-label="Messages">
+    {% for flash in flash_messages %}
+      <div class="flash flash-{{ flash.level }}">{{ flash.message }}</div>
+    {% endfor %}
+  </section>
+{% endif %}

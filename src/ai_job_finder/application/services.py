@@ -4,7 +4,7 @@ from uuid import UUID
 
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 
 from ai_job_finder.domain.common import new_uuid, utc_now
 from ai_job_finder.domain.enums import PostingStatus
@@ -97,6 +97,12 @@ def list_career_facts(session: Session, candidate_profile_id: UUID) -> list[Care
     )
 
 
+def get_primary_candidate_profile(session: Session) -> CandidateProfileModel | None:
+    return session.scalar(
+        select(CandidateProfileModel).order_by(CandidateProfileModel.created_at.asc())
+    )
+
+
 def create_job_lead(
     session: Session,
     *,
@@ -108,9 +114,10 @@ def create_job_lead(
     location_text: str | None,
     workplace_type: str | None,
     description_raw: str,
-    description_normalized: str,
+    description_normalized: str | None,
     compensation_text: str | None,
 ) -> JobLeadModel:
+    normalized_description = (description_normalized or description_raw).strip()
     job_lead = JobLeadModel(
         id=new_uuid(),
         source=source,
@@ -121,7 +128,7 @@ def create_job_lead(
         location_text=location_text,
         workplace_type=workplace_type,
         description_raw=description_raw,
-        description_normalized=description_normalized,
+        description_normalized=normalized_description,
         compensation_text=compensation_text,
         discovered_at=utc_now(),
         posting_status=PostingStatus.DISCOVERED.value,
@@ -130,6 +137,17 @@ def create_job_lead(
     session.commit()
     session.refresh(job_lead)
     return job_lead
+
+
+def list_job_leads(session: Session, *, posting_status: str | None = None) -> list[JobLeadModel]:
+    query = (
+        select(JobLeadModel)
+        .options(selectinload(JobLeadModel.evaluations))
+        .order_by(JobLeadModel.discovered_at.desc(), JobLeadModel.created_at.desc())
+    )
+    if posting_status is not None:
+        query = query.where(JobLeadModel.posting_status == posting_status)
+    return list(session.scalars(query))
 
 
 def get_job_lead(session: Session, job_lead_id: UUID) -> JobLeadModel:

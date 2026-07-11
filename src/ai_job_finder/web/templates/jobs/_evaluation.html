@@ -1,0 +1,46 @@
+<article class="panel" id="evaluation-panel">
+  <div class="section-row">
+    <div>
+      <h2>Latest evaluation</h2>
+      <p>Uses the current candidate profile and verified career facts.</p>
+    </div>
+    <form
+      method="post"
+      action="/jobs/{{ job.id }}/evaluation"
+      hx-post="/jobs/{{ job.id }}/evaluation"
+      hx-target="#evaluation-panel"
+      hx-swap="outerHTML"
+    >
+      <button type="submit">Run evaluation</button>
+    </form>
+  </div>
+
+  {% if evaluation_error %}<p class="field-error">{{ evaluation_error }}</p>{% endif %}
+
+  {% if evaluation %}
+    <div class="evaluation-summary">
+      <p><strong>Overall score:</strong> {{ '%.1f'|format(evaluation.overall_score) }}</p>
+      <p><strong>Recommendation:</strong> <span class="badge badge-recommendation">{{ evaluation.recommendation|humanize }}</span></p>
+      <p><strong>Evaluated:</strong> {{ evaluation.evaluated_at|datetime }}</p>
+      <p><strong>Scoring version:</strong> {{ evaluation.scoring_version }}</p>
+    </div>
+
+    <div class="score-grid">
+      <div class="score-card"><span>Leadership scope</span><strong>{{ evaluation.leadership_scope_score }}</strong></div>
+      <div class="score-card"><span>Technical alignment</span><strong>{{ evaluation.technical_alignment_score }}</strong></div>
+      <div class="score-card"><span>Location</span><strong>{{ evaluation.location_score }}</strong></div>
+      <div class="score-card"><span>Level</span><strong>{{ evaluation.level_score }}</strong></div>
+      <div class="score-card"><span>Platform ownership</span><strong>{{ evaluation.platform_ownership_score }}</strong></div>
+      <div class="score-card"><span>Referral priority</span><strong>{{ evaluation.referral_priority_score }}</strong></div>
+    </div>
+
+    <div>
+      <h3>Explanation</h3>
+      <p class="preformatted">{{ evaluation.explanation }}</p>
+    </div>
+  {% else %}
+    {% with title='No evaluation yet', message='Run the evaluation once the candidate profile has verified career facts.', action_href=None, action_label=None %}
+      {% include 'components/empty_state.html' %}
+    {% endwith %}
+  {% endif %}
+</article>

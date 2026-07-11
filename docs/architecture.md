@@ -82,3 +82,9 @@ erDiagram
 - Evaluation stores each component score independently so later scoring revisions remain auditable.
 - Raw job text is preserved alongside normalized text to keep provenance intact.
 - Typed JSON collections are limited to fields that are naturally list-shaped in this slice.
+
+## Web Console Note
+
+The thin web console uses server-rendered Jinja2 templates plus targeted HTMX fragment updates instead of a SPA. That choice keeps state on the server, avoids a second deployment surface, and fits the single-user, workflow-heavy review loop where clarity and maintainability matter more than rich client interactivity.
+
+The presentation layer still depends on the same application services as the JSON API rather than making internal HTTP calls. If a richer frontend is needed later, the current web routes can be replaced without rewriting domain rules, scoring logic, workflow validation, or persistence behavior.

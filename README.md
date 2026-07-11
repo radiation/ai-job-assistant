@@ -7,6 +7,8 @@ Foundation slice for a deterministic, explainable executive job-search platform.
 - Python 3.14
 - uv
 - FastAPI
+- Jinja2
+- HTMX via pinned CDN (`https://unpkg.com/htmx.org@1.9.12`)
 - Pydantic v2
 - SQLAlchemy 2.x
 - Alembic
@@ -50,6 +52,32 @@ uv run ai-job-finder-validate
 - `ai-job-finder-tests --integration --require-postgres` runs the PostgreSQL-backed integration layer.
 - `ai-job-finder-tests` runs the full suite.
 - `ai-job-finder-validate` runs fast checks followed by the full suite.
+
+## Web Console
+
+The API and the thin server-rendered console run in the same FastAPI process. There is no separate frontend build, Node toolchain, or client-side state container.
+
+- Browser URL: `http://127.0.0.1:8000/jobs`
+- API docs: `http://127.0.0.1:8000/docs`
+- JSON API base: `http://127.0.0.1:8000/api/v1`
+
+Primary HTML routes:
+
+- `/jobs`
+- `/jobs/new`
+- `/jobs/{job_id}`
+- `/candidate`
+- `/career-facts`
+
+The main manual workflow is:
+
+1. Open `/jobs/new`.
+2. Enter a job lead manually.
+3. Submit the form and land on the job detail page.
+4. Update posting status inline.
+5. Trigger an evaluation inline once verified career facts exist.
+
+HTMX is used only for job status updates and evaluation refresh on the detail page. Normal navigation and form submission still render correctly without HTMX.
 
 ## Docker Compose Development Stack
 
@@ -125,6 +153,12 @@ Run the full suite directly when needed:
 uv run ai-job-finder-tests
 ```
 
+Run only the web integration tests when iterating on the server-rendered console:
+
+```bash
+uv run pytest tests/integration/test_web.py
+```
+
 The repository keeps a clear split by directory:
 
 - `tests/unit` for fast unit tests
@@ -146,7 +180,7 @@ Start the API directly from the local environment:
 uv run uvicorn ai_job_finder.main:app --reload
 ```
 
-The API is served at `http://127.0.0.1:8000/api/v1`.
+The web console is served at `http://127.0.0.1:8000/jobs` and the JSON API is served at `http://127.0.0.1:8000/api/v1`.
 
 ## Expected Local Workflow
 

@@ -1,0 +1,42 @@
+{% extends 'base.html' %}
+
+{% block content %}
+  <section class="page-header">
+    <div>
+      <h1>{{ job.company_name }}</h1>
+      <p>{{ job.title }}</p>
+    </div>
+    <p><a href="/jobs">Back to job leads</a></p>
+  </section>
+
+  <section class="detail-grid">
+    <article class="panel">
+      <h2>Job summary</h2>
+      <dl class="detail-list">
+        <div><dt>Title</dt><dd>{{ job.title }}</dd></div>
+        <div><dt>Company</dt><dd>{{ job.company_name }}</dd></div>
+        <div><dt>Source</dt><dd>{{ job.source|humanize }}</dd></div>
+        <div><dt>Location</dt><dd>{{ job.location_text or 'Not specified' }}</dd></div>
+        <div><dt>Workplace type</dt><dd>{{ job.workplace_type|humanize if job.workplace_type else 'Not specified' }}</dd></div>
+        <div><dt>External ID</dt><dd>{{ job.external_id or 'Not specified' }}</dd></div>
+        <div><dt>Compensation</dt><dd>{{ job.compensation_text or 'Not specified' }}</dd></div>
+        <div><dt>Discovered</dt><dd>{{ job.discovered_at|datetime }}</dd></div>
+        <div><dt>Source link</dt><dd>{% if job.source_url %}<a href="{{ job.source_url }}">Open source posting</a>{% else %}Not available{% endif %}</dd></div>
+      </dl>
+    </article>
+
+    {% include 'jobs/_status.html' %}
+  </section>
+
+  <section class="panel">
+    <h2>Normalized job description</h2>
+    <p class="preformatted">{{ job.description_normalized }}</p>
+  </section>
+
+  <section class="panel">
+    <h2>Raw job description</h2>
+    <p class="preformatted">{{ job.description_raw }}</p>
+  </section>
+
+  {% include 'jobs/_evaluation.html' %}
+{% endblock %}

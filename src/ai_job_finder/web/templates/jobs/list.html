@@ -1,0 +1,75 @@
+{% extends 'base.html' %}
+
+{% block content %}
+  <section class="page-header">
+    <div>
+      <h1>Job Leads</h1>
+      <p>Manual review queue for job leads and latest fit recommendations.</p>
+    </div>
+    <a class="button-link" href="/jobs/new">Add job lead</a>
+  </section>
+
+  <section class="panel">
+    <form class="filter-form" method="get" action="/jobs">
+      <label for="posting_status">Posting status</label>
+      <select id="posting_status" name="posting_status">
+        <option value="">All statuses</option>
+        {% for option in posting_statuses %}
+          <option value="{{ option.value }}" {% if selected_status == option.value %}selected{% endif %}>{{ option.value|humanize }}</option>
+        {% endfor %}
+      </select>
+      <button type="submit">Apply filter</button>
+    </form>
+  </section>
+
+  {% if job_items %}
+    <section class="panel">
+      <div class="table-wrap">
+        <table class="job-table">
+          <thead>
+            <tr>
+              <th scope="col">Company</th>
+              <th scope="col">Title</th>
+              <th scope="col">Location</th>
+              <th scope="col">Workplace</th>
+              <th scope="col">Status</th>
+              <th scope="col">Latest score</th>
+              <th scope="col">Recommendation</th>
+              <th scope="col"></th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for item in job_items %}
+              <tr>
+                <td>{{ item.job.company_name }}</td>
+                <td>{{ item.job.title }}</td>
+                <td>{{ item.job.location_text or 'Not specified' }}</td>
+                <td>{{ item.job.workplace_type|humanize if item.job.workplace_type else 'Not specified' }}</td>
+                <td><span class="badge badge-status">{{ item.job.posting_status|humanize }}</span></td>
+                <td>
+                  {% if item.latest_evaluation %}
+                    {{ '%.1f'|format(item.latest_evaluation.overall_score) }}
+                  {% else %}
+                    <span class="muted">No evaluation</span>
+                  {% endif %}
+                </td>
+                <td>
+                  {% if item.latest_evaluation %}
+                    <span class="badge badge-recommendation">{{ item.latest_evaluation.recommendation|humanize }}</span>
+                  {% else %}
+                    <span class="muted">Not available</span>
+                  {% endif %}
+                </td>
+                <td><a href="/jobs/{{ item.job.id }}">View detail</a></td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  {% else %}
+    {% with title='No job leads yet', message='Create a manual job lead to start the review workflow.', action_href='/jobs/new', action_label='Create job lead' %}
+      {% include 'components/empty_state.html' %}
+    {% endwith %}
+  {% endif %}
+{% endblock %}
