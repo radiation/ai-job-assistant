@@ -17,12 +17,17 @@ dependencies = [
 dev = [
 	"httpx>=0.28.1",
 	"mypy>=1.17.0",
+	"pre-commit>=4.2.0",
 	"pytest>=8.4.1",
 	"ruff>=0.12.3",
 ]
 
 [project.scripts]
 ai-job-finder-seed = "ai_job_finder.infrastructure.database.seed:main"
+ai-job-finder-fast-checks = "ai_job_finder.dev:fast_checks_main"
+ai-job-finder-format = "ai_job_finder.dev:format_main"
+ai-job-finder-tests = "ai_job_finder.dev:tests_main"
+ai-job-finder-validate = "ai_job_finder.dev:validate_main"
 
 [build-system]
 requires = ["setuptools>=75"]

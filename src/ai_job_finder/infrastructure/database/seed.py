@@ -15,7 +15,7 @@ from ai_job_finder.domain.enums import (
     VerificationStatus,
     WorkplaceType,
 )
-from ai_job_finder.infrastructure.database.session import SessionLocal
+from ai_job_finder.infrastructure.database.session import get_session_factory
 
 
 def seed_development_data(session: Session) -> None:
@@ -91,5 +91,5 @@ def seed_development_data(session: Session) -> None:
 
 
 def main() -> None:
-    with SessionLocal() as session:
+    with get_session_factory()() as session:
         seed_development_data(session)

@@ -19,10 +19,15 @@ def database_url() -> str:
 
 
 @pytest.fixture()
-def session_factory(database_url: str) -> sessionmaker[Session]:
+def session_factory(database_url: str) -> Iterator[sessionmaker[Session]]:
     engine = create_engine_from_url(database_url)
+    Base.metadata.drop_all(engine)
     Base.metadata.create_all(engine)
-    return sessionmaker(bind=engine, autoflush=False, expire_on_commit=False, class_=Session)
+    try:
+        yield sessionmaker(bind=engine, autoflush=False, expire_on_commit=False, class_=Session)
+    finally:
+        Base.metadata.drop_all(engine)
+        engine.dispose()
 
 
 @pytest.fixture()
