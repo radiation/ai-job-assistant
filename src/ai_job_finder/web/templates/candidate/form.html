@@ -1,0 +1,55 @@
+{% extends 'base.html' %}
+
+{% block content %}
+  <section class="page-header">
+    <div>
+      <h1>{{ form_title }}</h1>
+      <p>Only one active candidate profile is supported in this slice.</p>
+    </div>
+  </section>
+
+  <section class="panel narrow-panel">
+    <form class="stack-form" action="{{ form_action }}" method="post">
+      <div class="field-grid">
+        <div class="field-group">
+          <label for="full_name">Full name</label>
+          <input id="full_name" name="full_name" value="{{ form_values.full_name }}" required />
+          {% if form_errors.full_name %}<p class="field-error">{{ form_errors.full_name }}</p>{% endif %}
+        </div>
+        <div class="field-group">
+          <label for="remote_preference">Remote preference</label>
+          <select id="remote_preference" name="remote_preference">
+            {% for option in remote_preferences %}
+              <option value="{{ option.value }}" {% if form_values.remote_preference == option.value %}selected{% endif %}>{{ option.value|humanize }}</option>
+            {% endfor %}
+          </select>
+          {% if form_errors.remote_preference %}<p class="field-error">{{ form_errors.remote_preference }}</p>{% endif %}
+        </div>
+      </div>
+      <div class="field-grid">
+        <div class="field-group">
+          <label for="preferred_locations">Preferred locations</label>
+          <textarea id="preferred_locations" name="preferred_locations" rows="4">{{ form_values.preferred_locations }}</textarea>
+          <p class="muted">Enter one value per line or separate with commas.</p>
+          {% if form_errors.preferred_locations %}<p class="field-error">{{ form_errors.preferred_locations }}</p>{% endif %}
+        </div>
+        <div class="field-group">
+          <label for="target_levels">Target levels</label>
+          <textarea id="target_levels" name="target_levels" rows="4">{{ form_values.target_levels }}</textarea>
+          <p class="muted">Enter one value per line or separate with commas.</p>
+          {% if form_errors.target_levels %}<p class="field-error">{{ form_errors.target_levels }}</p>{% endif %}
+        </div>
+      </div>
+      <div class="field-group">
+        <label for="target_functions">Target functions</label>
+        <textarea id="target_functions" name="target_functions" rows="4">{{ form_values.target_functions }}</textarea>
+        <p class="muted">Enter one value per line or separate with commas.</p>
+        {% if form_errors.target_functions %}<p class="field-error">{{ form_errors.target_functions }}</p>{% endif %}
+      </div>
+      <div class="actions-row">
+        <button type="submit">{{ submit_label }}</button>
+        <a href="/jobs">Back to jobs</a>
+      </div>
+    </form>
+  </section>
+{% endblock %}

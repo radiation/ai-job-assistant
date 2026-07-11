@@ -7,16 +7,26 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from ai_job_finder.domain.enums import (
     CareerFactCategory,
+    CareerFactLifecycle,
+    EvidenceTag,
     JobLeadSource,
     PostingStatus,
+    ProvenanceType,
     Recommendation,
     RemotePreference,
-    VerificationStatus,
     WorkplaceType,
 )
 
 
 class CandidateProfileCreateRequest(BaseModel):
+    full_name: str = Field(min_length=1, max_length=200)
+    preferred_locations: list[str] = Field(default_factory=list)
+    remote_preference: RemotePreference
+    target_levels: list[str] = Field(default_factory=list)
+    target_functions: list[str] = Field(default_factory=list)
+
+
+class CandidateProfileUpdateRequest(BaseModel):
     full_name: str = Field(min_length=1, max_length=200)
     preferred_locations: list[str] = Field(default_factory=list)
     remote_preference: RemotePreference
@@ -46,8 +56,27 @@ class CareerFactCreateRequest(BaseModel):
     leadership_scope: str | None = Field(default=None, max_length=200)
     business_outcome: str | None = Field(default=None, max_length=500)
     approved_wording: str = Field(min_length=1)
-    verification_status: VerificationStatus
+    evidence_tags: list[EvidenceTag] = Field(default_factory=list)
+    provenance_type: ProvenanceType
     source_reference: str = Field(min_length=1, max_length=500)
+
+
+class CareerFactUpdateRequest(BaseModel):
+    category: CareerFactCategory
+    source_organization: str | None = Field(default=None, max_length=200)
+    statement: str = Field(min_length=1)
+    metric: str | None = Field(default=None, max_length=200)
+    technologies: list[str] = Field(default_factory=list)
+    leadership_scope: str | None = Field(default=None, max_length=200)
+    business_outcome: str | None = Field(default=None, max_length=500)
+    approved_wording: str = Field(min_length=1)
+    evidence_tags: list[EvidenceTag] = Field(default_factory=list)
+    provenance_type: ProvenanceType
+    source_reference: str = Field(min_length=1, max_length=500)
+
+
+class CareerFactTransitionRequest(BaseModel):
+    lifecycle_status: CareerFactLifecycle
 
 
 class CareerFactResponse(BaseModel):
@@ -63,8 +92,12 @@ class CareerFactResponse(BaseModel):
     leadership_scope: str | None
     business_outcome: str | None
     approved_wording: str
-    verification_status: VerificationStatus
+    lifecycle_status: CareerFactLifecycle
+    evidence_tags: list[EvidenceTag]
+    provenance_type: ProvenanceType
     source_reference: str
+    verified_at: datetime | None
+    archived_at: datetime | None
     created_at: datetime
     updated_at: datetime
 

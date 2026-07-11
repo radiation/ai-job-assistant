@@ -1,0 +1,40 @@
+<section id="fact-lifecycle-panel" class="panel narrow-panel">
+  <div class="section-row">
+    <div>
+      <h2>Lifecycle</h2>
+      <p class="muted">Draft and archived facts are excluded from evaluation. Verification is explicit.</p>
+    </div>
+    <span class="badge badge-{{ fact.lifecycle_status }}">{{ fact.lifecycle_status|humanize }}</span>
+  </div>
+
+  {% if lifecycle_error %}
+    <div class="flash flash-error">{{ lifecycle_error }}</div>
+  {% endif %}
+
+  <div class="actions-row wrap-actions">
+    {% if fact.lifecycle_status == 'draft' %}
+      <form method="post" action="/career-facts/{{ fact.id }}/lifecycle" hx-post="/career-facts/{{ fact.id }}/lifecycle" hx-target="#fact-lifecycle-panel" hx-swap="outerHTML">
+        <input type="hidden" name="lifecycle_status" value="verified" />
+        <button type="submit">Verify</button>
+      </form>
+      <form method="post" action="/career-facts/{{ fact.id }}/lifecycle" hx-post="/career-facts/{{ fact.id }}/lifecycle" hx-target="#fact-lifecycle-panel" hx-swap="outerHTML" onsubmit="return confirm('Archive this draft fact? It will stay in history but drop out of normal views and evaluation.');">
+        <input type="hidden" name="lifecycle_status" value="archived" />
+        <button type="submit" class="button-danger">Archive</button>
+      </form>
+    {% elif fact.lifecycle_status == 'verified' %}
+      <form method="post" action="/career-facts/{{ fact.id }}/lifecycle" hx-post="/career-facts/{{ fact.id }}/lifecycle" hx-target="#fact-lifecycle-panel" hx-swap="outerHTML">
+        <input type="hidden" name="lifecycle_status" value="draft" />
+        <button type="submit">Return to draft</button>
+      </form>
+      <form method="post" action="/career-facts/{{ fact.id }}/lifecycle" hx-post="/career-facts/{{ fact.id }}/lifecycle" hx-target="#fact-lifecycle-panel" hx-swap="outerHTML" onsubmit="return confirm('Archive this verified fact? It will no longer contribute to evaluation until restored.');">
+        <input type="hidden" name="lifecycle_status" value="archived" />
+        <button type="submit" class="button-danger">Archive</button>
+      </form>
+    {% elif fact.lifecycle_status == 'archived' %}
+      <form method="post" action="/career-facts/{{ fact.id }}/lifecycle" hx-post="/career-facts/{{ fact.id }}/lifecycle" hx-target="#fact-lifecycle-panel" hx-swap="outerHTML">
+        <input type="hidden" name="lifecycle_status" value="draft" />
+        <button type="submit">Restore to draft</button>
+      </form>
+    {% endif %}
+  </div>
+</section>

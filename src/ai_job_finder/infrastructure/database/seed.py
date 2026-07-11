@@ -7,12 +7,14 @@ from ai_job_finder.application.services import (
     create_career_fact,
     create_job_evaluation,
     create_job_lead,
+    transition_career_fact,
 )
 from ai_job_finder.domain.enums import (
     CareerFactCategory,
+    EvidenceTag,
     JobLeadSource,
+    ProvenanceType,
     RemotePreference,
-    VerificationStatus,
     WorkplaceType,
 )
 from ai_job_finder.infrastructure.database.session import get_session_factory
@@ -28,7 +30,7 @@ def seed_development_data(session: Session) -> None:
         target_functions=["platform engineering", "infrastructure"],
     )
 
-    create_career_fact(
+    platform_fact = create_career_fact(
         session,
         candidate_profile_id=candidate.id,
         category=CareerFactCategory.PLATFORM.value,
@@ -42,11 +44,18 @@ def seed_development_data(session: Session) -> None:
             "Built a developer platform adopted by 400 engineers, reducing "
             "deployment lead time by 60%."
         ),
-        verification_status=VerificationStatus.VERIFIED.value,
+        evidence_tags=[
+            EvidenceTag.PLATFORM_ENGINEERING.value,
+            EvidenceTag.DEVELOPER_EXPERIENCE.value,
+            EvidenceTag.CLOUD.value,
+            EvidenceTag.KUBERNETES.value,
+            EvidenceTag.CI_CD.value,
+        ],
+        provenance_type=ProvenanceType.PERFORMANCE_REVIEW.value,
         source_reference="board packet FY25 / platform adoption dashboard",
     )
 
-    create_career_fact(
+    leadership_fact = create_career_fact(
         session,
         candidate_profile_id=candidate.id,
         category=CareerFactCategory.LEADERSHIP.value,
@@ -63,8 +72,26 @@ def seed_development_data(session: Session) -> None:
             "Directed a 45-person platform organization spanning infrastructure, "
             "developer productivity, and reliability."
         ),
-        verification_status=VerificationStatus.VERIFIED.value,
+        evidence_tags=[
+            EvidenceTag.PEOPLE_LEADERSHIP.value,
+            EvidenceTag.MANAGER_OF_MANAGERS.value,
+            EvidenceTag.RELIABILITY.value,
+            EvidenceTag.INFRASTRUCTURE.value,
+            EvidenceTag.HIGH_SCALE.value,
+        ],
+        provenance_type=ProvenanceType.PROJECT_NOTES.value,
         source_reference="leadership review summary",
+    )
+
+    transition_career_fact(
+        session,
+        fact_id=platform_fact.id,
+        lifecycle_status="verified",
+    )
+    transition_career_fact(
+        session,
+        fact_id=leadership_fact.id,
+        lifecycle_status="verified",
     )
 
     job = create_job_lead(

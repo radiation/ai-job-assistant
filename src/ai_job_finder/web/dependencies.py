@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from datetime import datetime
 from pathlib import Path
 from typing import Annotated, Any
@@ -67,4 +68,4 @@ def optional_str(value: str | None) -> str | None:
 
 
 def split_multivalue(value: str) -> list[str]:
-    return [item.strip() for item in value.split(",") if item.strip()]
+    return [item.strip() for item in re.split(r"[\n,]", value) if item.strip()]

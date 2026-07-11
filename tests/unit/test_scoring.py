@@ -6,10 +6,12 @@ from ai_job_finder.domain.candidate import CandidateProfileSnapshot, CareerFactS
 from ai_job_finder.domain.common import new_uuid, utc_now
 from ai_job_finder.domain.enums import (
     CareerFactCategory,
+    CareerFactLifecycle,
+    EvidenceTag,
     PostingStatus,
+    ProvenanceType,
     Recommendation,
     RemotePreference,
-    VerificationStatus,
     WorkplaceType,
 )
 from ai_job_finder.domain.job_lead import JobLeadSnapshot
@@ -25,6 +27,7 @@ def build_candidate() -> CandidateProfileSnapshot:
         remote_preference=RemotePreference.FLEXIBLE,
         target_levels=["director"],
         target_functions=["platform engineering"],
+        is_active=True,
         created_at=now,
         updated_at=now,
     )
@@ -43,8 +46,12 @@ def build_fact() -> CareerFactSnapshot:
         leadership_scope="20 engineers",
         business_outcome="Faster delivery",
         approved_wording="Built platform",
-        verification_status=VerificationStatus.VERIFIED,
+        lifecycle_status=CareerFactLifecycle.VERIFIED,
+        evidence_tags=[EvidenceTag.PLATFORM_ENGINEERING, EvidenceTag.PEOPLE_LEADERSHIP],
+        provenance_type=ProvenanceType.PROJECT_NOTES,
         source_reference="doc",
+        verified_at=now,
+        archived_at=None,
         created_at=now,
         updated_at=now,
     )
@@ -80,10 +87,13 @@ def test_scoring_outputs_components_and_explanation() -> None:
     assert evaluation.level_score == 100
     assert evaluation.location_score >= 70
     assert evaluation.platform_ownership_score >= 45
-    assert evaluation.leadership_scope_score >= 40
+    assert evaluation.leadership_scope_score >= 60
+    assert evaluation.technical_alignment_score >= 60
+    assert "Scoring version: candidate_evidence_v2" in evaluation.explanation
+    assert "Matched verified evidence:" in evaluation.explanation
     assert "Positive signals:" in evaluation.explanation
     assert "Concerns:" in evaluation.explanation
-    assert "Missing information:" in evaluation.explanation
+    assert "Missing evidence:" in evaluation.explanation
 
 
 def test_overall_score_and_recommendation_thresholds() -> None:
@@ -91,12 +101,73 @@ def test_overall_score_and_recommendation_thresholds() -> None:
 
     assert evaluation.overall_score >= 80
     assert evaluation.recommendation is Recommendation.STRONG_RECOMMEND
+    assert evaluation.scoring_version == "candidate_evidence_v2"
 
 
 def test_unverified_facts_do_not_count_as_usable() -> None:
     fact = build_fact()
-    rejected_fact = replace(fact, verification_status=VerificationStatus.PENDING)
+    rejected_fact = replace(
+        fact,
+        lifecycle_status=CareerFactLifecycle.DRAFT,
+        verified_at=None,
+    )
 
     evaluation = evaluate_job_fit(build_candidate(), build_job(), [rejected_fact])
 
     assert "No verified career facts are available yet" in evaluation.explanation
+
+
+def test_archived_facts_do_not_count_as_usable() -> None:
+    fact = replace(
+        build_fact(),
+        lifecycle_status=CareerFactLifecycle.ARCHIVED,
+        archived_at=utc_now(),
+    )
+
+    evaluation = evaluate_job_fit(build_candidate(), build_job(), [fact])
+
+    assert "No verified career facts are available yet" in evaluation.explanation
+
+
+def test_missing_evidence_is_reported_when_job_signals_exceed_verified_tags() -> None:
+    fact = replace(build_fact(), evidence_tags=[EvidenceTag.PLATFORM_ENGINEERING])
+    job = replace(
+        build_job(),
+        description_normalized=(
+            "Own platform strategy with Kubernetes, CI/CD, observability, and global operations."
+        ),
+    )
+
+    evaluation = evaluate_job_fit(build_candidate(), job, [fact])
+
+    assert "Missing evidence:" in evaluation.explanation
+    assert "CI/CD" in evaluation.explanation or "reliability" in evaluation.explanation.lower()
+
+
+def test_matched_evidence_is_deduplicated_when_one_fact_matches_multiple_rules() -> None:
+    fact = replace(
+        build_fact(),
+        approved_wording="Built platform with strong cloud and CI/CD outcomes",
+        evidence_tags=[
+            EvidenceTag.PLATFORM_ENGINEERING,
+            EvidenceTag.CLOUD,
+            EvidenceTag.CI_CD,
+        ],
+    )
+    job = replace(
+        build_job(),
+        description_normalized=(
+            "Own the developer platform strategy, improve cloud foundations, and "
+            "lead CI/CD modernization for the engineering organization."
+        ),
+    )
+
+    evaluation = evaluate_job_fit(build_candidate(), job, [fact])
+
+    assert (
+        evaluation.explanation.count(
+            "- Built platform with strong cloud and CI/CD outcomes [ci_cd, cloud, "
+            "platform_engineering]"
+        )
+        == 1
+    )

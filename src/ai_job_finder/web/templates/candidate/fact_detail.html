@@ -1,0 +1,53 @@
+{% extends 'base.html' %}
+
+{% block content %}
+  <section class="page-header">
+    <div>
+      <h1>Career Fact Detail</h1>
+      <p>Canonical evidence item used for reviewed, deterministic evaluation enrichment.</p>
+    </div>
+    <div class="actions-row">
+      <a class="button-link button-secondary" href="/career-facts">Back to facts</a>
+      {% if fact.lifecycle_status != 'archived' %}
+        <a class="button-link" href="/career-facts/{{ fact.id }}/edit">Edit fact</a>
+      {% endif %}
+    </div>
+  </section>
+
+  {% include 'candidate/_fact_lifecycle.html' %}
+
+  <section class="panel narrow-panel">
+    {% if fact.lifecycle_status == 'verified' %}
+      <p class="muted">Editing material content on a verified fact returns it to draft.</p>
+    {% endif %}
+    <dl class="detail-list">
+      <div><dt>Category</dt><dd>{{ fact.category|humanize }}</dd></div>
+      <div><dt>Source organization</dt><dd>{{ fact.source_organization or 'Not specified' }}</dd></div>
+      <div><dt>Statement</dt><dd>{{ fact.statement }}</dd></div>
+      <div><dt>Metric</dt><dd>{{ fact.metric or 'Not specified' }}</dd></div>
+      <div><dt>Technologies</dt><dd>{{ fact.technologies|join(', ') or 'Not specified' }}</dd></div>
+      <div><dt>Leadership scope</dt><dd>{{ fact.leadership_scope or 'Not specified' }}</dd></div>
+      <div><dt>Business outcome</dt><dd>{{ fact.business_outcome or 'Not specified' }}</dd></div>
+      <div><dt>Approved wording</dt><dd>{{ fact.approved_wording }}</dd></div>
+      <div><dt>Provenance</dt><dd>{{ fact.provenance_type|humanize }}</dd></div>
+      <div><dt>Source reference</dt><dd>{{ fact.source_reference }}</dd></div>
+      <div>
+        <dt>Evidence tags</dt>
+        <dd>
+          <div class="tag-badges">
+            {% for tag in fact.evidence_tags %}
+              <span class="badge">{{ tag|humanize }}</span>
+            {% endfor %}
+            {% if not fact.evidence_tags %}
+              <span class="muted">No tags</span>
+            {% endif %}
+          </div>
+        </dd>
+      </div>
+      <div><dt>Verified at</dt><dd>{{ fact.verified_at|datetime if fact.verified_at else 'Not verified' }}</dd></div>
+      <div><dt>Archived at</dt><dd>{{ fact.archived_at|datetime if fact.archived_at else 'Not archived' }}</dd></div>
+      <div><dt>Created</dt><dd>{{ fact.created_at|datetime }}</dd></div>
+      <div><dt>Updated</dt><dd>{{ fact.updated_at|datetime }}</dd></div>
+    </dl>
+  </section>
+{% endblock %}

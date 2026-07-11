@@ -18,10 +18,45 @@ class CareerFactCategory(StrEnum):
     TRANSFORMATION = "transformation"
 
 
-class VerificationStatus(StrEnum):
-    PENDING = "pending"
+class CareerFactLifecycle(StrEnum):
+    DRAFT = "draft"
     VERIFIED = "verified"
-    REJECTED = "rejected"
+    ARCHIVED = "archived"
+
+
+class EvidenceTag(StrEnum):
+    PEOPLE_LEADERSHIP = "people_leadership"
+    MANAGER_OF_MANAGERS = "manager_of_managers"
+    PLATFORM_ENGINEERING = "platform_engineering"
+    DEVELOPER_EXPERIENCE = "developer_experience"
+    DEVELOPER_PRODUCTIVITY = "developer_productivity"
+    INFRASTRUCTURE = "infrastructure"
+    SHARED_SERVICES = "shared_services"
+    AI_ENABLEMENT = "ai_enablement"
+    ML_PLATFORM = "ml_platform"
+    DATA_PLATFORM = "data_platform"
+    GLOBAL_OPERATIONS = "global_operations"
+    HIGH_SCALE = "high_scale"
+    REGULATED_ENVIRONMENT = "regulated_environment"
+    CUSTOMER_IMPACT = "customer_impact"
+    P_AND_L = "p_and_l"
+    VENDOR_MANAGEMENT = "vendor_management"
+    COST_OPTIMIZATION = "cost_optimization"
+    RELIABILITY = "reliability"
+    SECURITY = "security"
+    OBSERVABILITY = "observability"
+    CI_CD = "ci_cd"
+    CLOUD = "cloud"
+    KUBERNETES = "kubernetes"
+
+
+class ProvenanceType(StrEnum):
+    RESUME = "resume"
+    PERFORMANCE_REVIEW = "performance_review"
+    PROJECT_NOTES = "project_notes"
+    PERSONAL_RECOLLECTION = "personal_recollection"
+    VERIFIED_EXTERNAL_SOURCE = "verified_external_source"
+    OTHER = "other"
 
 
 class JobLeadSource(StrEnum):

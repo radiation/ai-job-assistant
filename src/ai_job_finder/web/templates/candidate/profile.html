@@ -4,23 +4,23 @@
   <section class="page-header">
     <div>
       <h1>Candidate Profile</h1>
-      <p>Single-user reference profile used for synchronous job evaluations.</p>
+      <p>Single-user reference profile used for deterministic job evaluations.</p>
+    </div>
+    <div class="actions-row">
+      <a class="button-link" href="/candidate/edit">Edit profile</a>
+      <a class="button-link button-secondary" href="/career-facts">Manage career facts</a>
     </div>
   </section>
 
-  {% if candidate %}
-    <section class="panel narrow-panel">
-      <dl class="detail-list">
-        <div><dt>Full name</dt><dd>{{ candidate.full_name }}</dd></div>
-        <div><dt>Preferred locations</dt><dd>{{ candidate.preferred_locations|join(', ') or 'Not specified' }}</dd></div>
-        <div><dt>Remote preference</dt><dd>{{ candidate.remote_preference|humanize }}</dd></div>
-        <div><dt>Target levels</dt><dd>{{ candidate.target_levels|join(', ') or 'Not specified' }}</dd></div>
-        <div><dt>Target functions</dt><dd>{{ candidate.target_functions|join(', ') or 'Not specified' }}</dd></div>
-      </dl>
-    </section>
-  {% else %}
-    {% with title='No candidate profile available', message='Create a candidate profile through the JSON API or seed command before running evaluations.', action_href='/docs', action_label='Open API docs' %}
-      {% include 'components/empty_state.html' %}
-    {% endwith %}
-  {% endif %}
+  <section class="panel narrow-panel">
+    <dl class="detail-list">
+      <div><dt>Full name</dt><dd>{{ candidate.full_name }}</dd></div>
+      <div><dt>Preferred locations</dt><dd>{{ candidate.preferred_locations|join(', ') or 'Not specified' }}</dd></div>
+      <div><dt>Remote preference</dt><dd>{{ candidate.remote_preference|humanize }}</dd></div>
+      <div><dt>Target levels</dt><dd>{{ candidate.target_levels|join(', ') or 'Not specified' }}</dd></div>
+      <div><dt>Target functions</dt><dd>{{ candidate.target_functions|join(', ') or 'Not specified' }}</dd></div>
+      <div><dt>Created</dt><dd>{{ candidate.created_at|datetime }}</dd></div>
+      <div><dt>Updated</dt><dd>{{ candidate.updated_at|datetime }}</dd></div>
+    </dl>
+  </section>
 {% endblock %}

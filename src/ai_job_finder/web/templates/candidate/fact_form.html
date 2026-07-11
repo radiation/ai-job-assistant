@@ -1,0 +1,105 @@
+{% extends 'base.html' %}
+
+{% block content %}
+  <section class="page-header">
+    <div>
+      <h1>{{ form_title }}</h1>
+      <p>New facts start in draft and must be explicitly verified before evaluation uses them.</p>
+    </div>
+  </section>
+
+  <section class="panel narrow-panel">
+    {% if notice %}
+      <div class="flash flash-error">{{ notice }}</div>
+    {% endif %}
+    <form class="stack-form" action="{{ form_action }}" method="post">
+      <div class="field-grid">
+        <div class="field-group">
+          <label for="category">Category</label>
+          <select id="category" name="category">
+            {% for option in category_options %}
+              <option value="{{ option.value }}" {% if form_values.category == option.value %}selected{% endif %}>{{ option.value|humanize }}</option>
+            {% endfor %}
+          </select>
+          {% if form_errors.category %}<p class="field-error">{{ form_errors.category }}</p>{% endif %}
+        </div>
+        <div class="field-group">
+          <label for="source_organization">Source organization</label>
+          <input id="source_organization" name="source_organization" value="{{ form_values.source_organization }}" />
+          {% if form_errors.source_organization %}<p class="field-error">{{ form_errors.source_organization }}</p>{% endif %}
+        </div>
+      </div>
+      <div class="field-group">
+        <label for="statement">Statement</label>
+        <textarea id="statement" name="statement" rows="4" required>{{ form_values.statement }}</textarea>
+        {% if form_errors.statement %}<p class="field-error">{{ form_errors.statement }}</p>{% endif %}
+      </div>
+      <div class="field-grid">
+        <div class="field-group">
+          <label for="metric">Metric</label>
+          <input id="metric" name="metric" value="{{ form_values.metric }}" />
+          {% if form_errors.metric %}<p class="field-error">{{ form_errors.metric }}</p>{% endif %}
+        </div>
+        <div class="field-group">
+          <label for="leadership_scope">Leadership scope</label>
+          <input id="leadership_scope" name="leadership_scope" value="{{ form_values.leadership_scope }}" />
+          {% if form_errors.leadership_scope %}<p class="field-error">{{ form_errors.leadership_scope }}</p>{% endif %}
+        </div>
+      </div>
+      <div class="field-grid">
+        <div class="field-group">
+          <label for="technologies">Technologies</label>
+          <textarea id="technologies" name="technologies" rows="4">{{ form_values.technologies }}</textarea>
+          <p class="muted">Enter one value per line or separate with commas.</p>
+          {% if form_errors.technologies %}<p class="field-error">{{ form_errors.technologies }}</p>{% endif %}
+        </div>
+        <div class="field-group">
+          <label for="business_outcome">Business outcome</label>
+          <textarea id="business_outcome" name="business_outcome" rows="4">{{ form_values.business_outcome }}</textarea>
+          {% if form_errors.business_outcome %}<p class="field-error">{{ form_errors.business_outcome }}</p>{% endif %}
+        </div>
+      </div>
+      <div class="field-group">
+        <label for="approved_wording">Approved wording</label>
+        <textarea id="approved_wording" name="approved_wording" rows="4" required>{{ form_values.approved_wording }}</textarea>
+        {% if form_errors.approved_wording %}<p class="field-error">{{ form_errors.approved_wording }}</p>{% endif %}
+      </div>
+      <div class="field-grid">
+        <div class="field-group">
+          <label for="provenance_type">Provenance</label>
+          <select id="provenance_type" name="provenance_type">
+            {% for option in provenance_options %}
+              <option value="{{ option.value }}" {% if form_values.provenance_type == option.value %}selected{% endif %}>{{ option.value|humanize }}</option>
+            {% endfor %}
+          </select>
+          {% if form_errors.provenance_type %}<p class="field-error">{{ form_errors.provenance_type }}</p>{% endif %}
+        </div>
+        <div class="field-group">
+          <label for="source_reference">Source reference</label>
+          <input id="source_reference" name="source_reference" value="{{ form_values.source_reference }}" required />
+          {% if form_errors.source_reference %}<p class="field-error">{{ form_errors.source_reference }}</p>{% endif %}
+        </div>
+      </div>
+      <fieldset class="field-group checkbox-fieldset">
+        <legend>Evidence tags</legend>
+        <div class="checkbox-grid">
+          {% for option in evidence_tag_options %}
+            <label class="checkbox-option">
+              <input type="checkbox" name="evidence_tags" value="{{ option.value }}" {% if option.value in form_values.evidence_tags %}checked{% endif %} />
+              <span>{{ option.value|humanize }}</span>
+            </label>
+          {% endfor %}
+        </div>
+        {% if form_errors.evidence_tags %}<p class="field-error">{{ form_errors.evidence_tags }}</p>{% endif %}
+      </fieldset>
+      <div class="actions-row">
+        <button type="submit">{{ submit_label }}</button>
+        {% if fact %}
+          <a href="/career-facts/{{ fact.id }}">Cancel</a>
+        {% else %}
+          <a href="/career-facts">Cancel</a>
+        {% endif %}
+      </div>
+    </form>
+  </section>
+{% endblock %}

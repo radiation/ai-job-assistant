@@ -6,6 +6,7 @@ from uuid import UUID
 
 from sqlalchemy import (
     JSON,
+    Boolean,
     CheckConstraint,
     DateTime,
     Float,
@@ -24,10 +25,12 @@ from ai_job_finder.domain.candidate import CandidateProfileSnapshot, CareerFactS
 from ai_job_finder.domain.common import utc_now
 from ai_job_finder.domain.enums import (
     CareerFactCategory,
+    CareerFactLifecycle,
+    EvidenceTag,
     PostingStatus,
+    ProvenanceType,
     Recommendation,
     RemotePreference,
-    VerificationStatus,
     WorkplaceType,
 )
 from ai_job_finder.domain.evaluation import EvaluationResult
@@ -37,6 +40,15 @@ from ai_job_finder.infrastructure.database.base import Base
 
 class CandidateProfileModel(Base):
     __tablename__ = "candidate_profiles"
+    __table_args__ = (
+        Index(
+            "ix_candidate_profiles_single_active",
+            "is_active",
+            unique=True,
+            sqlite_where=text("is_active = 1"),
+            postgresql_where=text("is_active"),
+        ),
+    )
 
     id: Mapped[UUID] = mapped_column(Uuid, primary_key=True)
     full_name: Mapped[str] = mapped_column(String(200))
@@ -44,6 +56,7 @@ class CandidateProfileModel(Base):
     remote_preference: Mapped[str] = mapped_column(String(20))
     target_levels: Mapped[list[str]] = mapped_column(JSON, default=list)
     target_functions: Mapped[list[str]] = mapped_column(JSON, default=list)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utc_now, onupdate=utc_now
@@ -64,6 +77,7 @@ class CandidateProfileModel(Base):
             remote_preference=RemotePreference(self.remote_preference),
             target_levels=list(self.target_levels),
             target_functions=list(self.target_functions),
+            is_active=self.is_active,
             created_at=self.created_at,
             updated_at=self.updated_at,
         )
@@ -74,6 +88,10 @@ class CareerFactModel(Base):
     __table_args__ = (
         CheckConstraint("statement <> ''", name="statement_not_blank"),
         CheckConstraint("approved_wording <> ''", name="approved_wording_not_blank"),
+        Index("ix_career_facts_candidate_profile_id", "candidate_profile_id"),
+        Index("ix_career_facts_lifecycle_status", "lifecycle_status"),
+        Index("ix_career_facts_category", "category"),
+        Index("ix_career_facts_source_organization", "source_organization"),
     )
 
     id: Mapped[UUID] = mapped_column(Uuid, primary_key=True)
@@ -88,8 +106,12 @@ class CareerFactModel(Base):
     leadership_scope: Mapped[str | None] = mapped_column(String(200))
     business_outcome: Mapped[str | None] = mapped_column(String(500))
     approved_wording: Mapped[str] = mapped_column(Text)
-    verification_status: Mapped[str] = mapped_column(String(20))
+    lifecycle_status: Mapped[str] = mapped_column(String(20))
+    evidence_tags: Mapped[list[str]] = mapped_column(JSON, default=list)
+    provenance_type: Mapped[str] = mapped_column(String(40))
     source_reference: Mapped[str] = mapped_column(String(500))
+    verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    archived_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utc_now, onupdate=utc_now
@@ -109,8 +131,12 @@ class CareerFactModel(Base):
             leadership_scope=self.leadership_scope,
             business_outcome=self.business_outcome,
             approved_wording=self.approved_wording,
-            verification_status=VerificationStatus(self.verification_status),
+            lifecycle_status=CareerFactLifecycle(self.lifecycle_status),
+            evidence_tags=[EvidenceTag(value) for value in self.evidence_tags],
+            provenance_type=ProvenanceType(self.provenance_type),
             source_reference=self.source_reference,
+            verified_at=self.verified_at,
+            archived_at=self.archived_at,
             created_at=self.created_at,
             updated_at=self.updated_at,
         )

@@ -4,66 +4,105 @@
   <section class="page-header">
     <div>
       <h1>Career Facts</h1>
-      <p>Read-only evidence inventory grouped by verification status.</p>
+      <p>Canonical candidate evidence, reviewed and reused across evaluations.</p>
     </div>
+    <a class="button-link" href="/career-facts/new">Create fact</a>
   </section>
 
-  {% if candidate %}
-    <section class="facts-layout">
-      <article class="panel">
-        <h2>Verified facts</h2>
-        {% if verified_facts %}
-          <div class="fact-stack">
-            {% for fact in verified_facts %}
-              <section class="fact-card fact-card-verified">
-                <p class="fact-meta">{{ fact.category|humanize }} · {{ fact.source_organization or 'Unknown source' }}</p>
-                <p>{{ fact.statement }}</p>
-                <dl class="detail-list compact-detail-list">
-                  <div><dt>Metric</dt><dd>{{ fact.metric or 'Not specified' }}</dd></div>
-                  <div><dt>Technologies</dt><dd>{{ fact.technologies|join(', ') or 'Not specified' }}</dd></div>
-                  <div><dt>Leadership scope</dt><dd>{{ fact.leadership_scope or 'Not specified' }}</dd></div>
-                  <div><dt>Business outcome</dt><dd>{{ fact.business_outcome or 'Not specified' }}</dd></div>
-                  <div><dt>Approved wording</dt><dd>{{ fact.approved_wording }}</dd></div>
-                  <div><dt>Verification status</dt><dd>{{ fact.verification_status|humanize }}</dd></div>
-                </dl>
-              </section>
-            {% endfor %}
-          </div>
-        {% else %}
-          {% with title='No verified facts', message='Verified facts are required before job evaluations can succeed.', action_href=None, action_label=None %}
-            {% include 'components/empty_state.html' %}
-          {% endwith %}
-        {% endif %}
-      </article>
+  <section class="panel filters-panel">
+    <form class="filter-form filter-form-wide" action="/career-facts" method="get">
+      <div class="field-group">
+        <label for="lifecycle_status">Lifecycle</label>
+        <select id="lifecycle_status" name="lifecycle_status">
+          <option value="">Active only</option>
+          {% for option in lifecycle_options %}
+            <option value="{{ option.value }}" {% if selected_filters.lifecycle_status == option.value %}selected{% endif %}>{{ option.value|humanize }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="field-group">
+        <label for="category">Category</label>
+        <select id="category" name="category">
+          <option value="">All categories</option>
+          {% for option in category_options %}
+            <option value="{{ option.value }}" {% if selected_filters.category == option.value %}selected{% endif %}>{{ option.value|humanize }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="field-group">
+        <label for="source_organization">Organization</label>
+        <select id="source_organization" name="source_organization">
+          <option value="">All organizations</option>
+          {% for option in organization_options %}
+            <option value="{{ option }}" {% if selected_filters.source_organization == option %}selected{% endif %}>{{ option }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="field-group">
+        <label for="evidence_tag">Evidence tag</label>
+        <select id="evidence_tag" name="evidence_tag">
+          <option value="">All tags</option>
+          {% for option in evidence_tag_options %}
+            <option value="{{ option.value }}" {% if selected_filters.evidence_tag == option.value %}selected{% endif %}>{{ option.value|humanize }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="actions-row">
+        <button type="submit">Apply filters</button>
+        <a href="/career-facts">Reset</a>
+      </div>
+    </form>
+  </section>
 
-      <article class="panel">
-        <h2>Unverified facts</h2>
-        {% if unverified_facts %}
-          <div class="fact-stack">
-            {% for fact in unverified_facts %}
-              <section class="fact-card">
-                <p class="fact-meta">{{ fact.category|humanize }} · {{ fact.source_organization or 'Unknown source' }}</p>
-                <p>{{ fact.statement }}</p>
-                <dl class="detail-list compact-detail-list">
-                  <div><dt>Metric</dt><dd>{{ fact.metric or 'Not specified' }}</dd></div>
-                  <div><dt>Technologies</dt><dd>{{ fact.technologies|join(', ') or 'Not specified' }}</dd></div>
-                  <div><dt>Leadership scope</dt><dd>{{ fact.leadership_scope or 'Not specified' }}</dd></div>
-                  <div><dt>Business outcome</dt><dd>{{ fact.business_outcome or 'Not specified' }}</dd></div>
-                  <div><dt>Approved wording</dt><dd>{{ fact.approved_wording }}</dd></div>
-                  <div><dt>Verification status</dt><dd>{{ fact.verification_status|humanize }}</dd></div>
-                </dl>
-              </section>
-            {% endfor %}
-          </div>
-        {% else %}
-          {% with title='No unverified facts', message='All current facts are already verified or no facts have been recorded yet.', action_href=None, action_label=None %}
-            {% include 'components/empty_state.html' %}
-          {% endwith %}
-        {% endif %}
-      </article>
+  {% if facts %}
+    <section class="panel table-wrap">
+      <table class="job-table">
+        <thead>
+          <tr>
+            <th>Category</th>
+            <th>Organization</th>
+            <th>Statement</th>
+            <th>Lifecycle</th>
+            <th>Evidence tags</th>
+            <th>Updated</th>
+            <th>Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for fact in facts %}
+            <tr>
+              <td>{{ fact.category|humanize }}</td>
+              <td>{{ fact.source_organization or 'Not specified' }}</td>
+              <td>{{ fact.statement }}</td>
+              <td><span class="badge badge-{{ fact.lifecycle_status }}">{{ fact.lifecycle_status|humanize }}</span></td>
+              <td>
+                <div class="tag-badges">
+                  {% for tag in fact.evidence_tags %}
+                    <span class="badge">{{ tag|humanize }}</span>
+                  {% endfor %}
+                  {% if not fact.evidence_tags %}
+                    <span class="muted">No tags</span>
+                  {% endif %}
+                </div>
+              </td>
+              <td>{{ fact.updated_at|datetime }}</td>
+              <td class="table-actions">
+                <a href="/career-facts/{{ fact.id }}">View</a>
+                {% if fact.lifecycle_status != 'archived' %}
+                  <a href="/career-facts/{{ fact.id }}/edit">Edit</a>
+                {% endif %}
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
     </section>
+  {% elif has_filters %}
+    {% with title='No career facts match these filters', message='Adjust the lifecycle, category, organization, or evidence-tag filters to widen the result set.', action_href='/career-facts', action_label='Clear filters' %}
+      {% include 'components/empty_state.html' %}
+    {% endwith %}
   {% else %}
-    {% with title='No candidate profile available', message='Create a candidate profile before reviewing career facts.', action_href='/docs', action_label='Open API docs' %}
+    {% with title='No career facts yet', message='Create a draft fact, review it, and verify it before relying on it in evaluations.', action_href='/career-facts/new', action_label='Create first fact' %}
       {% include 'components/empty_state.html' %}
     {% endwith %}
   {% endif %}

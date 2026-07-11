@@ -4,7 +4,13 @@ from dataclasses import dataclass
 from datetime import datetime
 from uuid import UUID
 
-from ai_job_finder.domain.enums import CareerFactCategory, RemotePreference, VerificationStatus
+from ai_job_finder.domain.enums import (
+    CareerFactCategory,
+    CareerFactLifecycle,
+    EvidenceTag,
+    ProvenanceType,
+    RemotePreference,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -15,6 +21,7 @@ class CandidateProfileSnapshot:
     remote_preference: RemotePreference
     target_levels: list[str]
     target_functions: list[str]
+    is_active: bool
     created_at: datetime
     updated_at: datetime
 
@@ -31,11 +38,15 @@ class CareerFactSnapshot:
     leadership_scope: str | None
     business_outcome: str | None
     approved_wording: str
-    verification_status: VerificationStatus
+    lifecycle_status: CareerFactLifecycle
+    evidence_tags: list[EvidenceTag]
+    provenance_type: ProvenanceType
     source_reference: str
+    verified_at: datetime | None
+    archived_at: datetime | None
     created_at: datetime
     updated_at: datetime
 
     @property
     def is_usable(self) -> bool:
-        return self.verification_status is VerificationStatus.VERIFIED
+        return self.lifecycle_status is CareerFactLifecycle.VERIFIED

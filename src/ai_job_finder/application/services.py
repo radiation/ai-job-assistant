@@ -6,9 +6,15 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, selectinload
 
+from ai_job_finder.domain.career_fact import transition_metadata
 from ai_job_finder.domain.common import new_uuid, utc_now
-from ai_job_finder.domain.enums import PostingStatus
-from ai_job_finder.domain.errors import EvaluationPreconditionError, NotFoundError
+from ai_job_finder.domain.enums import CareerFactLifecycle, PostingStatus
+from ai_job_finder.domain.errors import (
+    ArchivedCareerFactModificationError,
+    EvaluationPreconditionError,
+    NotFoundError,
+    SingleCandidateViolationError,
+)
 from ai_job_finder.domain.job_lead import ensure_valid_status_transition
 from ai_job_finder.domain.scoring import evaluate_job_fit
 from ai_job_finder.infrastructure.database.models import (
@@ -17,6 +23,29 @@ from ai_job_finder.infrastructure.database.models import (
     JobEvaluationModel,
     JobLeadModel,
 )
+
+
+def _normalize_list(values: list[str]) -> list[str]:
+    normalized: list[str] = []
+    for value in values:
+        item = value.strip()
+        if item and item not in normalized:
+            normalized.append(item)
+    return normalized
+
+
+def _normalize_optional_str(value: str | None) -> str | None:
+    if value is None:
+        return None
+    normalized = value.strip()
+    return normalized or None
+
+
+def _ensure_single_active_candidate(session: Session) -> None:
+    existing = get_current_candidate_profile(session)
+    if existing is not None:
+        msg = "Only one active candidate profile is supported in this slice."
+        raise SingleCandidateViolationError(msg)
 
 
 def create_candidate_profile(
@@ -28,13 +57,15 @@ def create_candidate_profile(
     target_levels: list[str],
     target_functions: list[str],
 ) -> CandidateProfileModel:
+    _ensure_single_active_candidate(session)
     candidate = CandidateProfileModel(
         id=new_uuid(),
-        full_name=full_name,
-        preferred_locations=preferred_locations,
+        full_name=full_name.strip(),
+        preferred_locations=_normalize_list(preferred_locations),
         remote_preference=remote_preference,
-        target_levels=target_levels,
-        target_functions=target_functions,
+        target_levels=_normalize_list(target_levels),
+        target_functions=_normalize_list(target_functions),
+        is_active=True,
     )
     session.add(candidate)
     session.commit()
@@ -50,6 +81,36 @@ def get_candidate_profile(session: Session, candidate_profile_id: UUID) -> Candi
     return candidate
 
 
+def get_current_candidate_profile(session: Session) -> CandidateProfileModel | None:
+    return session.scalar(
+        select(CandidateProfileModel)
+        .where(CandidateProfileModel.is_active.is_(True))
+        .order_by(CandidateProfileModel.created_at.asc())
+    )
+
+
+def update_candidate_profile(
+    session: Session,
+    *,
+    candidate_profile_id: UUID,
+    full_name: str,
+    preferred_locations: list[str],
+    remote_preference: str,
+    target_levels: list[str],
+    target_functions: list[str],
+) -> CandidateProfileModel:
+    candidate = get_candidate_profile(session, candidate_profile_id)
+    candidate.full_name = full_name.strip()
+    candidate.preferred_locations = _normalize_list(preferred_locations)
+    candidate.remote_preference = remote_preference
+    candidate.target_levels = _normalize_list(target_levels)
+    candidate.target_functions = _normalize_list(target_functions)
+    session.add(candidate)
+    session.commit()
+    session.refresh(candidate)
+    return candidate
+
+
 def create_career_fact(
     session: Session,
     *,
@@ -62,7 +123,8 @@ def create_career_fact(
     leadership_scope: str | None,
     business_outcome: str | None,
     approved_wording: str,
-    verification_status: str,
+    evidence_tags: list[str],
+    provenance_type: str,
     source_reference: str,
 ) -> CareerFactModel:
     get_candidate_profile(session, candidate_profile_id)
@@ -70,15 +132,19 @@ def create_career_fact(
         id=new_uuid(),
         candidate_profile_id=candidate_profile_id,
         category=category,
-        source_organization=source_organization,
-        statement=statement,
-        metric=metric,
-        technologies=technologies,
-        leadership_scope=leadership_scope,
-        business_outcome=business_outcome,
-        approved_wording=approved_wording,
-        verification_status=verification_status,
-        source_reference=source_reference,
+        source_organization=_normalize_optional_str(source_organization),
+        statement=statement.strip(),
+        metric=_normalize_optional_str(metric),
+        technologies=_normalize_list(technologies),
+        leadership_scope=_normalize_optional_str(leadership_scope),
+        business_outcome=_normalize_optional_str(business_outcome),
+        approved_wording=approved_wording.strip(),
+        lifecycle_status=CareerFactLifecycle.DRAFT.value,
+        evidence_tags=_normalize_list(evidence_tags),
+        provenance_type=provenance_type,
+        source_reference=source_reference.strip(),
+        verified_at=None,
+        archived_at=None,
     )
     session.add(fact)
     session.commit()
@@ -86,20 +152,150 @@ def create_career_fact(
     return fact
 
 
-def list_career_facts(session: Session, candidate_profile_id: UUID) -> list[CareerFactModel]:
+def list_career_facts(
+    session: Session,
+    candidate_profile_id: UUID,
+    *,
+    lifecycle_status: str | None = None,
+    category: str | None = None,
+    source_organization: str | None = None,
+    evidence_tag: str | None = None,
+    include_archived: bool = False,
+) -> list[CareerFactModel]:
     get_candidate_profile(session, candidate_profile_id)
-    return list(
+    query = select(CareerFactModel).where(
+        CareerFactModel.candidate_profile_id == candidate_profile_id
+    )
+    if lifecycle_status is not None:
+        query = query.where(CareerFactModel.lifecycle_status == lifecycle_status)
+    elif not include_archived:
+        query = query.where(CareerFactModel.lifecycle_status != CareerFactLifecycle.ARCHIVED.value)
+    if category is not None:
+        query = query.where(CareerFactModel.category == category)
+    if source_organization is not None:
+        query = query.where(CareerFactModel.source_organization == source_organization)
+
+    facts = list(
         session.scalars(
-            select(CareerFactModel)
-            .where(CareerFactModel.candidate_profile_id == candidate_profile_id)
-            .order_by(CareerFactModel.created_at.asc())
+            query.order_by(
+                CareerFactModel.updated_at.desc(),
+                CareerFactModel.created_at.desc(),
+            )
         )
     )
+    if evidence_tag is not None:
+        facts = [fact for fact in facts if evidence_tag in fact.evidence_tags]
+    return facts
 
 
 def get_primary_candidate_profile(session: Session) -> CandidateProfileModel | None:
-    return session.scalar(
-        select(CandidateProfileModel).order_by(CandidateProfileModel.created_at.asc())
+    return get_current_candidate_profile(session)
+
+
+def get_career_fact(session: Session, fact_id: UUID) -> CareerFactModel:
+    fact = session.get(CareerFactModel, fact_id)
+    if fact is None:
+        msg = f"Career fact {fact_id} was not found."
+        raise NotFoundError(msg)
+    return fact
+
+
+def update_career_fact(
+    session: Session,
+    *,
+    fact_id: UUID,
+    category: str,
+    source_organization: str | None,
+    statement: str,
+    metric: str | None,
+    technologies: list[str],
+    leadership_scope: str | None,
+    business_outcome: str | None,
+    approved_wording: str,
+    evidence_tags: list[str],
+    provenance_type: str,
+    source_reference: str,
+) -> CareerFactModel:
+    fact = get_career_fact(session, fact_id)
+    if fact.lifecycle_status == CareerFactLifecycle.ARCHIVED.value:
+        msg = "Archived career facts must be restored to draft before editing."
+        raise ArchivedCareerFactModificationError(msg)
+
+    next_values = {
+        "category": category,
+        "source_organization": _normalize_optional_str(source_organization),
+        "statement": statement.strip(),
+        "metric": _normalize_optional_str(metric),
+        "technologies": _normalize_list(technologies),
+        "leadership_scope": _normalize_optional_str(leadership_scope),
+        "business_outcome": _normalize_optional_str(business_outcome),
+        "approved_wording": approved_wording.strip(),
+        "evidence_tags": _normalize_list(evidence_tags),
+        "provenance_type": provenance_type,
+        "source_reference": source_reference.strip(),
+    }
+    current_values = {
+        "category": fact.category,
+        "source_organization": fact.source_organization,
+        "statement": fact.statement,
+        "metric": fact.metric,
+        "technologies": list(fact.technologies),
+        "leadership_scope": fact.leadership_scope,
+        "business_outcome": fact.business_outcome,
+        "approved_wording": fact.approved_wording,
+        "evidence_tags": list(fact.evidence_tags),
+        "provenance_type": fact.provenance_type,
+        "source_reference": fact.source_reference,
+    }
+    material_change = current_values != next_values
+
+    for field_name, field_value in next_values.items():
+        setattr(fact, field_name, field_value)
+
+    if material_change and fact.lifecycle_status == CareerFactLifecycle.VERIFIED.value:
+        fact.lifecycle_status = CareerFactLifecycle.DRAFT.value
+        fact.verified_at = None
+        fact.archived_at = None
+
+    session.add(fact)
+    session.commit()
+    session.refresh(fact)
+    return fact
+
+
+def transition_career_fact(
+    session: Session,
+    *,
+    fact_id: UUID,
+    lifecycle_status: str,
+) -> CareerFactModel:
+    fact = get_career_fact(session, fact_id)
+    target_status = CareerFactLifecycle(lifecycle_status)
+    verified_at, archived_at = transition_metadata(
+        CareerFactLifecycle(fact.lifecycle_status),
+        target_status,
+        changed_at=utc_now(),
+        existing_verified_at=fact.verified_at,
+    )
+    fact.lifecycle_status = target_status.value
+    fact.verified_at = verified_at
+    fact.archived_at = archived_at
+    session.add(fact)
+    session.commit()
+    session.refresh(fact)
+    return fact
+
+
+def retrieve_verified_evidence(
+    session: Session,
+    *,
+    candidate_profile_id: UUID,
+) -> list[CareerFactModel]:
+    return list_career_facts(
+        session,
+        candidate_profile_id,
+        lifecycle_status=CareerFactLifecycle.VERIFIED.value,
+        include_archived=False,
     )
 
 
@@ -174,7 +370,7 @@ def create_job_evaluation(
 ) -> JobEvaluationModel:
     candidate = get_candidate_profile(session, candidate_profile_id)
     job_lead = get_job_lead(session, job_lead_id)
-    facts = list_career_facts(session, candidate_profile_id)
+    facts = retrieve_verified_evidence(session, candidate_profile_id=candidate_profile_id)
     fact_snapshots = [fact.to_snapshot() for fact in facts]
     verified_facts = [fact for fact in fact_snapshots if fact.is_usable]
     if not verified_facts:

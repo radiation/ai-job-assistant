@@ -2,6 +2,8 @@
 
 Foundation slice for a deterministic, explainable executive job-search platform.
 
+The current product slice centers on a single reviewed candidate profile and a canonical career-fact knowledge base. Resume parsing, document ingestion, and LLM extraction are intentionally deferred until the review workflow is mature enough to validate extracted evidence safely.
+
 ## Stack
 
 - Python 3.14
@@ -67,17 +69,95 @@ Primary HTML routes:
 - `/jobs/new`
 - `/jobs/{job_id}`
 - `/candidate`
+- `/candidate/edit`
 - `/career-facts`
+- `/career-facts/new`
+- `/career-facts/{fact_id}`
+- `/career-facts/{fact_id}/edit`
 
 The main manual workflow is:
 
-1. Open `/jobs/new`.
-2. Enter a job lead manually.
-3. Submit the form and land on the job detail page.
-4. Update posting status inline.
-5. Trigger an evaluation inline once verified career facts exist.
+1. Open `/candidate` and complete the first-run candidate setup if no active candidate exists.
+2. Record career facts under `/career-facts` and verify the reviewed facts that should influence evaluation.
+3. Open `/jobs/new`.
+4. Enter a job lead manually.
+5. Submit the form and land on the job detail page.
+6. Update posting status inline.
+7. Trigger an evaluation inline once verified career facts exist.
 
-HTMX is used only for job status updates and evaluation refresh on the detail page. Normal navigation and form submission still render correctly without HTMX.
+HTMX is used only for job status updates, evaluation refresh on the detail page, and career-fact lifecycle actions. Normal navigation and form submission still render correctly without HTMX.
+
+## Candidate Knowledge Base Slice
+
+This slice is intentionally single-candidate.
+
+- Exactly one active candidate profile is supported.
+- The candidate profile stores typed collections for preferred locations, target levels, and target functions.
+- Career facts are canonical reviewed evidence items, not resume fragments.
+- Evaluations only consume verified, non-archived career facts.
+
+The current lifecycle for a career fact is:
+
+- `draft`
+- `verified`
+- `archived`
+
+Allowed transitions:
+
+- `draft` -> `verified`
+- `draft` -> `archived`
+- `verified` -> `draft`
+- `verified` -> `archived`
+- `archived` -> `draft`
+
+Material edits to a verified fact return it to `draft`. Archived facts remain stored for audit and provenance but are hidden from the default fact list and excluded from evaluation.
+
+### Evidence Tags
+
+Controlled evidence tags currently supported:
+
+- `people_leadership`
+- `manager_of_managers`
+- `platform_engineering`
+- `developer_experience`
+- `developer_productivity`
+- `infrastructure`
+- `shared_services`
+- `ai_enablement`
+- `ml_platform`
+- `data_platform`
+- `global_operations`
+- `high_scale`
+- `regulated_environment`
+- `customer_impact`
+- `p_and_l`
+- `vendor_management`
+- `cost_optimization`
+- `reliability`
+- `security`
+- `observability`
+- `ci_cd`
+- `cloud`
+- `kubernetes`
+
+### Provenance
+
+Each fact carries a typed provenance source plus free-form source reference:
+
+- `resume`
+- `performance_review`
+- `project_notes`
+- `personal_recollection`
+- `verified_external_source`
+- `other`
+
+## Evaluation Notes
+
+- The scoring version for the current slice is `candidate_evidence_v2`.
+- `technical_alignment_score` now uses overlap between verified evidence tags and deterministic job signals.
+- `leadership_scope_score` now uses verified leadership evidence and structured leadership fields rather than prose-only inference.
+- Explanations now include matched verified evidence, concerns, missing evidence, and the scoring version.
+- Historical evaluations remain stored by scoring version, so earlier `foundation_v1` rows are preserved.
 
 ## Docker Compose Development Stack
 
@@ -206,3 +286,4 @@ If you need to bypass hooks temporarily, use Git's standard `--no-verify` flag f
 - [Architecture](docs/architecture.md)
 - [Domain Model](docs/domain-model.md)
 - [Architecture Decision 0001](docs/decisions/0001-foundation-architecture.md)
+- [Architecture Decision 0002](docs/decisions/0002-candidate-knowledge-base.md)
