@@ -1,0 +1,48 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="page-header">
+  <div>
+    <h1>Source Documents</h1>
+    <p class="muted">Uploaded career documents waiting for extraction and review.</p>
+  </div>
+  <a class="button-link" href="/documents/new">Upload Document</a>
+</div>
+
+{% if documents %}
+<div class="panel table-wrap">
+  <table class="job-table">
+    <thead>
+      <tr>
+        <th>Filename</th>
+        <th>Source</th>
+        <th>Uploaded</th>
+        <th>Status</th>
+        <th>Latest run</th>
+        <th>Proposals</th>
+        <th></th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for document in documents %}
+      {% set latest_run = (document.extraction_runs | sort(attribute='started_at') | last) if document.extraction_runs else none %}
+      <tr>
+        <td>{{ document.original_filename }}</td>
+        <td>{{ document.source_type | humanize }}</td>
+        <td>{{ document.uploaded_at | datetime }}</td>
+        <td><span class="badge">{{ document.extraction_status | humanize }}</span></td>
+        <td>{{ latest_run.status | humanize if latest_run else 'None' }}</td>
+        <td>{{ document.proposals | length }}</td>
+        <td><a href="/documents/{{ document.id }}">Detail</a></td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% else %}
+<div class="empty-state">
+  <h2>No source documents yet</h2>
+  <p>Upload a resume or plain career document to start extracting reviewed fact proposals.</p>
+</div>
+{% endif %}
+{% endblock %}

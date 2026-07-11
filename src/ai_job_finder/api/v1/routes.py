@@ -3,19 +3,28 @@ from __future__ import annotations
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
 from sqlalchemy.orm import Session
 
-from ai_job_finder.api.dependencies import db_session_dependency
+from ai_job_finder.api.dependencies import (
+    career_fact_extractor_dependency,
+    db_session_dependency,
+    document_storage_dependency,
+    settings_dependency,
+)
 from ai_job_finder.api.v1.schemas import (
     CandidateProfileCreateRequest,
     CandidateProfileResponse,
     CandidateProfileUpdateRequest,
     CandidateSliceResetResponse,
     CareerFactCreateRequest,
+    CareerFactProposalMergeRequest,
+    CareerFactProposalResponse,
+    CareerFactProposalUpdateRequest,
     CareerFactResponse,
     CareerFactTransitionRequest,
     CareerFactUpdateRequest,
+    ExtractionRunResponse,
     HealthResponse,
     JobEvaluationCreateRequest,
     JobEvaluationResponse,
@@ -23,7 +32,24 @@ from ai_job_finder.api.v1.schemas import (
     JobLeadResponse,
     JobLeadStatusPatchRequest,
     JobLeadUpdateRequest,
+    SourceDocumentResponse,
 )
+from ai_job_finder.application.document_services import (
+    accept_career_fact_proposal,
+    edit_career_fact_proposal,
+    extract_document_text,
+    get_career_fact_proposal,
+    get_source_document,
+    list_career_fact_proposals,
+    list_extraction_runs,
+    list_source_documents,
+    merge_career_fact_proposal,
+    reject_career_fact_proposal,
+    rerun_failed_extraction,
+    start_extraction_run,
+    upload_source_document,
+)
+from ai_job_finder.application.extraction import CareerFactExtractor
 from ai_job_finder.application.services import (
     create_candidate_profile,
     create_career_fact,
@@ -43,12 +69,22 @@ from ai_job_finder.application.services import (
     update_job_lead,
     update_job_lead_status,
 )
-from ai_job_finder.domain.enums import CareerFactCategory, CareerFactLifecycle, EvidenceTag
+from ai_job_finder.domain.enums import (
+    CareerFactCategory,
+    CareerFactLifecycle,
+    CareerFactProposalReviewStatus,
+    EvidenceTag,
+    SourceDocumentType,
+)
 from ai_job_finder.domain.errors import NotFoundError
-from ai_job_finder.settings import get_settings
+from ai_job_finder.infrastructure.storage import DocumentStorage
+from ai_job_finder.settings import Settings, get_settings
 
 router = APIRouter(prefix="/api/v1")
 DbSession = Annotated[Session, Depends(db_session_dependency)]
+DocumentStorageDependency = Annotated[DocumentStorage, Depends(document_storage_dependency)]
+SettingsDependency = Annotated[Settings, Depends(settings_dependency)]
+ExtractorDependency = Annotated[CareerFactExtractor, Depends(career_fact_extractor_dependency)]
 
 
 @router.get("/health", response_model=HealthResponse)
@@ -111,6 +147,219 @@ def post_reset_candidate_profile(session: DbSession) -> CandidateSliceResetRespo
     if not get_settings().enable_dev_reset_api:
         raise HTTPException(status_code=404, detail="Not found")
     return CandidateSliceResetResponse(candidate_deleted=reset_current_candidate_profile(session))
+
+
+@router.post(
+    "/documents",
+    response_model=SourceDocumentResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def post_source_document(
+    session: DbSession,
+    storage: DocumentStorageDependency,
+    settings: SettingsDependency,
+    document_file: Annotated[UploadFile, File()],
+    source_type: Annotated[SourceDocumentType, Form()],
+    upload_note: Annotated[str | None, Form()] = None,
+) -> SourceDocumentResponse:
+    candidate = get_current_candidate_profile(session)
+    if candidate is None:
+        raise NotFoundError("No active candidate profile exists.")
+    content = await document_file.read()
+    document = upload_source_document(
+        session,
+        storage,
+        candidate_profile_id=candidate.id,
+        original_filename=document_file.filename or "document",
+        content_type=document_file.content_type or "application/octet-stream",
+        content=content,
+        source_type=source_type.value,
+        max_upload_size_bytes=settings.max_upload_size_bytes,
+        upload_note=upload_note,
+    )
+    return SourceDocumentResponse.model_validate(document)
+
+
+@router.get("/documents", response_model=list[SourceDocumentResponse])
+def get_source_documents(session: DbSession) -> list[SourceDocumentResponse]:
+    candidate = get_current_candidate_profile(session)
+    if candidate is None:
+        raise NotFoundError("No active candidate profile exists.")
+    return [
+        SourceDocumentResponse.model_validate(document)
+        for document in list_source_documents(session, candidate.id)
+    ]
+
+
+@router.get("/documents/{document_id}", response_model=SourceDocumentResponse)
+def get_source_document_route(document_id: UUID, session: DbSession) -> SourceDocumentResponse:
+    return SourceDocumentResponse.model_validate(get_source_document(session, document_id))
+
+
+@router.post("/documents/{document_id}/text-extraction", response_model=SourceDocumentResponse)
+def post_source_document_text_extraction(
+    document_id: UUID,
+    session: DbSession,
+    storage: DocumentStorageDependency,
+    settings: SettingsDependency,
+) -> SourceDocumentResponse:
+    return SourceDocumentResponse.model_validate(
+        extract_document_text(
+            session,
+            storage,
+            document_id=document_id,
+            max_extracted_characters=settings.extraction_max_extracted_characters,
+        )
+    )
+
+
+@router.post("/documents/{document_id}/extractions", response_model=ExtractionRunResponse)
+def post_source_document_extraction(
+    document_id: UUID,
+    session: DbSession,
+    storage: DocumentStorageDependency,
+    settings: SettingsDependency,
+    extractor: ExtractorDependency,
+) -> ExtractionRunResponse:
+    run = start_extraction_run(
+        session,
+        storage,
+        extractor,
+        document_id=document_id,
+        max_extracted_characters=settings.extraction_max_extracted_characters,
+        chunk_size=settings.extraction_chunk_size,
+        max_chunks=settings.extraction_max_chunks,
+    )
+    return ExtractionRunResponse.model_validate(run)
+
+
+@router.post("/documents/{document_id}/extractions/rerun", response_model=ExtractionRunResponse)
+def post_source_document_extraction_rerun(
+    document_id: UUID,
+    session: DbSession,
+    storage: DocumentStorageDependency,
+    settings: SettingsDependency,
+    extractor: ExtractorDependency,
+) -> ExtractionRunResponse:
+    run = rerun_failed_extraction(
+        session,
+        storage,
+        extractor,
+        document_id=document_id,
+        max_extracted_characters=settings.extraction_max_extracted_characters,
+        chunk_size=settings.extraction_chunk_size,
+        max_chunks=settings.extraction_max_chunks,
+    )
+    return ExtractionRunResponse.model_validate(run)
+
+
+@router.get("/documents/{document_id}/extraction-runs", response_model=list[ExtractionRunResponse])
+def get_source_document_extraction_runs(
+    document_id: UUID,
+    session: DbSession,
+) -> list[ExtractionRunResponse]:
+    return [
+        ExtractionRunResponse.model_validate(run)
+        for run in list_extraction_runs(session, document_id)
+    ]
+
+
+@router.get("/documents/{document_id}/extraction-status", response_model=SourceDocumentResponse)
+def get_source_document_extraction_status(
+    document_id: UUID,
+    session: DbSession,
+) -> SourceDocumentResponse:
+    return SourceDocumentResponse.model_validate(get_source_document(session, document_id))
+
+
+@router.get("/fact-proposals", response_model=list[CareerFactProposalResponse])
+def get_fact_proposals(
+    session: DbSession,
+    review_status: CareerFactProposalReviewStatus | None = None,
+    document_id: UUID | None = None,
+    category: CareerFactCategory | None = None,
+    source_organization: str | None = None,
+    evidence_tag: EvidenceTag | None = None,
+) -> list[CareerFactProposalResponse]:
+    candidate = get_current_candidate_profile(session)
+    if candidate is None:
+        raise NotFoundError("No active candidate profile exists.")
+    proposals = list_career_fact_proposals(
+        session,
+        candidate_profile_id=candidate.id,
+        review_status=review_status.value if review_status else None,
+        document_id=document_id,
+        category=category.value if category else None,
+        source_organization=source_organization,
+        evidence_tag=evidence_tag.value if evidence_tag else None,
+    )
+    return [CareerFactProposalResponse.model_validate(proposal) for proposal in proposals]
+
+
+@router.get("/fact-proposals/{proposal_id}", response_model=CareerFactProposalResponse)
+def get_fact_proposal_route(proposal_id: UUID, session: DbSession) -> CareerFactProposalResponse:
+    return CareerFactProposalResponse.model_validate(get_career_fact_proposal(session, proposal_id))
+
+
+@router.put("/fact-proposals/{proposal_id}", response_model=CareerFactProposalResponse)
+def put_fact_proposal(
+    proposal_id: UUID,
+    payload: CareerFactProposalUpdateRequest,
+    session: DbSession,
+) -> CareerFactProposalResponse:
+    proposal = edit_career_fact_proposal(
+        session,
+        proposal_id=proposal_id,
+        category=payload.proposed_category.value,
+        source_organization=payload.proposed_source_organization,
+        statement=payload.proposed_statement,
+        metric=payload.proposed_metric,
+        technologies=payload.proposed_technologies,
+        leadership_scope=payload.proposed_leadership_scope,
+        business_outcome=payload.proposed_business_outcome,
+        approved_wording=payload.proposed_approved_wording,
+        evidence_tags=[tag.value for tag in payload.proposed_evidence_tags],
+        supporting_excerpt=payload.supporting_excerpt,
+        source_location=payload.source_location,
+        confidence=payload.confidence,
+    )
+    return CareerFactProposalResponse.model_validate(proposal)
+
+
+@router.post("/fact-proposals/{proposal_id}/accept", response_model=CareerFactProposalResponse)
+def post_fact_proposal_accept(
+    proposal_id: UUID,
+    session: DbSession,
+) -> CareerFactProposalResponse:
+    return CareerFactProposalResponse.model_validate(
+        accept_career_fact_proposal(session, proposal_id=proposal_id)
+    )
+
+
+@router.post("/fact-proposals/{proposal_id}/reject", response_model=CareerFactProposalResponse)
+def post_fact_proposal_reject(
+    proposal_id: UUID,
+    session: DbSession,
+) -> CareerFactProposalResponse:
+    return CareerFactProposalResponse.model_validate(
+        reject_career_fact_proposal(session, proposal_id=proposal_id)
+    )
+
+
+@router.post("/fact-proposals/{proposal_id}/merge", response_model=CareerFactProposalResponse)
+def post_fact_proposal_merge(
+    proposal_id: UUID,
+    payload: CareerFactProposalMergeRequest,
+    session: DbSession,
+) -> CareerFactProposalResponse:
+    proposal = merge_career_fact_proposal(
+        session,
+        proposal_id=proposal_id,
+        target_fact_id=payload.target_fact_id,
+        replace_statement=payload.replace_statement,
+        replace_approved_wording=payload.replace_approved_wording,
+    )
+    return CareerFactProposalResponse.model_validate(proposal)
 
 
 @router.post(

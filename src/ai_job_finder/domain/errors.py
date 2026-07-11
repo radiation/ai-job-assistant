@@ -27,3 +27,43 @@ class SingleCandidateViolationError(DomainError):
 
 class ArchivedCareerFactModificationError(DomainError):
     code = "archived_career_fact_requires_restore"
+
+
+class UnsupportedDocumentTypeError(DomainError):
+    code = "unsupported_document_type"
+
+
+class DocumentTooLargeError(DomainError):
+    code = "document_too_large"
+
+
+class DuplicateSourceDocumentError(DomainError):
+    code = "duplicate_source_document"
+
+
+class DocumentExtractionError(DomainError):
+    code = "document_extraction_failed"
+
+
+class DocumentExtractionLimitError(DomainError):
+    code = "document_extraction_limit_exceeded"
+
+
+class ExtractionProviderUnavailableError(DomainError):
+    code = "extraction_provider_unavailable"
+
+
+class MalformedExtractionOutputError(DomainError):
+    code = "malformed_extraction_output"
+
+
+class InvalidProposalEditError(DomainError):
+    code = "invalid_proposal_edit"
+
+
+class InvalidProposalTransitionError(DomainError):
+    code = "invalid_proposal_transition"
+
+
+class MergeTargetMismatchError(DomainError):
+    code = "merge_target_mismatch"

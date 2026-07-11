@@ -65,6 +65,7 @@ class CareerFactCategory(StrEnum):
 
 class ProvenanceType(StrEnum):
     PROJECT_NOTES = "project_notes"
+    PERSONAL_RECOLLECTION = "personal_recollection"
 
 
 class JobLeadSource(StrEnum):
@@ -159,6 +160,40 @@ class JobEvaluationResponse(BaseModel):
     recommendation: str
     explanation: str
     evaluated_at: str
+
+
+class SourceDocumentResponse(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    id: str
+    original_filename: str
+    checksum_sha256: str
+    source_type: str
+    extraction_status: str
+
+
+class ExtractionRunResponse(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    id: str
+    source_document_id: str
+    provider: str
+    model_id: str
+    prompt_version: str
+    schema_version: str
+    status: str
+    input_token_count: int | None = None
+    output_token_count: int | None = None
+
+
+class CareerFactProposalResponse(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    id: str
+    source_document_id: str
+    proposed_statement: str
+    review_status: str
+    accepted_career_fact_id: str | None = None
 
 
 class HealthResponse(BaseModel):
@@ -549,6 +584,40 @@ class ApiClient:
         self._assert_status("evaluations", "evaluation create succeeds", response, 201, body)
         return JobEvaluationResponse.model_validate(body)
 
+    def upload_document(self, filename: str, content: bytes) -> SourceDocumentResponse:
+        response, body = self._request(
+            "POST",
+            "/api/v1/documents",
+            data={"source_type": "career_notes", "upload_note": BOOTSTRAP_OWNER},
+            files={"document_file": (filename, content, "text/plain")},
+        )
+        self._assert_status("documents", "document upload succeeds", response, 201, body)
+        return SourceDocumentResponse.model_validate(body)
+
+    def extract_document(self, document_id: str) -> ExtractionRunResponse:
+        response, body = self._request("POST", f"/api/v1/documents/{document_id}/extractions")
+        self._assert_status("documents", "document extraction succeeds", response, 200, body)
+        return ExtractionRunResponse.model_validate(body)
+
+    def extract_document_expect_failure(self, document_id: str) -> tuple[int, Any]:
+        response, body = self._request("POST", f"/api/v1/documents/{document_id}/extractions")
+        return response.status_code, body
+
+    def list_proposals(self, **params: Any) -> list[CareerFactProposalResponse]:
+        response, body = self._request("GET", "/api/v1/fact-proposals", params=params)
+        self._assert_status("proposals", "proposal list succeeds", response, 200, body)
+        return [CareerFactProposalResponse.model_validate(item) for item in body]
+
+    def accept_proposal(self, proposal_id: str) -> CareerFactProposalResponse:
+        response, body = self._request("POST", f"/api/v1/fact-proposals/{proposal_id}/accept")
+        self._assert_status("proposals", "proposal accept succeeds", response, 200, body)
+        return CareerFactProposalResponse.model_validate(body)
+
+    def reject_proposal(self, proposal_id: str) -> CareerFactProposalResponse:
+        response, body = self._request("POST", f"/api/v1/fact-proposals/{proposal_id}/reject")
+        self._assert_status("proposals", "proposal reject succeeds", response, 200, body)
+        return CareerFactProposalResponse.model_validate(body)
+
     def list_evaluations(self, job_id: str) -> list[JobEvaluationResponse]:
         response, body = self._request("GET", f"/api/v1/job-leads/{job_id}/evaluations")
         self._assert_status("evaluations", "evaluation history succeeds", response, 200, body)
@@ -583,6 +652,7 @@ class HarnessConfig:
     allow_non_localhost_destructive: bool
     verbose: bool
     json_output: str | None
+    document_ingestion: bool = False
 
 
 class BootstrapHarness:
@@ -604,6 +674,8 @@ class BootstrapHarness:
         self._phase_archive_behavior(candidate.id, strong_job.id, facts)
         self._phase_restore_behavior(candidate.id, strong_job.id, facts)
         self._phase_filtering(facts)
+        if self.config.document_ingestion:
+            self._phase_document_ingestion()
         self._phase_comparative_evaluation(candidate.id)
         return self.metadata
 
@@ -1115,6 +1187,120 @@ class BootstrapHarness:
         )
         self._record_pass(phase, "comparative evaluations validated")
 
+    def _phase_document_ingestion(self) -> None:
+        phase = "phase_11_document_ingestion"
+        content = (
+            f"{BOOTSTRAP_OWNER} document fixture. Led platform work with Kubernetes and "
+            f"developer productivity improvements at {time.time_ns()}."
+        ).encode()
+        document = self.client.upload_document("bootstrap-career-notes.txt", content)
+        self.metadata.created_ids["document:accepted"] = document.id
+
+        duplicate_response, duplicate_body = self.client._request(
+            "POST",
+            "/api/v1/documents",
+            data={"source_type": "career_notes", "upload_note": BOOTSTRAP_OWNER},
+            files={"document_file": ("bootstrap-career-notes-copy.txt", content, "text/plain")},
+        )
+        self._assert(
+            duplicate_response.status_code == 409,
+            phase,
+            "duplicate document upload is rejected",
+            endpoint="POST /api/v1/documents",
+            expected=409,
+            actual=duplicate_response.status_code,
+            response=duplicate_body,
+        )
+
+        run = self.client.extract_document(document.id)
+        self._assert(
+            run.status == "succeeded" and run.prompt_version == "career_fact_extraction_v1",
+            phase,
+            "fake extraction run succeeds and records prompt version",
+            endpoint=f"POST /api/v1/documents/{document.id}/extractions",
+            expected="succeeded with prompt version",
+            actual=run.model_dump(mode="json"),
+        )
+        pending = self.client.list_proposals(review_status="pending")
+        self._assert(
+            bool(pending),
+            phase,
+            "extraction creates pending proposals",
+            endpoint="GET /api/v1/fact-proposals?review_status=pending",
+            expected="at least one pending proposal",
+            actual=[],
+        )
+        accepted = self.client.accept_proposal(pending[0].id)
+        self._assert(
+            accepted.review_status == "accepted" and accepted.accepted_career_fact_id is not None,
+            phase,
+            "accepted proposal links to draft career fact",
+            endpoint=f"POST /api/v1/fact-proposals/{pending[0].id}/accept",
+            expected="accepted with career fact linkage",
+            actual=accepted.model_dump(mode="json"),
+        )
+        accepted_fact_id = accepted.accepted_career_fact_id
+        if accepted_fact_id is None:
+            raise HarnessError(
+                phase,
+                "accepted proposal did not include career fact linkage",
+                endpoint=f"POST /api/v1/fact-proposals/{pending[0].id}/accept",
+                expected="accepted_career_fact_id",
+                actual=None,
+                response_body=accepted.model_dump(mode="json"),
+            )
+        accepted_fact = self.client.get_fact(accepted_fact_id)
+        self._assert(
+            accepted_fact.lifecycle_status == CareerFactLifecycle.DRAFT,
+            phase,
+            "accepted proposal creates a draft fact, not verified evidence",
+            endpoint=f"GET /api/v1/career-facts/{accepted.accepted_career_fact_id}",
+            expected="draft",
+            actual=accepted_fact.lifecycle_status.value,
+            response=accepted_fact.model_dump(mode="json"),
+        )
+
+        reject_content = f"{BOOTSTRAP_OWNER} reject fixture {time.time_ns()}.".encode()
+        reject_document = self.client.upload_document("bootstrap-reject-notes.txt", reject_content)
+        self.client.extract_document(reject_document.id)
+        reject_pending = self.client.list_proposals(review_status="pending")
+        self._assert(
+            bool(reject_pending),
+            phase,
+            "second extraction creates a proposal for rejection",
+            endpoint="GET /api/v1/fact-proposals?review_status=pending",
+            expected="at least one pending proposal",
+            actual=[],
+        )
+        rejected = self.client.reject_proposal(reject_pending[0].id)
+        self._assert(
+            rejected.review_status == "rejected",
+            phase,
+            "proposal rejection persists review state",
+            endpoint=f"POST /api/v1/fact-proposals/{reject_pending[0].id}/reject",
+            expected="rejected",
+            actual=rejected.review_status,
+            response=rejected.model_dump(mode="json"),
+        )
+
+        chunk_limit_content = b"\n\n".join([b"A" * 7000 for _ in range(9)])
+        chunk_limit_document = self.client.upload_document(
+            "bootstrap-chunk-limit.txt", chunk_limit_content
+        )
+        status_code, failure_body = self.client.extract_document_expect_failure(
+            chunk_limit_document.id
+        )
+        self._assert(
+            status_code == 422
+            and failure_body["error"]["code"] == "document_extraction_limit_exceeded",
+            phase,
+            "chunk limit failure returns a structured error without partial extraction",
+            endpoint=f"POST /api/v1/documents/{chunk_limit_document.id}/extractions",
+            expected={"status": 422, "code": "document_extraction_limit_exceeded"},
+            actual={"status": status_code, "body": failure_body},
+        )
+        self._record_pass(phase, "document ingestion acceptance flow validated")
+
     def _fact_by_key(self, key: str) -> CareerFactResponse:
         for fact in self.client.list_facts(include_archived=True):
             if fact.source_reference == _fact_definitions()[key].source_reference:
@@ -1140,6 +1326,14 @@ def parse_args(argv: list[str] | None = None) -> HarnessConfig:
     parser.add_argument("--allow-non-localhost-destructive", action="store_true")
     parser.add_argument("--verbose", action="store_true")
     parser.add_argument("--json-output")
+    parser.add_argument(
+        "--document-ingestion",
+        action="store_true",
+        help=(
+            "Run the optional document-ingestion acceptance phase. Configure the app with "
+            "EXTRACTION_ENABLED=true and EXTRACTION_PROVIDER=fake for normal local use."
+        ),
+    )
     args = parser.parse_args(argv)
     return HarnessConfig(
         base_url=args.base_url,
@@ -1150,6 +1344,7 @@ def parse_args(argv: list[str] | None = None) -> HarnessConfig:
         allow_non_localhost_destructive=args.allow_non_localhost_destructive,
         verbose=args.verbose,
         json_output=args.json_output,
+        document_ingestion=args.document_ingestion,
     )
 
 

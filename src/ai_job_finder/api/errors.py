@@ -16,7 +16,20 @@ def _is_api_request(request: Request) -> bool:
 def install_error_handlers(app: FastAPI) -> None:
     @app.exception_handler(DomainError)
     async def handle_domain_error(request: Request, exc: DomainError) -> Response:
-        status_code = 404 if exc.code == "not_found" else 409
+        status_code_by_code = {
+            "not_found": 404,
+            "unsupported_document_type": 415,
+            "document_too_large": 413,
+            "duplicate_source_document": 409,
+            "document_extraction_failed": 422,
+            "document_extraction_limit_exceeded": 422,
+            "extraction_provider_unavailable": 503,
+            "malformed_extraction_output": 502,
+            "invalid_proposal_edit": 422,
+            "invalid_proposal_transition": 409,
+            "merge_target_mismatch": 409,
+        }
+        status_code = status_code_by_code.get(exc.code, 409)
         if not _is_api_request(request):
             return render_template(
                 request,

@@ -50,6 +50,34 @@ class EvidenceTag(StrEnum):
     KUBERNETES = "kubernetes"
 
 
+class SourceDocumentType(StrEnum):
+    RESUME = "resume"
+    PERFORMANCE_REVIEW = "performance_review"
+    PROJECT_NOTES = "project_notes"
+    CAREER_NOTES = "career_notes"
+    OTHER = "other"
+
+
+class SourceDocumentExtractionStatus(StrEnum):
+    UPLOADED = "uploaded"
+    TEXT_EXTRACTED = "text_extracted"
+    EXTRACTION_FAILED = "extraction_failed"
+    FACTS_EXTRACTED = "facts_extracted"
+
+
+class ExtractionRunStatus(StrEnum):
+    RUNNING = "running"
+    SUCCEEDED = "succeeded"
+    FAILED = "failed"
+
+
+class CareerFactProposalReviewStatus(StrEnum):
+    PENDING = "pending"
+    ACCEPTED = "accepted"
+    REJECTED = "rejected"
+    MERGED = "merged"
+
+
 class ProvenanceType(StrEnum):
     RESUME = "resume"
     PERFORMANCE_REVIEW = "performance_review"

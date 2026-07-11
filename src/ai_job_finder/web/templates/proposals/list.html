@@ -1,0 +1,64 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="page-header">
+  <div>
+    <h1>Fact Proposals</h1>
+    <p class="muted">Review AI-assisted proposals before they become draft career facts.</p>
+  </div>
+  <a class="button-link button-secondary" href="/documents">Documents</a>
+</div>
+
+<form class="panel filter-form-wide filters-panel" method="get" action="/fact-proposals">
+  <div class="field-group">
+    <label for="review_status">Status</label>
+    <select id="review_status" name="review_status">
+      <option value="">Any</option>
+      {% for option in review_status_options %}<option value="{{ option.value }}" {% if selected_filters.review_status == option.value %}selected{% endif %}>{{ option.value | humanize }}</option>{% endfor %}
+    </select>
+  </div>
+  <div class="field-group">
+    <label for="document_id">Document</label>
+    <select id="document_id" name="document_id">
+      <option value="">Any</option>
+      {% for document in documents %}<option value="{{ document.id }}" {% if selected_filters.document_id == document.id|string %}selected{% endif %}>{{ document.original_filename }}</option>{% endfor %}
+    </select>
+  </div>
+  <div class="field-group">
+    <label for="category">Category</label>
+    <select id="category" name="category"><option value="">Any</option>{% for option in category_options %}<option value="{{ option.value }}" {% if selected_filters.category == option.value %}selected{% endif %}>{{ option.value | humanize }}</option>{% endfor %}</select>
+  </div>
+  <div class="field-group">
+    <label for="evidence_tag">Tag</label>
+    <select id="evidence_tag" name="evidence_tag"><option value="">Any</option>{% for option in evidence_tag_options %}<option value="{{ option.value }}" {% if selected_filters.evidence_tag == option.value %}selected{% endif %}>{{ option.value | humanize }}</option>{% endfor %}</select>
+  </div>
+  <button type="submit">Apply filters</button>
+</form>
+
+{% if proposals %}
+<div class="fact-stack">
+  {% for proposal in proposals %}
+  <article class="panel fact-card">
+    <div class="section-row">
+      <div>
+        <h2><a href="/fact-proposals/{{ proposal.id }}">{{ proposal.proposed_statement }}</a></h2>
+        <p class="fact-meta">{{ proposal.proposed_category | humanize }}{% if proposal.proposed_source_organization %} · {{ proposal.proposed_source_organization }}{% endif %} · confidence {{ '%.2f'|format(proposal.confidence) }}</p>
+      </div>
+      <span class="badge">{{ proposal.review_status | humanize }}</span>
+    </div>
+    {% if proposal.duplicate_candidate_fact_id %}<p class="field-error">Likely duplicate of career fact {{ proposal.duplicate_candidate_fact_id }}</p>{% endif %}
+    <p class="preformatted">{{ proposal.supporting_excerpt }}</p>
+    <div class="tag-badges">{% for tag in proposal.proposed_evidence_tags %}<span class="badge">{{ tag | humanize }}</span>{% endfor %}</div>
+    {% if proposal.review_status == 'pending' %}
+    <div class="table-actions">
+      <form method="post" action="/fact-proposals/{{ proposal.id }}/accept"><button type="submit">Accept draft</button></form>
+      <form method="post" action="/fact-proposals/{{ proposal.id }}/reject"><button class="button-danger" type="submit">Reject</button></form>
+    </div>
+    {% endif %}
+  </article>
+  {% endfor %}
+</div>
+{% else %}
+<div class="empty-state"><h2>No proposals found</h2><p>Run fact extraction from a source document to populate this queue.</p></div>
+{% endif %}
+{% endblock %}

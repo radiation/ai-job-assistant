@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="page-header">
+  <div>
+    <h1>Upload Document</h1>
+    <p class="muted">Supported formats: UTF-8 text and embedded-text PDF.</p>
+  </div>
+  <a class="button-link button-secondary" href="/documents">Back to Documents</a>
+</div>
+
+<form class="panel narrow-panel stack-form" method="post" action="/documents" enctype="multipart/form-data">
+  <div class="field-group">
+    <label for="document_file">Document file</label>
+    <input id="document_file" name="document_file" type="file" accept=".txt,.pdf,text/plain,application/pdf" required />
+    {% if form_errors.document_file %}<p class="field-error">{{ form_errors.document_file }}</p>{% endif %}
+  </div>
+  <div class="field-group">
+    <label for="source_type">Source type</label>
+    <select id="source_type" name="source_type">
+      {% for option in source_type_options %}
+      <option value="{{ option.value }}" {% if form_values.source_type == option.value %}selected{% endif %}>{{ option.value | humanize }}</option>
+      {% endfor %}
+    </select>
+    {% if form_errors.source_type %}<p class="field-error">{{ form_errors.source_type }}</p>{% endif %}
+  </div>
+  <div class="field-group">
+    <label for="upload_note">Note</label>
+    <textarea id="upload_note" name="upload_note" rows="3">{{ form_values.upload_note }}</textarea>
+  </div>
+  <button type="submit">Upload document</button>
+</form>
+{% endblock %}

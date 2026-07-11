@@ -24,6 +24,41 @@ Represents a reusable reviewed evidence item or accomplishment bundle.
 
 Verification and archival timestamps are stored explicitly. Editing a verified fact returns it to draft when the content changes. Archived facts are retained for history and provenance but excluded from normal evaluation.
 
+## SourceDocument
+
+Represents an uploaded resume or career document. Metadata is persisted in the database; file bytes are stored through the document-storage abstraction. The initial local implementation writes to the configured storage directory and stores only a storage key in the database.
+
+Source types:
+
+- `resume`
+- `performance_review`
+- `project_notes`
+- `career_notes`
+- `other`
+
+Extraction statuses:
+
+- `uploaded`
+- `text_extracted`
+- `extraction_failed`
+- `facts_extracted`
+
+## ExtractionRun
+
+Represents one attempt to extract structured fact proposals from a source document. Failed runs are retained for observability. Each run stores provider, model, prompt version, schema version, temperature, timestamps, chunk count, token usage when available, safe raw response text when available, and error details.
+
+## CareerFactProposal
+
+Represents AI-assisted structured output awaiting human review. Proposals are not canonical facts and are never verified automatically.
+
+Proposal review lifecycle:
+
+- `pending` -> `accepted`
+- `pending` -> `rejected`
+- `pending` -> `merged`
+
+Terminal proposal states are immutable except for audit metadata. Accepting creates a draft career fact. Rejection persists the proposal for audit. Merging records the target fact and only performs narrow reviewer-directed enrichment.
+
 ### Evidence Tags
 
 - `people_leadership`

@@ -1,0 +1,70 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="page-header">
+  <div>
+    <h1>Proposal Review</h1>
+    <p class="muted">{{ proposal.review_status | humanize }} · <a href="/documents/{{ proposal.source_document_id }}">source document</a></p>
+  </div>
+  <a class="button-link button-secondary" href="/fact-proposals">Back to Queue</a>
+</div>
+
+{% if action_error %}<div class="flash flash-error">{{ action_error }}</div>{% endif %}
+{% if proposal.duplicate_candidate_fact_id %}<div class="flash flash-error">Likely duplicate of career fact {{ proposal.duplicate_candidate_fact_id }}.</div>{% endif %}
+
+<form class="panel stack-form" method="post" action="/fact-proposals/{{ proposal.id }}">
+  <div class="field-grid">
+    <div class="field-group">
+      <label for="proposed_category">Category</label>
+      <select id="proposed_category" name="proposed_category" {% if proposal.review_status != 'pending' %}disabled{% endif %}>{% for option in category_options %}<option value="{{ option.value }}" {% if form_values.proposed_category == option.value %}selected{% endif %}>{{ option.value | humanize }}</option>{% endfor %}</select>
+    </div>
+    <div class="field-group"><label for="proposed_source_organization">Organization</label><input id="proposed_source_organization" name="proposed_source_organization" value="{{ form_values.proposed_source_organization }}" {% if proposal.review_status != 'pending' %}disabled{% endif %} /></div>
+  </div>
+  <div class="field-group"><label for="proposed_statement">Statement</label><textarea id="proposed_statement" name="proposed_statement" rows="4" {% if proposal.review_status != 'pending' %}disabled{% endif %}>{{ form_values.proposed_statement }}</textarea>{% if form_errors.proposed_statement %}<p class="field-error">{{ form_errors.proposed_statement }}</p>{% endif %}</div>
+  <div class="field-grid">
+    <div class="field-group"><label for="proposed_metric">Metric</label><input id="proposed_metric" name="proposed_metric" value="{{ form_values.proposed_metric }}" {% if proposal.review_status != 'pending' %}disabled{% endif %} /></div>
+    <div class="field-group"><label for="confidence">Confidence</label><input id="confidence" name="confidence" value="{{ form_values.confidence }}" {% if proposal.review_status != 'pending' %}disabled{% endif %} /></div>
+  </div>
+  <div class="field-grid">
+    <div class="field-group"><label for="proposed_technologies">Technologies</label><textarea id="proposed_technologies" name="proposed_technologies" rows="4" {% if proposal.review_status != 'pending' %}disabled{% endif %}>{{ form_values.proposed_technologies }}</textarea></div>
+    <div class="field-group"><label for="proposed_leadership_scope">Leadership scope</label><textarea id="proposed_leadership_scope" name="proposed_leadership_scope" rows="4" {% if proposal.review_status != 'pending' %}disabled{% endif %}>{{ form_values.proposed_leadership_scope }}</textarea></div>
+  </div>
+  <div class="field-group"><label for="proposed_business_outcome">Business outcome</label><textarea id="proposed_business_outcome" name="proposed_business_outcome" rows="3" {% if proposal.review_status != 'pending' %}disabled{% endif %}>{{ form_values.proposed_business_outcome }}</textarea></div>
+  <div class="field-group"><label for="proposed_approved_wording">Approved wording suggestion</label><textarea id="proposed_approved_wording" name="proposed_approved_wording" rows="3" {% if proposal.review_status != 'pending' %}disabled{% endif %}>{{ form_values.proposed_approved_wording }}</textarea></div>
+  <fieldset class="checkbox-fieldset">
+    <legend>Evidence tags</legend>
+    <div class="checkbox-grid">
+      {% for option in evidence_tag_options %}
+      <label class="checkbox-option"><input type="checkbox" name="proposed_evidence_tags" value="{{ option.value }}" {% if option.value in form_values.proposed_evidence_tags %}checked{% endif %} {% if proposal.review_status != 'pending' %}disabled{% endif %} />{{ option.value | humanize }}</label>
+      {% endfor %}
+    </div>
+  </fieldset>
+  <div class="field-grid">
+    <div class="field-group"><label for="source_location">Source location</label><input id="source_location" name="source_location" value="{{ form_values.source_location }}" {% if proposal.review_status != 'pending' %}disabled{% endif %} /></div>
+    <div class="field-group"><label for="supporting_excerpt">Supporting excerpt</label><textarea id="supporting_excerpt" name="supporting_excerpt" rows="4" readonly>{{ form_values.supporting_excerpt }}</textarea><p class="muted">Captured from the source document at extraction time and kept immutable for grounding.</p></div>
+  </div>
+  {% if proposal.review_status == 'pending' %}<button type="submit">Save proposal edits</button>{% endif %}
+</form>
+
+{% if proposal.review_status == 'pending' %}
+<section class="panel stack-form">
+  <h2>Review actions</h2>
+  <div class="table-actions">
+    <form method="post" action="/fact-proposals/{{ proposal.id }}/accept"><button type="submit">Accept as draft fact</button></form>
+    <form method="post" action="/fact-proposals/{{ proposal.id }}/reject"><button class="button-danger" type="submit">Reject proposal</button></form>
+  </div>
+  <form class="stack-form" method="post" action="/fact-proposals/{{ proposal.id }}/merge">
+    <div class="field-group">
+      <label for="target_fact_id">Merge target fact</label>
+      <select id="target_fact_id" name="target_fact_id" required>
+        <option value="">Choose a career fact</option>
+        {% for fact in facts %}<option value="{{ fact.id }}">{{ fact.source_organization or 'Unknown' }} · {{ fact.statement }}</option>{% endfor %}
+      </select>
+    </div>
+    <label class="checkbox-option"><input type="checkbox" name="replace_statement" />Replace canonical statement</label>
+    <label class="checkbox-option"><input type="checkbox" name="replace_approved_wording" />Replace approved wording</label>
+    <button class="button-secondary" type="submit">Merge into fact</button>
+  </form>
+</section>
+{% endif %}
+{% endblock %}

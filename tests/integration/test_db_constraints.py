@@ -23,7 +23,7 @@ from ai_job_finder.domain.enums import (
     RemotePreference,
     WorkplaceType,
 )
-from ai_job_finder.domain.errors import EvaluationPreconditionError, SingleCandidateViolationError
+from ai_job_finder.domain.errors import SingleCandidateViolationError
 from ai_job_finder.infrastructure.database.models import (
     CandidateProfileModel,
     CareerFactModel,
@@ -211,8 +211,11 @@ def test_draft_and_archived_facts_are_excluded_from_evaluation(
             compensation_text=None,
         )
 
-        with pytest.raises(EvaluationPreconditionError):
-            create_job_evaluation(session, job_lead_id=job.id, candidate_profile_id=candidate.id)
+        evaluation = create_job_evaluation(
+            session, job_lead_id=job.id, candidate_profile_id=candidate.id
+        )
+
+        assert "No verified evidence matched the job signals." in evaluation.explanation
 
 
 def test_previous_evaluation_history_is_preserved(session_factory: sessionmaker[Session]) -> None:

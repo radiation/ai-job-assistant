@@ -1,0 +1,80 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="page-header">
+  <div>
+    <h1>{{ document.original_filename }}</h1>
+    <p class="muted">{{ document.source_type | humanize }} · {{ document.byte_size }} bytes</p>
+  </div>
+  <a class="button-link button-secondary" href="/documents">Back to Documents</a>
+</div>
+
+{% if action_error %}<div class="flash flash-error">{{ action_error }}</div>{% endif %}
+
+<section class="panel detail-grid">
+  <dl class="detail-list compact-detail-list">
+    <div><dt>Status</dt><dd><span class="badge">{{ document.extraction_status | humanize }}</span></dd></div>
+    <div><dt>Content type</dt><dd>{{ document.content_type }}</dd></div>
+    <div><dt>Checksum</dt><dd>{{ document.checksum_sha256 }}</dd></div>
+    <div><dt>Uploaded</dt><dd>{{ document.uploaded_at | datetime }}</dd></div>
+    <div><dt>Processed</dt><dd>{{ document.processed_at | datetime if document.processed_at else 'Not processed' }}</dd></div>
+  </dl>
+  <div class="stack-form">
+    <form method="post" action="/documents/{{ document.id }}/text-extraction">
+      <button class="button-secondary" type="submit">Extract text</button>
+    </form>
+    <form method="post" action="/documents/{{ document.id }}/extractions">
+      <button type="submit">Extract facts</button>
+    </form>
+    {% if document.extraction_error %}<p class="field-error">{{ document.extraction_error }}</p>{% endif %}
+  </div>
+</section>
+
+<section class="panel">
+  <div class="section-row">
+    <h2>Extracted-text preview</h2>
+    <span class="muted">{{ document.extracted_text | length if document.extracted_text else 0 }} characters</span>
+  </div>
+  {% if document.extracted_text %}
+  <p class="preformatted">{{ document.extracted_text[:3000] }}</p>
+  {% else %}
+  <p class="muted">No extracted text yet.</p>
+  {% endif %}
+</section>
+
+<section class="panel">
+  <h2>Extraction runs</h2>
+  {% if document.extraction_runs %}
+  <div class="table-wrap">
+    <table class="job-table">
+      <thead><tr><th>Started</th><th>Status</th><th>Provider</th><th>Model</th><th>Prompt</th><th>Chunks</th><th>Tokens</th></tr></thead>
+      <tbody>
+      {% for run in document.extraction_runs | sort(attribute='started_at', reverse=true) %}
+      <tr>
+        <td>{{ run.started_at | datetime }}</td>
+        <td>{{ run.status | humanize }}</td>
+        <td>{{ run.provider }}</td>
+        <td>{{ run.model_id }}</td>
+        <td>{{ run.prompt_version }}</td>
+        <td>{{ run.chunk_count }}</td>
+        <td>{{ run.input_token_count or 0 }} / {{ run.output_token_count or 0 }}</td>
+      </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}<p class="muted">No extraction runs yet.</p>{% endif %}
+</section>
+
+<section class="panel">
+  <div class="section-row">
+    <h2>Proposals</h2>
+    <a href="/fact-proposals?document_id={{ document.id }}">Review queue</a>
+  </div>
+  <div class="tag-badges">
+    {% for status in ['pending', 'accepted', 'rejected', 'merged'] %}
+    <span class="badge">{{ status | humanize }}: {{ document.proposals | selectattr('review_status', 'equalto', status) | list | length }}</span>
+    {% endfor %}
+  </div>
+</section>
+{% endblock %}
