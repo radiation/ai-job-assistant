@@ -31,24 +31,6 @@ uv sync --frozen --all-groups
 uv run pre-commit install --hook-type pre-commit --hook-type pre-push
 ```
 
-4. Start PostgreSQL for local development and PostgreSQL-backed tests:
-
-```bash
-docker compose up -d postgres
-```
-
-5. Run migrations for local development:
-
-```bash
-uv run alembic upgrade head
-```
-
-6. Seed development data when needed:
-
-```bash
-uv run ai-job-finder-seed
-```
-
 ## Shared Developer Commands
 
 Local use, hooks, and CI share the same `uv run` command surface:
@@ -56,16 +38,52 @@ Local use, hooks, and CI share the same `uv run` command surface:
 ```bash
 uv run ai-job-finder-format
 uv run ai-job-finder-fast-checks
+uv run ai-job-finder-tests --unit
+uv run ai-job-finder-tests --integration --require-postgres
 uv run ai-job-finder-tests
-uv run ai-job-finder-tests --require-postgres
 uv run ai-job-finder-validate
 ```
 
 - `ai-job-finder-format` runs Ruff safe fixes and Ruff formatting.
 - `ai-job-finder-fast-checks` runs `ruff check .`, `ruff format --check .`, and `mypy .`.
-- `ai-job-finder-tests` runs the full pytest suite.
-- `ai-job-finder-tests --require-postgres` requires a reachable PostgreSQL test database and is what the pre-push hook uses.
-- `ai-job-finder-validate` runs fast checks followed by the default pytest suite.
+- `ai-job-finder-tests --unit` runs the fast local unit-test layer with no Docker or PostgreSQL dependency.
+- `ai-job-finder-tests --integration --require-postgres` runs the PostgreSQL-backed integration layer.
+- `ai-job-finder-tests` runs the full suite.
+- `ai-job-finder-validate` runs fast checks followed by the full suite.
+
+## Docker Compose Development Stack
+
+Treat Docker Compose as the primary local development environment:
+
+```bash
+docker compose up
+```
+
+The development stack starts in this order:
+
+1. PostgreSQL becomes healthy.
+2. The one-shot `migrate` service runs Alembic once.
+3. The FastAPI app starts with Uvicorn reload enabled.
+
+The `src` and `alembic` trees are mounted from the host, so normal Python edits do not require a rebuild. Edit files locally and Uvicorn reloads the app automatically.
+
+When you change dependencies or the Dockerfile itself, rebuild explicitly:
+
+```bash
+docker compose up --build
+```
+
+Inspect migration failures with:
+
+```bash
+docker compose logs migrate
+```
+
+Stop the stack and remove volumes when needed:
+
+```bash
+docker compose down -v
+```
 
 ## Hook Usage
 
@@ -81,29 +99,44 @@ Run the pre-push stage manually:
 uv run pre-commit run --all-files --hook-stage pre-push
 ```
 
-The pre-push hook expects PostgreSQL to be reachable. Start it first with:
+Pre-commit runs only whitespace/config cleanup, Ruff safe fixes, Ruff formatting, and mypy. Pre-push runs only the unit-test suite, so local hooks do not depend on Docker or PostgreSQL.
+
+## Running Tests Locally
+
+Run unit tests locally:
 
 ```bash
+uv run ai-job-finder-tests --unit
+```
+
+Run PostgreSQL-backed integration tests manually:
+
+```bash
+docker compose down -v
 docker compose up -d postgres
+TEST_DATABASE_URL=postgresql+psycopg://postgres:postgres@localhost:5432/ai_job_finder_test uv run ai-job-finder-tests --integration --require-postgres
 ```
 
-If PostgreSQL is unavailable, the hook fails with a clear error instead of silently falling back to SQLite.
+The Compose PostgreSQL service provisions both `ai_job_finder` and `ai_job_finder_test` on a fresh volume, so the integration-test command can use a dedicated database.
 
-## Running Tests Directly
-
-Run the full suite with the repository's current test harness:
+Run the full suite directly when needed:
 
 ```bash
-uv run pytest
+uv run ai-job-finder-tests
 ```
 
-Run the PostgreSQL-backed path explicitly:
+The repository keeps a clear split by directory:
+
+- `tests/unit` for fast unit tests
+- `tests/integration` for real-infrastructure integration tests
+
+## Seed Development Data
+
+Seed development data when needed:
 
 ```bash
-TEST_DATABASE_URL=postgresql+psycopg://postgres:postgres@localhost:5432/ai_job_finder_test uv run ai-job-finder-tests --require-postgres
+uv run ai-job-finder-seed
 ```
-
-The integration tests continue using the existing fixture strategy that builds schema from SQLAlchemy metadata. This slice does not force the authoritative test suite to build schema exclusively through Alembic.
 
 ## Run The API
 
@@ -115,28 +148,14 @@ uv run uvicorn ai_job_finder.main:app --reload
 
 The API is served at `http://127.0.0.1:8000/api/v1`.
 
-## Docker Compose Stack
+## Expected Local Workflow
 
-Start the full local stack from a clean state:
-
-```bash
-docker compose down -v
-docker compose up --build
-```
-
-Docker Compose starts services in this order:
-
-1. PostgreSQL becomes healthy.
-2. The one-shot `migrate` service runs `uv run alembic upgrade head`.
-3. The `app` service starts only after the migration service exits successfully.
-
-Inspect migration failures with:
-
-```bash
-docker compose logs migrate
-```
-
-This startup path is for local Compose only. It does not add production deployment behavior in this slice.
+1. Run `docker compose up`.
+2. Edit Python files locally.
+3. Let the Compose-backed app reload automatically.
+4. Let pre-commit run on commit.
+5. Push changes and let pre-push run the unit-test suite locally.
+6. Let GitHub Actions validate quality, unit tests, and PostgreSQL-backed integration tests.
 
 ## Emergency Hook Bypass
 
@@ -144,9 +163,9 @@ If you need to bypass hooks temporarily, use Git's standard `--no-verify` flag f
 
 ## Test Notes
 
-- Unit tests run without a database server.
-- Integration tests use `TEST_DATABASE_URL` when provided.
-- If `TEST_DATABASE_URL` is not set, integration tests fall back to SQLite unless PostgreSQL is explicitly required by the command you run.
+- Unit tests run without Docker or PostgreSQL.
+- Integration tests are intended to run against PostgreSQL.
+- The integration fixture strategy still builds schema from SQLAlchemy metadata; this refinement does not replace the existing architecture with an Alembic-only test harness.
 
 ## Documentation
 

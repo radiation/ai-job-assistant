@@ -38,8 +38,32 @@ jobs:
       - name: Run Ruff, format check, and mypy
         run: uv run ai-job-finder-fast-checks
 
-  tests:
-    name: Tests
+  unit-tests:
+    name: Unit Tests
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.14
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.14'
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+
+      - name: Install dependencies from lockfile
+        run: uv sync --frozen --all-groups
+
+      - name: Run unit tests
+        run: uv run ai-job-finder-tests --unit
+
+  integration-tests:
+    name: Integration Tests
     runs-on: ubuntu-latest
 
     services:
@@ -77,5 +101,5 @@ jobs:
       - name: Install dependencies from lockfile
         run: uv sync --frozen --all-groups
 
-      - name: Run pytest against PostgreSQL
-        run: uv run ai-job-finder-tests --require-postgres
+      - name: Run integration tests against PostgreSQL
+        run: uv run ai-job-finder-tests --integration --require-postgres

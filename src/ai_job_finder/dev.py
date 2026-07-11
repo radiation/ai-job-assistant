@@ -4,12 +4,16 @@ import argparse
 import os
 import subprocess
 import sys
+import time
 
 import psycopg
 
 DEFAULT_TEST_DATABASE_URL = (
     "postgresql+psycopg://postgres:postgres@localhost:5432/ai_job_finder_test"
 )
+POSTGRES_WAIT_TIMEOUT_SECONDS = 20
+UNIT_TEST_PATH = "tests/unit"
+INTEGRATION_TEST_PATH = "tests/integration"
 
 
 def _run(*command: str) -> int:
@@ -23,18 +27,27 @@ def _run_or_exit(*command: str) -> None:
 
 def _postgres_connectable(database_url: str) -> bool:
     connect_url = database_url.replace("+psycopg", "", 1)
-    try:
-        with psycopg.connect(connect_url) as connection:
-            with connection.cursor() as cursor:
-                cursor.execute("SELECT 1")
-                cursor.fetchone()
-    except psycopg.Error:
-        return False
-    return True
+    deadline = time.monotonic() + POSTGRES_WAIT_TIMEOUT_SECONDS
+
+    while time.monotonic() < deadline:
+        try:
+            with psycopg.connect(connect_url) as connection:
+                with connection.cursor() as cursor:
+                    cursor.execute("SELECT 1")
+                    cursor.fetchone()
+            return True
+        except psycopg.Error:
+            time.sleep(1)
+
+    return False
 
 
 def _resolve_test_database_url() -> str:
     return os.environ.get("TEST_DATABASE_URL", DEFAULT_TEST_DATABASE_URL)
+
+
+def _pytest_args(*test_paths: str) -> tuple[str, ...]:
+    return ("uv", "run", "pytest", *test_paths)
 
 
 def fast_checks_main() -> None:
@@ -62,8 +75,19 @@ def format_main() -> None:
 
 def tests_main() -> None:
     parser = argparse.ArgumentParser()
+    parser.add_argument("--unit", action="store_true")
+    parser.add_argument("--integration", action="store_true")
     parser.add_argument("--require-postgres", action="store_true")
     args = parser.parse_args()
+
+    if args.unit and args.integration:
+        pytest_command = _pytest_args(UNIT_TEST_PATH, INTEGRATION_TEST_PATH)
+    elif args.unit:
+        pytest_command = _pytest_args(UNIT_TEST_PATH)
+    elif args.integration:
+        pytest_command = _pytest_args(INTEGRATION_TEST_PATH)
+    else:
+        pytest_command = _pytest_args()
 
     if args.require_postgres:
         test_database_url = _resolve_test_database_url()
@@ -76,7 +100,7 @@ def tests_main() -> None:
             )
             raise SystemExit(1)
 
-    _run_or_exit("uv", "run", "pytest")
+            _run_or_exit(*pytest_command)
 
 
 def validate_main() -> None:

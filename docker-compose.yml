@@ -3,6 +3,7 @@ services:
     image: postgres:17
     environment:
       POSTGRES_DB: ai_job_finder
+      POSTGRES_TEST_DB: ai_job_finder_test
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
     healthcheck:
@@ -14,6 +15,7 @@ services:
       - "5432:5432"
     volumes:
       - postgres-data:/var/lib/postgresql/data
+      - ./docker/postgres/init:/docker-entrypoint-initdb.d:ro
 
   migrate:
     build:
@@ -26,7 +28,12 @@ services:
       TEST_DATABASE_URL: ${TEST_DATABASE_URL:-postgresql+psycopg://postgres:postgres@postgres:5432/ai_job_finder_test}
       API_HOST: ${API_HOST:-0.0.0.0}
       API_PORT: ${API_PORT:-8000}
-    command: ["uv", "run", "--no-dev", "alembic", "upgrade", "head"]
+    volumes:
+      - ./src:/app/src
+      - ./alembic:/app/alembic
+      - ./alembic.ini:/app/alembic.ini:ro
+      - app-venv:/app/.venv
+    command: ["/app/.venv/bin/alembic", "upgrade", "head"]
     restart: "no"
 
   app:
@@ -44,7 +51,24 @@ services:
       API_PORT: ${API_PORT:-8000}
     ports:
       - "8000:8000"
-    command: ["uv", "run", "--no-dev", "uvicorn", "ai_job_finder.main:app", "--host", "0.0.0.0", "--port", "8000"]
+    volumes:
+      - ./src:/app/src
+      - ./alembic:/app/alembic
+      - ./alembic.ini:/app/alembic.ini:ro
+      - app-venv:/app/.venv
+    command:
+      [
+        "/app/.venv/bin/uvicorn",
+        "ai_job_finder.main:app",
+        "--host",
+        "0.0.0.0",
+        "--port",
+        "8000",
+        "--reload",
+        "--reload-dir",
+        "/app/src",
+      ]
 
 volumes:
   postgres-data:
+  app-venv:
