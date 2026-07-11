@@ -15,7 +15,6 @@ from sqlalchemy import (
     Integer,
     String,
     Text,
-    UniqueConstraint,
     Uuid,
     text,
 )
@@ -200,11 +199,6 @@ class JobLeadModel(Base):
 
 class JobEvaluationModel(Base):
     __tablename__ = "job_evaluations"
-    __table_args__ = (
-        UniqueConstraint(
-            "candidate_profile_id", "job_lead_id", "scoring_version", name="candidate_job_version"
-        ),
-    )
 
     id: Mapped[UUID] = mapped_column(Uuid, primary_key=True)
     candidate_profile_id: Mapped[UUID] = mapped_column(
@@ -222,6 +216,7 @@ class JobEvaluationModel(Base):
     recommendation: Mapped[str] = mapped_column(String(30))
     explanation: Mapped[str] = mapped_column(Text)
     evaluated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
 
     candidate_profile: Mapped[CandidateProfileModel] = relationship(back_populates="evaluations")
     job_lead: Mapped[JobLeadModel] = relationship(back_populates="evaluations")

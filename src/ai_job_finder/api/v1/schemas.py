@@ -115,6 +115,17 @@ class JobLeadCreateRequest(BaseModel):
     compensation_text: str | None = Field(default=None, max_length=200)
 
 
+class JobLeadUpdateRequest(BaseModel):
+    source_url: str | None = Field(default=None, max_length=500)
+    company_name: str = Field(min_length=1, max_length=200)
+    title: str = Field(min_length=1, max_length=200)
+    location_text: str | None = Field(default=None, max_length=200)
+    workplace_type: WorkplaceType | None = None
+    description_raw: str = Field(min_length=1)
+    description_normalized: str = Field(min_length=1)
+    compensation_text: str | None = Field(default=None, max_length=200)
+
+
 class JobLeadResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -164,3 +175,7 @@ class JobEvaluationResponse(BaseModel):
 
 class HealthResponse(BaseModel):
     status: str
+
+
+class CandidateSliceResetResponse(BaseModel):
+    candidate_deleted: bool

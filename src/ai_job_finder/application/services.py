@@ -11,7 +11,6 @@ from ai_job_finder.domain.common import new_uuid, utc_now
 from ai_job_finder.domain.enums import CareerFactLifecycle, PostingStatus
 from ai_job_finder.domain.errors import (
     ArchivedCareerFactModificationError,
-    EvaluationPreconditionError,
     NotFoundError,
     SingleCandidateViolationError,
 )
@@ -109,6 +108,15 @@ def update_candidate_profile(
     session.commit()
     session.refresh(candidate)
     return candidate
+
+
+def reset_current_candidate_profile(session: Session) -> bool:
+    candidate = get_current_candidate_profile(session)
+    if candidate is None:
+        return False
+    session.delete(candidate)
+    session.commit()
+    return True
 
 
 def create_career_fact(
@@ -346,6 +354,27 @@ def list_job_leads(session: Session, *, posting_status: str | None = None) -> li
     return list(session.scalars(query))
 
 
+def find_job_leads(
+    session: Session,
+    *,
+    posting_status: str | None = None,
+    source: str | None = None,
+    external_id: str | None = None,
+) -> list[JobLeadModel]:
+    query = (
+        select(JobLeadModel)
+        .options(selectinload(JobLeadModel.evaluations))
+        .order_by(JobLeadModel.discovered_at.desc(), JobLeadModel.created_at.desc())
+    )
+    if posting_status is not None:
+        query = query.where(JobLeadModel.posting_status == posting_status)
+    if source is not None:
+        query = query.where(JobLeadModel.source == source)
+    if external_id is not None:
+        query = query.where(JobLeadModel.external_id == external_id)
+    return list(session.scalars(query))
+
+
 def get_job_lead(session: Session, job_lead_id: UUID) -> JobLeadModel:
     job_lead = session.get(JobLeadModel, job_lead_id)
     if job_lead is None:
@@ -365,6 +394,34 @@ def update_job_lead_status(session: Session, job_lead_id: UUID, status: str) -> 
     return job_lead
 
 
+def update_job_lead(
+    session: Session,
+    *,
+    job_lead_id: UUID,
+    source_url: str | None,
+    company_name: str,
+    title: str,
+    location_text: str | None,
+    workplace_type: str | None,
+    description_raw: str,
+    description_normalized: str,
+    compensation_text: str | None,
+) -> JobLeadModel:
+    job_lead = get_job_lead(session, job_lead_id)
+    job_lead.source_url = _normalize_optional_str(source_url)
+    job_lead.company_name = company_name.strip()
+    job_lead.title = title.strip()
+    job_lead.location_text = _normalize_optional_str(location_text)
+    job_lead.workplace_type = workplace_type
+    job_lead.description_raw = description_raw.strip()
+    job_lead.description_normalized = description_normalized.strip()
+    job_lead.compensation_text = _normalize_optional_str(compensation_text)
+    session.add(job_lead)
+    session.commit()
+    session.refresh(job_lead)
+    return job_lead
+
+
 def create_job_evaluation(
     session: Session, *, job_lead_id: UUID, candidate_profile_id: UUID
 ) -> JobEvaluationModel:
@@ -373,9 +430,6 @@ def create_job_evaluation(
     facts = retrieve_verified_evidence(session, candidate_profile_id=candidate_profile_id)
     fact_snapshots = [fact.to_snapshot() for fact in facts]
     verified_facts = [fact for fact in fact_snapshots if fact.is_usable]
-    if not verified_facts:
-        msg = "At least one verified career fact is required before creating an evaluation."
-        raise EvaluationPreconditionError(msg)
 
     evaluation = evaluate_job_fit(candidate.to_snapshot(), job_lead.to_snapshot(), verified_facts)
     evaluation_model = JobEvaluationModel(
@@ -404,12 +458,23 @@ def create_job_evaluation(
     return evaluation_model
 
 
+def list_job_evaluations(session: Session, job_lead_id: UUID) -> list[JobEvaluationModel]:
+    get_job_lead(session, job_lead_id)
+    return list(
+        session.scalars(
+            select(JobEvaluationModel)
+            .where(JobEvaluationModel.job_lead_id == job_lead_id)
+            .order_by(JobEvaluationModel.evaluated_at.desc(), JobEvaluationModel.created_at.desc())
+        )
+    )
+
+
 def get_latest_job_evaluation(session: Session, job_lead_id: UUID) -> JobEvaluationModel:
     get_job_lead(session, job_lead_id)
     evaluation = session.scalar(
         select(JobEvaluationModel)
         .where(JobEvaluationModel.job_lead_id == job_lead_id)
-        .order_by(JobEvaluationModel.evaluated_at.desc())
+        .order_by(JobEvaluationModel.evaluated_at.desc(), JobEvaluationModel.created_at.desc())
     )
     if evaluation is None:
         msg = f"No evaluation exists for job lead {job_lead_id}."

@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
 from ai_job_finder.api.dependencies import db_session_dependency
@@ -11,6 +11,7 @@ from ai_job_finder.api.v1.schemas import (
     CandidateProfileCreateRequest,
     CandidateProfileResponse,
     CandidateProfileUpdateRequest,
+    CandidateSliceResetResponse,
     CareerFactCreateRequest,
     CareerFactResponse,
     CareerFactTransitionRequest,
@@ -21,24 +22,30 @@ from ai_job_finder.api.v1.schemas import (
     JobLeadCreateRequest,
     JobLeadResponse,
     JobLeadStatusPatchRequest,
+    JobLeadUpdateRequest,
 )
 from ai_job_finder.application.services import (
     create_candidate_profile,
     create_career_fact,
     create_job_evaluation,
     create_job_lead,
+    find_job_leads,
     get_career_fact,
     get_current_candidate_profile,
     get_job_lead,
     get_latest_job_evaluation,
     list_career_facts,
+    list_job_evaluations,
+    reset_current_candidate_profile,
     transition_career_fact,
     update_candidate_profile,
     update_career_fact,
+    update_job_lead,
     update_job_lead_status,
 )
 from ai_job_finder.domain.enums import CareerFactCategory, CareerFactLifecycle, EvidenceTag
 from ai_job_finder.domain.errors import NotFoundError
+from ai_job_finder.settings import get_settings
 
 router = APIRouter(prefix="/api/v1")
 DbSession = Annotated[Session, Depends(db_session_dependency)]
@@ -94,6 +101,16 @@ def put_candidate_profile(
         target_functions=payload.target_functions,
     )
     return CandidateProfileResponse.model_validate(candidate)
+
+
+@router.post(
+    "/dev/reset-candidate-profile",
+    response_model=CandidateSliceResetResponse,
+)
+def post_reset_candidate_profile(session: DbSession) -> CandidateSliceResetResponse:
+    if not get_settings().enable_dev_reset_api:
+        raise HTTPException(status_code=404, detail="Not found")
+    return CandidateSliceResetResponse(candidate_deleted=reset_current_candidate_profile(session))
 
 
 @router.post(
@@ -216,9 +233,48 @@ def post_job_lead(payload: JobLeadCreateRequest, session: DbSession) -> JobLeadR
     return JobLeadResponse.model_validate(job_lead)
 
 
+@router.get("/job-leads", response_model=list[JobLeadResponse])
+def get_job_leads(
+    session: DbSession,
+    posting_status: str | None = None,
+    source: str | None = None,
+    external_id: str | None = None,
+) -> list[JobLeadResponse]:
+    return [
+        JobLeadResponse.model_validate(job_lead)
+        for job_lead in find_job_leads(
+            session,
+            posting_status=posting_status,
+            source=source,
+            external_id=external_id,
+        )
+    ]
+
+
 @router.get("/job-leads/{job_lead_id}", response_model=JobLeadResponse)
 def get_job_lead_route(job_lead_id: UUID, session: DbSession) -> JobLeadResponse:
     return JobLeadResponse.model_validate(get_job_lead(session, job_lead_id))
+
+
+@router.put("/job-leads/{job_lead_id}", response_model=JobLeadResponse)
+def put_job_lead(
+    job_lead_id: UUID,
+    payload: JobLeadUpdateRequest,
+    session: DbSession,
+) -> JobLeadResponse:
+    job_lead = update_job_lead(
+        session,
+        job_lead_id=job_lead_id,
+        source_url=payload.source_url,
+        company_name=payload.company_name,
+        title=payload.title,
+        location_text=payload.location_text,
+        workplace_type=payload.workplace_type.value if payload.workplace_type else None,
+        description_raw=payload.description_raw,
+        description_normalized=payload.description_normalized,
+        compensation_text=payload.compensation_text,
+    )
+    return JobLeadResponse.model_validate(job_lead)
 
 
 @router.patch("/job-leads/{job_lead_id}/status", response_model=JobLeadResponse)
@@ -252,3 +308,14 @@ def post_job_evaluation(
 @router.get("/job-leads/{job_lead_id}/evaluations/latest", response_model=JobEvaluationResponse)
 def get_latest_evaluation(job_lead_id: UUID, session: DbSession) -> JobEvaluationResponse:
     return JobEvaluationResponse.model_validate(get_latest_job_evaluation(session, job_lead_id))
+
+
+@router.get(
+    "/job-leads/{job_lead_id}/evaluations",
+    response_model=list[JobEvaluationResponse],
+)
+def get_job_evaluations(job_lead_id: UUID, session: DbSession) -> list[JobEvaluationResponse]:
+    return [
+        JobEvaluationResponse.model_validate(evaluation)
+        for evaluation in list_job_evaluations(session, job_lead_id)
+    ]

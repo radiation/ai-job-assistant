@@ -25,6 +25,7 @@ dev = [
 ]
 
 [project.scripts]
+ai-job-finder-bootstrap = "ai_job_finder.bootstrap:main"
 ai-job-finder-seed = "ai_job_finder.infrastructure.database.seed:main"
 ai-job-finder-fast-checks = "ai_job_finder.dev:fast_checks_main"
 ai-job-finder-format = "ai_job_finder.dev:format_main"

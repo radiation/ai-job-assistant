@@ -216,7 +216,7 @@ def test_evaluation_trigger_success(
     assert "Matched verified evidence:" in response.text
 
 
-def test_evaluation_precondition_failure(
+def test_evaluation_allows_provisional_result_without_verified_facts(
     client: TestClient, session_factory: sessionmaker[Session]
 ) -> None:
     with session_factory() as session:
@@ -228,8 +228,9 @@ def test_evaluation_precondition_failure(
         headers={"HX-Request": "true"},
     )
 
-    assert response.status_code == 409
-    assert "At least one verified career fact is required" in response.text
+    assert response.status_code == 200
+    assert "No verified evidence matched the job signals." in response.text
+    assert "No verified career facts are available yet" in response.text
 
 
 def test_candidate_first_run_setup_and_validation(client: TestClient) -> None:

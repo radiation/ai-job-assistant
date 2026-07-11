@@ -12,6 +12,7 @@ class Settings(BaseSettings):
     test_database_url: str | None = None
     api_host: str = "127.0.0.1"
     api_port: int = 8000
+    enable_dev_reset_api: bool = False
 
 
 @lru_cache(maxsize=1)

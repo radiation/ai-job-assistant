@@ -42,6 +42,7 @@ Local use, hooks, and CI share the same `uv run` command surface:
 ```bash
 uv run ai-job-finder-format
 uv run ai-job-finder-fast-checks
+uv run ai-job-finder-bootstrap --base-url http://localhost:8000 --reset --allow-destructive
 uv run ai-job-finder-tests --unit
 uv run ai-job-finder-tests --integration --require-postgres
 uv run ai-job-finder-tests
@@ -50,6 +51,7 @@ uv run ai-job-finder-validate
 
 - `ai-job-finder-format` runs Ruff safe fixes and Ruff formatting.
 - `ai-job-finder-fast-checks` runs `ruff check .`, `ruff format --check .`, and `mypy .`.
+- `ai-job-finder-bootstrap` exercises the candidate knowledge-base slice end-to-end through the public HTTP API and prints a concise acceptance summary.
 - `ai-job-finder-tests --unit` runs the fast local unit-test layer with no Docker or PostgreSQL dependency.
 - `ai-job-finder-tests --integration --require-postgres` runs the PostgreSQL-backed integration layer.
 - `ai-job-finder-tests` runs the full suite.
@@ -251,6 +253,76 @@ Seed development data when needed:
 ```bash
 uv run ai-job-finder-seed
 ```
+
+## API Bootstrap Harness
+
+The repository also includes an API-driven bootstrap and acceptance harness for the candidate knowledge-base slice. This is not a database seed path. It validates the running application exclusively through the public API routes a real client would use.
+
+Prerequisites:
+
+1. Start the Docker Compose stack.
+2. Wait for the `app` service to become healthy and respond on `http://localhost:8000`.
+
+Start the stack:
+
+```bash
+docker compose up --build
+```
+
+Run the harness against the local stack:
+
+```bash
+uv run ai-job-finder-bootstrap --base-url http://localhost:8000 --reset --allow-destructive
+```
+
+Useful options:
+
+- `--base-url` overrides the API origin. Default: `http://localhost:8000`
+- `--timeout` sets the per-request timeout in seconds.
+- `--readiness-timeout` controls how long the harness waits for `/api/v1/health` before failing.
+- `--reset` requests destructive reset of the bootstrap-owned candidate slice.
+- `--allow-destructive` is required with `--reset`.
+- `--allow-non-localhost-destructive` is required if destructive reset targets anything other than `localhost` or `127.0.0.1`.
+- `--verbose` prints HTTP progress while the harness runs.
+- `--json-output path/to/file.json` writes structured run metadata and per-phase outcomes.
+
+Expected summary output is concise:
+
+```text
+PASS candidate created
+PASS second candidate rejected
+PASS 5 draft facts created
+PASS draft facts excluded from scoring
+PASS verified evidence increased platform alignment
+PASS verified edit returned fact to draft
+PASS archived fact excluded
+PASS filters validated
+PASS comparative evaluations validated
+
+Acceptance checks: 10 passed, 0 failed
+```
+
+Safety model:
+
+- The harness uses stable ownership markers in candidate naming, career-fact `source_reference`, and job `external_id` values.
+- Normal reruns reuse bootstrap-owned jobs and facts rather than creating duplicates.
+- Destructive reset is limited to the single active candidate slice through a development-only API route, which cascades only that candidate's career facts and evaluations.
+- Destructive reset is refused unless `--reset --allow-destructive` is supplied.
+- Destructive reset is also refused for non-localhost targets unless `--allow-non-localhost-destructive` is supplied.
+- The harness does not delete unrelated jobs or user-created records.
+
+JSON output captures:
+
+- base URL and reset mode
+- created and reused identifiers
+- per-phase pass or fail records
+- total passed and failed assertions
+
+Difference between related tools:
+
+- Seed data populates local development content directly and is intended for convenience.
+- Automated tests verify code behavior in controlled test environments.
+- The bootstrap harness validates the live running application through HTTP, using public API contracts and acceptance-style assertions.
 
 ## Run The API
 

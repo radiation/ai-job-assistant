@@ -101,6 +101,12 @@ def test_entity_creation_and_retrieval_flow(client: TestClient) -> None:
     assert latest_response.status_code == 200
     assert latest_response.json()["job_lead_id"] == job_id
 
+    history_response = client.get(f"/api/v1/job-leads/{job_id}/evaluations")
+    assert history_response.status_code == 200
+    assert [evaluation["id"] for evaluation in history_response.json()] == [
+        evaluation_response.json()["id"]
+    ]
+
 
 def test_candidate_update_and_single_candidate_invariant(client: TestClient) -> None:
     _create_candidate(client)
@@ -230,9 +236,21 @@ def test_api_validation_and_error_shapes(client: TestClient) -> None:
     assert invalid_fact.json()["error"]["code"] == "validation_error"
 
 
-def test_evaluation_requires_verified_fact_and_excludes_archived(client: TestClient) -> None:
+def test_evaluation_allows_draft_only_facts_and_excludes_archived(client: TestClient) -> None:
     candidate = _create_candidate(client)
     draft_fact = _create_fact(client)
+
+    job_id = _create_job(client, external_id="job-2")
+    evaluation_response = client.post(
+        f"/api/v1/job-leads/{job_id}/evaluations",
+        json={"candidate_profile_id": candidate["id"]},
+    )
+    assert evaluation_response.status_code == 201
+    assert (
+        "No verified evidence matched the job signals." in evaluation_response.json()["explanation"]
+    )
+    assert "No verified career facts are available yet" in evaluation_response.json()["explanation"]
+
     archived_fact = _verify_fact(client, draft_fact["id"])
     assert archived_fact["lifecycle_status"] == "verified"
     archive_response = client.post(
@@ -241,13 +259,15 @@ def test_evaluation_requires_verified_fact_and_excludes_archived(client: TestCli
     )
     assert archive_response.status_code == 200
 
-    job_id = _create_job(client, external_id="job-2")
-    evaluation_response = client.post(
+    archived_only_response = client.post(
         f"/api/v1/job-leads/{job_id}/evaluations",
         json={"candidate_profile_id": candidate["id"]},
     )
-    assert evaluation_response.status_code == 409
-    assert evaluation_response.json()["error"]["code"] == "evaluation_precondition_failed"
+    assert archived_only_response.status_code == 201
+    assert (
+        "No verified evidence matched the job signals."
+        in archived_only_response.json()["explanation"]
+    )
 
 
 def test_invalid_lifecycle_transition_returns_conflict(client: TestClient) -> None:
@@ -264,3 +284,56 @@ def test_invalid_lifecycle_transition_returns_conflict(client: TestClient) -> No
     )
     assert invalid_transition.status_code == 409
     assert invalid_transition.json()["error"]["code"] == "invalid_career_fact_transition"
+
+
+def test_job_lead_lookup_update_and_evaluation_history(client: TestClient) -> None:
+    candidate = _create_candidate(client)
+    fact = _verify_fact(client, _create_fact(client)["id"])
+    assert fact["lifecycle_status"] == "verified"
+
+    job_id = _create_job(client, external_id="bootstrap-strong-platform")
+
+    lookup_response = client.get(
+        "/api/v1/job-leads",
+        params={"source": "manual", "external_id": "bootstrap-strong-platform"},
+    )
+    assert lookup_response.status_code == 200
+    assert [job["id"] for job in lookup_response.json()] == [job_id]
+
+    update_response = client.put(
+        f"/api/v1/job-leads/{job_id}",
+        json={
+            "source_url": "https://example.com/job/1",
+            "company_name": "Northstar",
+            "title": "Senior Director, Platform Engineering",
+            "location_text": "Seattle, WA",
+            "workplace_type": "hybrid",
+            "description_raw": "Lead platform engineering strategy.",
+            "description_normalized": (
+                "Lead platform engineering strategy, developer experience, and self-service "
+                "infrastructure with Kubernetes, CI/CD, and observability."
+            ),
+            "compensation_text": "$260k",
+        },
+    )
+    assert update_response.status_code == 200
+    assert update_response.json()["title"] == "Senior Director, Platform Engineering"
+
+    first_evaluation = client.post(
+        f"/api/v1/job-leads/{job_id}/evaluations",
+        json={"candidate_profile_id": candidate["id"]},
+    )
+    assert first_evaluation.status_code == 201
+
+    second_evaluation = client.post(
+        f"/api/v1/job-leads/{job_id}/evaluations",
+        json={"candidate_profile_id": candidate["id"]},
+    )
+    assert second_evaluation.status_code == 201
+    assert second_evaluation.json()["id"] != first_evaluation.json()["id"]
+
+    history_response = client.get(f"/api/v1/job-leads/{job_id}/evaluations")
+    assert history_response.status_code == 200
+    assert len(history_response.json()) == 2
+    assert history_response.json()[0]["id"] == second_evaluation.json()["id"]
+    assert history_response.json()[1]["id"] == first_evaluation.json()["id"]
