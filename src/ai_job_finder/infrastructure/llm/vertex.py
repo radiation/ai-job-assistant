@@ -124,7 +124,6 @@ class VertexGeminiCareerFactExtractor:
             response = cast(Any, model).generate_content(
                 request_text,
                 generation_config=generation_config,
-                request_options={"timeout": self.timeout_seconds},
             )
         except Exception as exc:
             msg = f"Vertex Gemini extraction failed: {exc}"

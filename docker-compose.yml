@@ -73,6 +73,7 @@ services:
       - ./src:/app/src
       - ./alembic:/app/alembic
       - ./alembic.ini:/app/alembic.ini:ro
+      - ~/.config/gcloud:/root/.config/gcloud:ro
       - app-venv:/app/.venv
       - document-storage:/app/.local/document-storage
     command:
