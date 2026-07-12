@@ -4,6 +4,12 @@ from typing import Any, cast
 
 from fastapi.testclient import TestClient
 
+from ai_job_finder.api.dependencies import job_source_connector_dependency
+from ai_job_finder.domain.enums import JobSourceProvider, WorkplaceType
+from ai_job_finder.domain.errors import InvalidJobSourceError, JobSourceProviderError
+from ai_job_finder.domain.job_sources import JobSourceItemFailure, NormalizedJobPosting
+from ai_job_finder.infrastructure.job_sources.fake import FakeJobSourceConnector
+
 
 def _create_candidate(client: TestClient) -> dict[str, Any]:
     response = client.post(
@@ -79,6 +85,32 @@ def _create_job(client: TestClient, external_id: str = "job-1") -> str:
     )
     assert response.status_code == 201
     return str(response.json()["id"])
+
+
+def _greenhouse_posting(
+    external_id: str,
+    *,
+    title: str = "Director, Platform Engineering",
+    description: str = "Lead platform engineering, Kubernetes, CI/CD, and cloud reliability.",
+) -> NormalizedJobPosting:
+    return NormalizedJobPosting(
+        provider=JobSourceProvider.GREENHOUSE,
+        company_name="Acme",
+        title=title,
+        location_text="Remote",
+        workplace_type=WorkplaceType.REMOTE,
+        description_raw=description,
+        description_normalized=description,
+        compensation_text="$200k",
+        source_url=f"https://boards.greenhouse.io/acme/jobs/{external_id}",
+        external_id=external_id,
+        internal_job_id=f"req-{external_id}",
+        source_updated_at=None,
+        departments=["Engineering"],
+        offices=["Remote"],
+        metadata={},
+        raw_payload={"id": external_id},
+    )
 
 
 def test_entity_creation_and_retrieval_flow(client: TestClient) -> None:
@@ -337,3 +369,173 @@ def test_job_lead_lookup_update_and_evaluation_history(client: TestClient) -> No
     assert len(history_response.json()) == 2
     assert history_response.json()[0]["id"] == second_evaluation.json()["id"]
     assert history_response.json()[1]["id"] == first_evaluation.json()["id"]
+
+
+def test_job_source_crud_sync_and_ranked_discovery(client: TestClient) -> None:
+    candidate = _create_candidate(client)
+    _verify_fact(
+        client,
+        _create_fact(
+            client,
+            statement="Led platform engineering with Kubernetes and developer experience scope.",
+            evidence_tags=["platform_engineering", "developer_experience", "cloud", "kubernetes"],
+        )["id"],
+    )
+    assert candidate["id"]
+
+    fake_connector = FakeJobSourceConnector(
+        jobs=[
+            _greenhouse_posting("strong"),
+            _greenhouse_posting(
+                "weak",
+                title="Finance Operations Manager",
+                description="Own finance operations reporting and vendor invoices.",
+            ),
+        ]
+    )
+    app = cast(Any, client.app)
+    app.dependency_overrides[job_source_connector_dependency] = lambda: fake_connector
+
+    create_response = client.post(
+        "/api/v1/job-sources",
+        json={
+            "provider": "greenhouse",
+            "display_name": "Acme Greenhouse",
+            "company_name": "Acme",
+            "board_token": "acme",
+            "source_url": "https://boards.greenhouse.io/acme",
+            "enabled": True,
+        },
+    )
+    assert create_response.status_code == 201
+    source_id = create_response.json()["id"]
+
+    duplicate_response = client.post(
+        "/api/v1/job-sources",
+        json={
+            "provider": "greenhouse",
+            "display_name": "Acme Duplicate",
+            "company_name": "Acme",
+            "board_token": "acme",
+            "source_url": None,
+            "enabled": True,
+        },
+    )
+    assert duplicate_response.status_code == 409
+    assert duplicate_response.json()["error"]["code"] == "duplicate_job_source"
+
+    disable_response = client.post(f"/api/v1/job-sources/{source_id}/disable")
+    assert disable_response.status_code == 200
+    assert disable_response.json()["enabled"] is False
+    enable_response = client.post(f"/api/v1/job-sources/{source_id}/enable")
+    assert enable_response.status_code == 200
+    assert enable_response.json()["enabled"] is True
+
+    first_import = client.post(f"/api/v1/job-sources/{source_id}/imports")
+    assert first_import.status_code == 201
+    assert first_import.json()["status"] == "succeeded"
+    assert first_import.json()["jobs_created"] == 2
+    assert first_import.json()["evaluations_created"] == 2
+
+    second_import = client.post(f"/api/v1/job-sources/{source_id}/imports")
+    assert second_import.status_code == 201
+    assert second_import.json()["jobs_unchanged"] == 2
+    assert second_import.json()["evaluations_created"] == 0
+
+    queue_response = client.get("/api/v1/discovered-leads")
+    assert queue_response.status_code == 200
+    leads = queue_response.json()
+    assert len(leads) == 2
+    assert leads[0]["job"]["external_id"].endswith(":strong")
+    assert (
+        leads[0]["latest_evaluation"]["overall_score"]
+        >= leads[1]["latest_evaluation"]["overall_score"]
+    )
+
+    filtered_response = client.get("/api/v1/discovered-leads", params={"recommendation": "decline"})
+    assert filtered_response.status_code == 200
+
+    invalid_connector = FakeJobSourceConnector(error=InvalidJobSourceError("invalid board"))
+    app.dependency_overrides[job_source_connector_dependency] = lambda: invalid_connector
+    failed_import = client.post(f"/api/v1/job-sources/{source_id}/imports")
+    assert failed_import.status_code == 201
+    assert failed_import.json()["status"] == "failed"
+    assert "invalid board" in failed_import.json()["error_message"]
+
+    runs_response = client.get("/api/v1/job-import-runs", params={"source_id": source_id})
+    assert runs_response.status_code == 200
+    assert len(runs_response.json()) == 3
+
+    run_detail = client.get(f"/api/v1/job-import-runs/{first_import.json()['id']}")
+    assert run_detail.status_code == 200
+    assert run_detail.json()["jobs_created"] == 2
+
+    status_response = client.patch(
+        f"/api/v1/job-leads/{leads[0]['job']['id']}/status",
+        json={"posting_status": "reviewing"},
+    )
+    assert status_response.status_code == 200
+    assert status_response.json()["posting_status"] == "reviewing"
+
+    app.dependency_overrides.pop(job_source_connector_dependency, None)
+
+
+def test_job_source_import_api_partial_failed_and_disabled(client: TestClient) -> None:
+    _create_candidate(client)
+    app = cast(Any, client.app)
+
+    source_response = client.post(
+        "/api/v1/job-sources",
+        json={
+            "provider": "greenhouse",
+            "display_name": "Acme Greenhouse",
+            "company_name": "Acme",
+            "board_token": "acme-partial",
+            "source_url": "https://boards.greenhouse.io/acme",
+            "enabled": True,
+        },
+    )
+    assert source_response.status_code == 201
+    source_id = source_response.json()["id"]
+
+    app.dependency_overrides[job_source_connector_dependency] = lambda: FakeJobSourceConnector(
+        jobs=[_greenhouse_posting("1"), _greenhouse_posting("2")]
+    )
+    baseline_import = client.post(f"/api/v1/job-sources/{source_id}/imports")
+    assert baseline_import.status_code == 201
+    assert baseline_import.json()["status"] == "succeeded"
+
+    app.dependency_overrides[job_source_connector_dependency] = lambda: FakeJobSourceConnector(
+        jobs=[_greenhouse_posting("1")],
+        job_failures=[
+            JobSourceItemFailure(
+                external_id="broken",
+                message="Greenhouse job payload is missing title.",
+            )
+        ],
+    )
+    partial_import = client.post(f"/api/v1/job-sources/{source_id}/imports")
+    assert partial_import.status_code == 201
+    assert partial_import.json()["status"] == "partial"
+    assert partial_import.json()["jobs_failed"] == 1
+    assert partial_import.json()["jobs_closed"] == 0
+    assert "missing title" in partial_import.json()["error_message"]
+
+    disabled_response = client.post(f"/api/v1/job-sources/{source_id}/disable")
+    assert disabled_response.status_code == 200
+    disabled_import = client.post(f"/api/v1/job-sources/{source_id}/imports")
+    assert disabled_import.status_code == 409
+    assert disabled_import.json()["error"]["code"] == "job_source_disabled"
+
+    enabled_response = client.post(f"/api/v1/job-sources/{source_id}/enable")
+    assert enabled_response.status_code == 200
+
+    app.dependency_overrides[job_source_connector_dependency] = lambda: FakeJobSourceConnector(
+        error=JobSourceProviderError("provider unavailable")
+    )
+    failed_import = client.post(f"/api/v1/job-sources/{source_id}/imports")
+    assert failed_import.status_code == 201
+    assert failed_import.json()["status"] == "failed"
+    assert "provider unavailable" in failed_import.json()["error_message"]
+
+    app.dependency_overrides.pop(job_source_connector_dependency, None)

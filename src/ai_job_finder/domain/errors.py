@@ -67,3 +67,39 @@ class InvalidProposalTransitionError(DomainError):
 
 class MergeTargetMismatchError(DomainError):
     code = "merge_target_mismatch"
+
+
+class DuplicateJobSourceError(DomainError):
+    code = "duplicate_job_source"
+
+
+class InvalidJobSourceError(DomainError):
+    code = "invalid_job_source"
+
+
+class JobSourceDisabledError(DomainError):
+    code = "job_source_disabled"
+
+
+class JobSourceProviderError(DomainError):
+    code = "job_source_provider_failure"
+
+
+class JobSourceTimeoutError(JobSourceProviderError):
+    code = "job_source_timeout"
+
+
+class MalformedJobSourcePayloadError(JobSourceProviderError):
+    code = "malformed_job_source_payload"
+
+
+class SuspiciousEmptyJobSourceResultError(DomainError):
+    code = "suspicious_empty_job_source_result"
+
+
+class OverlappingJobImportError(DomainError):
+    code = "overlapping_job_import"
+
+
+class MissingCandidateError(DomainError):
+    code = "missing_candidate"

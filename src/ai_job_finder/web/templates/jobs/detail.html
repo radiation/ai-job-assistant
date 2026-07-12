@@ -21,7 +21,7 @@
         <div><dt>External ID</dt><dd>{{ job.external_id or 'Not specified' }}</dd></div>
         <div><dt>Compensation</dt><dd>{{ job.compensation_text or 'Not specified' }}</dd></div>
         <div><dt>Discovered</dt><dd>{{ job.discovered_at|datetime }}</dd></div>
-        <div><dt>Source link</dt><dd>{% if job.source_url %}<a href="{{ job.source_url }}">Open source posting</a>{% else %}Not available{% endif %}</dd></div>
+        <div><dt>Source link</dt><dd>{% if job.source_url %}<a href="{{ job.source_url }}" target="_blank" rel="noopener noreferrer">Open source posting</a>{% else %}Not available{% endif %}</dd></div>
       </dl>
     </article>
 
@@ -33,10 +33,17 @@
     <p class="preformatted">{{ job.description_normalized }}</p>
   </section>
 
-  <section class="panel">
-    <h2>Raw job description</h2>
-    <p class="preformatted">{{ job.description_raw }}</p>
-  </section>
+  {% if job.source != 'greenhouse' %}
+    <section class="panel">
+      <h2>Raw job description</h2>
+      <p class="preformatted">{{ job.description_raw }}</p>
+    </section>
+  {% else %}
+    <section class="panel">
+      <h2>Original provider content</h2>
+      <p class="muted">Original Greenhouse markup is retained for provenance and not rendered in the UI.</p>
+    </section>
+  {% endif %}
 
   {% include 'jobs/_evaluation.html' %}
 {% endblock %}

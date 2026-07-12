@@ -7,6 +7,7 @@ import sys
 import time
 from dataclasses import asdict, dataclass, field
 from enum import StrEnum
+from pathlib import Path
 from typing import Any
 
 import httpx
@@ -70,6 +71,7 @@ class ProvenanceType(StrEnum):
 
 class JobLeadSource(StrEnum):
     MANUAL = "manual"
+    GREENHOUSE = "greenhouse"
 
 
 class WorkplaceType(StrEnum):
@@ -160,6 +162,49 @@ class JobEvaluationResponse(BaseModel):
     recommendation: str
     explanation: str
     evaluated_at: str
+
+
+class JobSourceConfigurationPayload(BaseModel):
+    provider: str = "greenhouse"
+    display_name: str
+    company_name: str
+    board_token: str
+    source_url: str | None
+    enabled: bool = True
+
+
+class JobSourceConfigurationResponse(JobSourceConfigurationPayload):
+    model_config = ConfigDict(extra="ignore")
+
+    id: str
+    last_successful_sync_at: str | None = None
+    last_sync_status: str | None = None
+    last_sync_error: str | None = None
+
+
+class JobImportRunResponse(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    id: str
+    source_configuration_id: str
+    status: str
+    jobs_fetched: int
+    jobs_created: int
+    jobs_updated: int
+    jobs_unchanged: int
+    jobs_closed: int
+    jobs_failed: int
+    evaluations_created: int
+    evaluation_failures: int
+    error_message: str | None = None
+
+
+class DiscoveredLeadResponse(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    job: JobLeadResponse
+    latest_evaluation: JobEvaluationResponse | None
+    external_post_id: str
 
 
 class SourceDocumentResponse(BaseModel):
@@ -623,6 +668,30 @@ class ApiClient:
         self._assert_status("evaluations", "evaluation history succeeds", response, 200, body)
         return [JobEvaluationResponse.model_validate(item) for item in body]
 
+    def list_job_sources(self) -> list[JobSourceConfigurationResponse]:
+        response, body = self._request("GET", "/api/v1/job-sources")
+        self._assert_status("job_sources", "job source list succeeds", response, 200, body)
+        return [JobSourceConfigurationResponse.model_validate(item) for item in body]
+
+    def create_job_source(
+        self, payload: JobSourceConfigurationPayload
+    ) -> JobSourceConfigurationResponse:
+        response, body = self._request(
+            "POST", "/api/v1/job-sources", json=payload.model_dump(mode="json")
+        )
+        self._assert_status("job_sources", "job source create succeeds", response, 201, body)
+        return JobSourceConfigurationResponse.model_validate(body)
+
+    def sync_job_source(self, source_id: str) -> JobImportRunResponse:
+        response, body = self._request("POST", f"/api/v1/job-sources/{source_id}/imports")
+        self._assert_status("job_import", "job source import trigger succeeds", response, 201, body)
+        return JobImportRunResponse.model_validate(body)
+
+    def list_discovered_leads(self, **params: Any) -> list[DiscoveredLeadResponse]:
+        response, body = self._request("GET", "/api/v1/discovered-leads", params=params)
+        self._assert_status("discovery", "discovered leads list succeeds", response, 200, body)
+        return [DiscoveredLeadResponse.model_validate(item) for item in body]
+
     def _assert_status(
         self,
         phase: str,
@@ -653,6 +722,8 @@ class HarnessConfig:
     verbose: bool
     json_output: str | None
     document_ingestion: bool = False
+    fake_greenhouse: bool = False
+    fake_greenhouse_fixture_path: Path | None = None
 
 
 class BootstrapHarness:
@@ -677,6 +748,8 @@ class BootstrapHarness:
         if self.config.document_ingestion:
             self._phase_document_ingestion()
         self._phase_comparative_evaluation(candidate.id)
+        if self.config.fake_greenhouse:
+            self._phase_fake_greenhouse_import()
         return self.metadata
 
     def _enforce_safety(self) -> None:
@@ -1301,6 +1374,177 @@ class BootstrapHarness:
         )
         self._record_pass(phase, "document ingestion acceptance flow validated")
 
+    def _phase_fake_greenhouse_import(self) -> None:
+        phase = "phase_12_fake_greenhouse_import"
+        fixture_path = self.config.fake_greenhouse_fixture_path
+        if fixture_path is None:
+            raise HarnessError(
+                phase,
+                "fake Greenhouse phase requires a fixture path shared with the server",
+                endpoint="cli",
+                expected="--fake-greenhouse-fixture-path or GREENHOUSE_FAKE_FIXTURE_PATH",
+                actual=None,
+            )
+        source = self._ensure_fake_greenhouse_source()
+
+        self._write_greenhouse_fixture(
+            fixture_path, [self._fake_job("strong"), self._fake_job("weak")]
+        )
+        first_run = self.client.sync_job_source(source.id)
+        self._assert(
+            first_run.status == "succeeded" and first_run.jobs_created == 2,
+            phase,
+            "first fake import creates jobs",
+            endpoint=f"POST /api/v1/job-sources/{source.id}/imports",
+            expected={"status": "succeeded", "jobs_created": 2},
+            actual=first_run.model_dump(mode="json"),
+        )
+
+        identical_run = self.client.sync_job_source(source.id)
+        self._assert(
+            identical_run.jobs_unchanged == 2 and identical_run.evaluations_created == 0,
+            phase,
+            "identical fake import creates no duplicates",
+            endpoint=f"POST /api/v1/job-sources/{source.id}/imports",
+            expected={"jobs_unchanged": 2, "evaluations_created": 0},
+            actual=identical_run.model_dump(mode="json"),
+        )
+
+        changed_strong = self._fake_job("strong")
+        changed_strong["description_normalized"] += (
+            " Own developer productivity, observability, and manager-of-managers scope."
+        )
+        self._write_greenhouse_fixture(fixture_path, [changed_strong, self._fake_job("weak")])
+        changed_run = self.client.sync_job_source(source.id)
+        self._assert(
+            changed_run.jobs_updated == 1 and changed_run.evaluations_created == 1,
+            phase,
+            "changed fake job updates and reevaluates",
+            endpoint=f"POST /api/v1/job-sources/{source.id}/imports",
+            expected={"jobs_updated": 1, "evaluations_created": 1},
+            actual=changed_run.model_dump(mode="json"),
+        )
+
+        self._write_greenhouse_fixture(fixture_path, [changed_strong])
+        closure_run = self.client.sync_job_source(source.id)
+        self._assert(
+            closure_run.jobs_closed == 1,
+            phase,
+            "missing fake job closes after successful import",
+            endpoint=f"POST /api/v1/job-sources/{source.id}/imports",
+            expected={"jobs_closed": 1},
+            actual=closure_run.model_dump(mode="json"),
+        )
+
+        self._write_greenhouse_fixture(fixture_path, [], error="simulated fake Greenhouse outage")
+        failed_run = self.client.sync_job_source(source.id)
+        active_after_failure = self.client.list_discovered_leads(source_id=source.id)
+        self._assert(
+            failed_run.status == "failed" and len(active_after_failure) == 1,
+            phase,
+            "failed fake import closes nothing",
+            endpoint=f"POST /api/v1/job-sources/{source.id}/imports",
+            expected={"status": "failed", "active_count": 1},
+            actual={
+                "run": failed_run.model_dump(mode="json"),
+                "active_count": len(active_after_failure),
+            },
+        )
+
+        self._write_greenhouse_fixture(fixture_path, [changed_strong, self._fake_job("weak")])
+        reappear_run = self.client.sync_job_source(source.id)
+        queue = self.client.list_discovered_leads(source_id=source.id)
+        self._assert(
+            reappear_run.jobs_updated == 1 and len(queue) == 2,
+            phase,
+            "reappearing fake job reactivates",
+            endpoint=f"POST /api/v1/job-sources/{source.id}/imports",
+            expected={"jobs_updated": 1, "active_count": 2},
+            actual={"run": reappear_run.model_dump(mode="json"), "active_count": len(queue)},
+        )
+        self._assert(
+            queue[0].external_post_id == "strong"
+            and queue[0].latest_evaluation is not None
+            and queue[1].latest_evaluation is not None
+            and queue[0].latest_evaluation.overall_score
+            >= queue[1].latest_evaluation.overall_score,
+            phase,
+            "ranked queue places strong fake match above weak match",
+            endpoint="GET /api/v1/discovered-leads",
+            expected="strong before weak",
+            actual=[
+                {
+                    "external_post_id": item.external_post_id,
+                    "score": (
+                        item.latest_evaluation.overall_score if item.latest_evaluation else None
+                    ),
+                }
+                for item in queue
+            ],
+        )
+        self._record_pass(phase, "fake Greenhouse import acceptance flow validated")
+
+    def _ensure_fake_greenhouse_source(self) -> JobSourceConfigurationResponse:
+        board_token = "bootstrap-fake-greenhouse"
+        for source in self.client.list_job_sources():
+            if source.provider == "greenhouse" and source.board_token == board_token:
+                return source
+        source = self.client.create_job_source(
+            JobSourceConfigurationPayload(
+                display_name="Bootstrap Fake Greenhouse",
+                company_name="Bootstrap Greenhouse",
+                board_token=board_token,
+                source_url="https://boards.greenhouse.io/bootstrap-fake-greenhouse",
+            )
+        )
+        self.metadata.created_ids["job_source:fake_greenhouse"] = source.id
+        return source
+
+    def _write_greenhouse_fixture(
+        self,
+        fixture_path: Path,
+        jobs: list[dict[str, Any]],
+        *,
+        error: str | None = None,
+    ) -> None:
+        fixture_path.parent.mkdir(parents=True, exist_ok=True)
+        payload: dict[str, Any] = {"jobs": jobs}
+        if error is not None:
+            payload["error"] = error
+        fixture_path.write_text(json.dumps(payload), encoding="utf-8")
+
+    def _fake_job(self, key: str) -> dict[str, Any]:
+        if key == "strong":
+            return {
+                "external_id": "strong",
+                "internal_job_id": "req-strong",
+                "company_name": "Bootstrap Greenhouse",
+                "title": "Senior Director, Platform Engineering",
+                "location_text": "Remote",
+                "workplace_type": "remote",
+                "description_raw": "Lead platform engineering and developer experience.",
+                "description_normalized": (
+                    "Lead platform engineering, developer platform strategy, Kubernetes, "
+                    "CI/CD, observability, cloud reliability, and engineering managers."
+                ),
+                "compensation_text": "$280k",
+                "source_url": "https://boards.greenhouse.io/bootstrap/jobs/strong",
+            }
+        return {
+            "external_id": "weak",
+            "internal_job_id": "req-weak",
+            "company_name": "Bootstrap Greenhouse",
+            "title": "Finance Operations Manager",
+            "location_text": "Austin, TX",
+            "workplace_type": "onsite",
+            "description_raw": "Own finance operations reporting.",
+            "description_normalized": (
+                "Own finance operations reporting and vendor invoice workflows."
+            ),
+            "compensation_text": "$160k",
+            "source_url": "https://boards.greenhouse.io/bootstrap/jobs/weak",
+        }
+
     def _fact_by_key(self, key: str) -> CareerFactResponse:
         for fact in self.client.list_facts(include_archived=True):
             if fact.source_reference == _fact_definitions()[key].source_reference:
@@ -1334,6 +1578,18 @@ def parse_args(argv: list[str] | None = None) -> HarnessConfig:
             "EXTRACTION_ENABLED=true and EXTRACTION_PROVIDER=fake for normal local use."
         ),
     )
+    parser.add_argument(
+        "--fake-greenhouse",
+        action="store_true",
+        help=(
+            "Run the optional fake-Greenhouse acceptance phase against a file-backed "
+            "fake connector."
+        ),
+    )
+    parser.add_argument(
+        "--fake-greenhouse-fixture-path",
+        default=os.environ.get("GREENHOUSE_FAKE_FIXTURE_PATH"),
+    )
     args = parser.parse_args(argv)
     return HarnessConfig(
         base_url=args.base_url,
@@ -1345,6 +1601,10 @@ def parse_args(argv: list[str] | None = None) -> HarnessConfig:
         verbose=args.verbose,
         json_output=args.json_output,
         document_ingestion=args.document_ingestion,
+        fake_greenhouse=args.fake_greenhouse,
+        fake_greenhouse_fixture_path=(
+            Path(args.fake_greenhouse_fixture_path) if args.fake_greenhouse_fixture_path else None
+        ),
     )
 
 

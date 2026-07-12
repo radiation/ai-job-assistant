@@ -6,6 +6,8 @@ The current vertical slice extends that foundation with a reviewed candidate kno
 
 The document-assisted ingestion slice adds uploadable source documents, deterministic text extraction, provider-neutral LLM fact extraction, and a separate proposal review queue. AI output is never canonical evidence until a reviewer accepts or merges a proposal, and accepted proposals become draft career facts rather than verified evidence.
 
+The Greenhouse discovery slice adds configured public job-board sources, provider-neutral job normalization, idempotent source observations, import-run history, source posting closure/reactivation, and a ranked review queue. Scheduling and background workers are deliberately deferred; sync is explicit through web, API, or CLI entry points.
+
 ## Layering
 
 - `domain`: enums, workflow rules, scoring, and immutable snapshots.
@@ -13,6 +15,7 @@ The document-assisted ingestion slice adds uploadable source documents, determin
 - `infrastructure`: SQLAlchemy models, session management, and the seed command.
 - `infrastructure.llm`: provider-specific adapters for direct model inference. Domain and application code depend only on the extractor protocol.
 - `infrastructure.storage`: local document storage behind a small storage interface; cloud storage can replace it later without changing application services.
+- `infrastructure.job_sources`: provider-specific job source connectors. The Greenhouse adapter owns HTTP, timeout/retry behavior, response parsing, and HTML-to-plain-text normalization.
 - `api`: versioned HTTP endpoints and transport schemas.
 
 ## Request Flow
@@ -34,6 +37,9 @@ erDiagram
     CareerFact ||--o{ CareerFactProposal : accepts_or_duplicates
     CandidateProfile ||--o{ JobEvaluation : receives
     JobLead ||--o{ JobEvaluation : produces
+    JobSourceConfiguration ||--o{ JobImportRun : records
+    JobSourceConfiguration ||--o{ JobSourceObservation : observes
+    JobLead ||--o{ JobSourceObservation : linked_from
 
     CandidateProfile {
         uuid id PK
@@ -119,8 +125,51 @@ erDiagram
         string workplace_type
         text description_raw
         text description_normalized
+        string source_posting_status
         string posting_status
         datetime discovered_at
+    }
+
+    JobSourceConfiguration {
+        uuid id PK
+        string provider
+        string display_name
+        string company_name
+        string board_token
+        string source_url
+        bool enabled
+        datetime last_successful_sync_at
+        string last_sync_status
+    }
+
+    JobImportRun {
+        uuid id PK
+        uuid source_configuration_id FK
+        string provider
+        string status
+        int jobs_fetched
+        int jobs_created
+        int jobs_updated
+        int jobs_unchanged
+        int jobs_closed
+        int evaluations_created
+    }
+
+    JobSourceObservation {
+        uuid id PK
+        uuid source_configuration_id FK
+        uuid job_lead_id FK
+        string provider
+        string external_post_id
+        string external_internal_job_id
+        string canonical_url
+        bool active
+        datetime first_seen_at
+        datetime last_seen_at
+        datetime removed_at
+        string payload_checksum
+        string scoring_checksum
+        string duplicate_hint_key
     }
 
     JobEvaluation {
@@ -145,6 +194,7 @@ erDiagram
 - Candidate-profile and career-fact web routes reuse the same application services as the JSON API instead of making internal HTTP calls.
 - Evaluation stores each component score independently so later scoring revisions remain auditable.
 - Raw job text is preserved alongside normalized text to keep provenance intact.
+- Imported job provenance is stored in `JobSourceObservation`, separate from canonical `JobLead`, so one future lead can be observed through multiple sources.
 - Typed JSON collections are limited to fields that are naturally list-shaped in this slice.
 - Controlled evidence tags intentionally replace free-form tagging or LLM extraction so scoring remains deterministic and queryable.
 - LLM extraction is bounded by deterministic validation: upload size, extracted character count, chunk count, schema validation, excerpt grounding, within-run deduplication, and deterministic duplicate hints against existing facts.
@@ -177,6 +227,22 @@ The current scoring version is `candidate_evidence_v2`.
 - Leadership scope uses verified leadership tags plus structured leadership fields.
 - Draft and archived facts are excluded from evaluation.
 - Explanations list matched verified evidence, positive signals, concerns, and missing evidence so the output remains inspectable.
+
+## Greenhouse Discovery
+
+`JobSourceConnector` is the provider-neutral boundary. Application services call `fetch_jobs(source)` and receive normalized postings; infrastructure adapters own provider HTTP details. The Greenhouse connector uses the public Job Board API with no authentication, an explicit timeout, bounded retry for transient failures, an application user agent, `content=true` to fetch full job content, and hard limits for response size and maximum job count.
+
+Greenhouse HTML is preserved in source provenance but converted to safe plain text for scoring. Jinja autoescaping handles rendered values in the web console; source markup is never trusted or rendered back into the UI. Source URLs are normalized to `http` and `https` only.
+
+The import service creates an import run before fetching and always transitions it to a terminal state. Source identity is `provider + source configuration + Greenhouse post ID`; exact repeats update `last_seen_at` without duplicate jobs. Payload and scoring checksums separate provenance-only changes from scoring-relevant changes, so evaluation history grows only when scoring inputs materially change.
+
+Connector-level malformed items are downgraded to per-item failures so one bad upstream posting does not poison a good snapshot. Application-level persistence uses per-posting and per-evaluation savepoints, which keeps partial flushes from leaking across items while still allowing the overall run to complete and report a truthful `partial` status.
+
+Closure is conservative. Missing observations close only after a fully successful non-suspicious import for the same source. Failed, partial, and suspiciously empty responses do not close jobs. Reappearing observations reactivate without losing prior run, observation, job, or evaluation history.
+
+Same-source overlap is rejected by a database-backed check for a running import run. Different sources can sync independently. Abandoned running states remain visible in import-run history for diagnosis, and stale-run messages surface the original start time. This slice does not add Redis, a scheduler, or background workers.
+
+Future Lever or Ashby support should add another infrastructure connector and normalization adapter behind the same protocol. A broader plugin framework is intentionally avoided until a second provider proves the extension points.
 
 ## Web Console Note
 

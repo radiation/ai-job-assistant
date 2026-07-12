@@ -2,7 +2,7 @@
 
 Foundation slice for a deterministic, explainable executive job-search platform.
 
-The current product slice centers on a single reviewed candidate profile, a canonical career-fact knowledge base, and document-assisted career-fact ingestion. Uploaded documents can produce AI-assisted proposals, but proposals remain separate from canonical facts until reviewed.
+The current product slice centers on a single reviewed candidate profile, a canonical career-fact knowledge base, document-assisted career-fact ingestion, and Greenhouse public job-board discovery. Imported jobs are normalized, evaluated deterministically, and presented in a ranked review queue.
 
 ## Stack
 
@@ -46,6 +46,9 @@ uv run ai-job-finder-format
 uv run ai-job-finder-fast-checks
 uv run ai-job-finder-bootstrap --base-url http://localhost:8000 --reset --allow-destructive
 uv run ai-job-finder-bootstrap --base-url http://localhost:8000 --document-ingestion
+uv run ai-job-finder-bootstrap --base-url http://localhost:8000 --fake-greenhouse
+uv run ai-job-finder-sync-source --source-id <uuid>
+uv run ai-job-finder-greenhouse-smoke
 uv run ai-job-finder-vertex-smoke
 uv run ai-job-finder-tests --unit
 uv run ai-job-finder-tests --integration --require-postgres
@@ -57,6 +60,9 @@ uv run ai-job-finder-validate
 - `ai-job-finder-fast-checks` runs `ruff check .`, `ruff format --check .`, and `mypy .`.
 - `ai-job-finder-bootstrap` exercises the candidate knowledge-base slice end-to-end through the public HTTP API and prints a concise acceptance summary.
 - `ai-job-finder-bootstrap --document-ingestion` optionally exercises upload, extraction, proposal acceptance, rejection, and duplicate upload handling. Configure the running app with `EXTRACTION_ENABLED=true` and `EXTRACTION_PROVIDER=fake` for this local fake-extractor phase.
+- `ai-job-finder-bootstrap --fake-greenhouse` optionally exercises fake Greenhouse source creation, idempotent import, update, closure, failed import safety, reactivation, and ranked discovery. Start the app with `GREENHOUSE_FAKE_FIXTURE_PATH=/tmp/ai-job-finder-fake-greenhouse.json` and pass the same path through `--fake-greenhouse-fixture-path` if it differs from the environment.
+- `ai-job-finder-sync-source --source-id <uuid>` runs the same source import service used by the web and API sync action.
+- `ai-job-finder-greenhouse-smoke` is skipped unless `AI_JOB_FINDER_RUN_GREENHOUSE_SMOKE=true`; when enabled it performs one fetch-only call to a configured public Greenhouse board token and does not persist jobs.
 - `ai-job-finder-vertex-smoke` is skipped unless `AI_JOB_FINDER_RUN_VERTEX_SMOKE=true`; when enabled it makes one live Vertex call against a small fixture and prints model, prompt version, token usage, and proposal count.
 - `ai-job-finder-tests --unit` runs the fast local unit-test layer with no Docker or PostgreSQL dependency.
 - `ai-job-finder-tests --integration --require-postgres` runs the PostgreSQL-backed integration layer.
@@ -87,6 +93,11 @@ Primary HTML routes:
 - `/documents/{document_id}`
 - `/fact-proposals`
 - `/fact-proposals/{proposal_id}`
+- `/job-sources`
+- `/job-sources/new`
+- `/job-sources/{source_id}`
+- `/job-import-runs/{run_id}`
+- `/discover`
 
 The main manual workflow is:
 
@@ -99,6 +110,45 @@ The main manual workflow is:
 7. Trigger an evaluation inline once verified career facts exist.
 
 HTMX is used only for job status updates, evaluation refresh on the detail page, and career-fact lifecycle actions. Normal navigation and form submission still render correctly without HTMX.
+
+## Greenhouse Job Discovery
+
+This slice supports only the official public Greenhouse Job Board API. It does not use Harvest APIs, customer credentials, application submission endpoints, HTML scraping, browser automation, scheduling, referrals, resume generation, or application submission.
+
+To identify a Greenhouse board token, open a public board URL such as `https://boards.greenhouse.io/acme`; the token is the final path segment, `acme`. Configure it from `/job-sources/new` or through `POST /api/v1/job-sources` with provider `greenhouse`, company name, board token, and optional source URL.
+
+Run a sync from the source detail page, the API, or CLI:
+
+```bash
+uv run ai-job-finder-sync-source --source-id <uuid>
+```
+
+Each import run is recorded under `/job-import-runs/{run_id}` with terminal status `succeeded`, `failed`, or `partial`, counts, connector version, and a safe error message. The CLI returns exit code `0` only for `succeeded`; `partial` and `failed` return `1`. The ranked review queue is at `/discover` and orders active imported leads by open/actionable workflow status, latest score, and source freshness.
+
+Identity and idempotency use `provider + source configuration + Greenhouse post ID`. Exact source identity reuses the same `JobLead` and `JobSourceObservation`; repeated identical imports do not duplicate jobs or evaluations. Mutable job fields are updated only when the source payload changes, and a new immutable evaluation is created only when scoring-relevant data changes.
+
+Connector parsing is intentionally conservative. The Greenhouse adapter accepts only `http` or `https` source URLs, bounds response size and job count, retries only transient upstream failures, and records malformed individual postings as per-item failures instead of aborting the entire fetch. Workplace type inference is narrow: it uses explicit Greenhouse metadata, location strings, or labeled description lines only, not broad keyword scans across the full description.
+
+Source posting state is separate from human workflow status. `source_posting_status` records whether the source observation is open or closed. `posting_status` remains the user's review/pursuit workflow and is not overwritten by imports.
+
+After a fully successful non-suspicious import, previously active observations from that same source that were not seen are marked removed and linked jobs get source posting state `closed`. Failed, partial, and suspiciously empty imports close nothing. If a removed job reappears, the observation reactivates and history is preserved.
+
+Per-job persistence is isolated with database savepoints. A failure while creating or updating one posting, or while creating its evaluation, does not leak partial writes for that item and does not prevent other postings in the same fetch from being processed. Every run still reaches a truthful terminal state.
+
+Duplicate preparation is deterministic and advisory. Observations store a duplicate hint key derived from normalized company, title, location, URL, description fingerprint, and internal job ID. The application does not fuzzy-merge cross-source jobs and does not use embeddings.
+
+Optional fetch-only live smoke:
+
+```bash
+AI_JOB_FINDER_RUN_GREENHOUSE_SMOKE=true \
+AI_JOB_FINDER_GREENHOUSE_SMOKE_BOARD_TOKEN=acme \
+AI_JOB_FINDER_GREENHOUSE_SMOKE_COMPANY=Acme \
+uv run ai-job-finder-greenhouse-smoke
+```
+
+Normal tests, hooks, and CI do not call live Greenhouse.
+
+Same-source overlap is rejected explicitly. Only one `running` import run may exist per source at a time, and stale overlap messages include the existing run start time for diagnosis. Different sources can still sync independently.
 
 ## Document-Assisted Career Fact Ingestion
 
@@ -384,6 +434,7 @@ Useful options:
 - `--verbose` prints HTTP progress while the harness runs.
 - `--json-output path/to/file.json` writes structured run metadata and per-phase outcomes.
 - `--document-ingestion` runs the optional fake-extractor document-ingestion phase. Start the app with `EXTRACTION_ENABLED=true EXTRACTION_PROVIDER=fake` for this phase.
+- `--fake-greenhouse` runs the optional fake-Greenhouse import phase. Start the app with `GREENHOUSE_FAKE_FIXTURE_PATH=/tmp/ai-job-finder-fake-greenhouse.json` so the server uses the file-backed fake connector, then run the harness with the same path.
 
 Expected summary output is concise:
 
@@ -401,6 +452,9 @@ PASS comparative evaluations validated
 # with --document-ingestion
 PASS document ingestion acceptance flow validated
 
+# with --fake-greenhouse
+PASS fake Greenhouse import acceptance flow validated
+
 Acceptance checks: 10 passed, 0 failed
 ```
 
@@ -413,6 +467,7 @@ Safety model:
 - Destructive reset is also refused for non-localhost targets unless `--allow-non-localhost-destructive` is supplied.
 - The harness does not delete unrelated jobs or user-created records.
 - The optional document-ingestion phase uses public upload and proposal-review API routes. It does not require live Vertex access when the app is configured with the fake extractor.
+- The optional fake-Greenhouse phase uses public source/import/discovery API routes. It does not call live Greenhouse when the app is configured with the file-backed fake connector.
 
 JSON output captures:
 
@@ -463,3 +518,4 @@ If you need to bypass hooks temporarily, use Git's standard `--no-verify` flag f
 - [Architecture Decision 0001](docs/decisions/0001-foundation-architecture.md)
 - [Architecture Decision 0002](docs/decisions/0002-candidate-knowledge-base.md)
 - [Architecture Decision 0003](docs/decisions/0003-document-assisted-career-fact-ingestion.md)
+- [Architecture Decision 0004](docs/decisions/0004-greenhouse-job-discovery-ingestion.md)

@@ -1,0 +1,42 @@
+{% extends 'base.html' %}
+
+{% block content %}
+  <section class="page-header">
+    <div>
+      <h1>Import Run</h1>
+      <p>{{ source.display_name }} · {{ run.started_at|datetime }}</p>
+    </div>
+    <a href="/job-sources/{{ source.id }}">Back to source</a>
+  </section>
+
+  <section class="detail-grid">
+    <article class="panel">
+      <h2>Status</h2>
+      <dl class="detail-list">
+        <div><dt>Status</dt><dd><span class="badge badge-status">{{ run.status|humanize }}</span></dd></div>
+        <div><dt>Started</dt><dd>{{ run.started_at|datetime }}</dd></div>
+        <div><dt>Completed</dt><dd>{{ run.completed_at|datetime if run.completed_at else 'Still running' }}</dd></div>
+        <div><dt>Connector</dt><dd>{{ run.connector_version }}</dd></div>
+      </dl>
+    </article>
+    <article class="panel">
+      <h2>Counts</h2>
+      <dl class="detail-list">
+        <div><dt>Fetched</dt><dd>{{ run.jobs_fetched }}</dd></div>
+        <div><dt>Created</dt><dd>{{ run.jobs_created }}</dd></div>
+        <div><dt>Updated</dt><dd>{{ run.jobs_updated }}</dd></div>
+        <div><dt>Unchanged</dt><dd>{{ run.jobs_unchanged }}</dd></div>
+        <div><dt>Closed</dt><dd>{{ run.jobs_closed }}</dd></div>
+        <div><dt>Failed</dt><dd>{{ run.jobs_failed }}</dd></div>
+        <div><dt>Evaluations</dt><dd>{{ run.evaluations_created }}</dd></div>
+        <div><dt>Evaluation failures</dt><dd>{{ run.evaluation_failures }}</dd></div>
+      </dl>
+    </article>
+  </section>
+
+  {% if run.error_message %}
+    <section class="panel"><h2>Error</h2><p class="preformatted">{{ run.error_message }}</p></section>
+  {% endif %}
+
+  <p><a class="button-link" href="/discover?source_id={{ source.id }}">Open imported jobs</a></p>
+{% endblock %}

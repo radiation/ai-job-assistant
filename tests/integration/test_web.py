@@ -1,10 +1,16 @@
 from __future__ import annotations
 
+from typing import Any, cast
 from uuid import UUID
 
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session, sessionmaker
 
+from ai_job_finder.api.dependencies import job_source_connector_dependency
+from ai_job_finder.application.job_imports import (
+    create_job_source_configuration,
+    run_job_source_import,
+)
 from ai_job_finder.application.services import (
     create_candidate_profile,
     create_career_fact,
@@ -17,10 +23,14 @@ from ai_job_finder.domain.enums import (
     CareerFactLifecycle,
     EvidenceTag,
     JobLeadSource,
+    JobSourceProvider,
     ProvenanceType,
     RemotePreference,
     WorkplaceType,
 )
+from ai_job_finder.domain.job_sources import JobSourceItemFailure, NormalizedJobPosting
+from ai_job_finder.infrastructure.database.models import JobLeadModel
+from ai_job_finder.infrastructure.job_sources.fake import FakeJobSourceConnector
 
 
 def _seed_candidate(
@@ -84,6 +94,29 @@ def _seed_job(session: Session, *, external_id: str = "job-1") -> UUID:
         compensation_text="$250k",
     )
     return job.id
+
+
+def _greenhouse_posting(
+    external_id: str,
+    *,
+    description: str = "Lead platform engineering with Kubernetes and cloud reliability.",
+    raw_description: str | None = None,
+) -> NormalizedJobPosting:
+    return NormalizedJobPosting(
+        provider=JobSourceProvider.GREENHOUSE,
+        company_name="Acme",
+        title="Director, Platform Engineering",
+        location_text="Remote",
+        workplace_type=WorkplaceType.REMOTE,
+        description_raw=raw_description or description,
+        description_normalized=description,
+        compensation_text="$200k",
+        source_url=f"https://boards.greenhouse.io/acme/jobs/{external_id}",
+        external_id=external_id,
+        internal_job_id=f"req-{external_id}",
+        source_updated_at=None,
+        raw_payload={"id": external_id},
+    )
 
 
 def test_jobs_rendering(client: TestClient, session_factory: sessionmaker[Session]) -> None:
@@ -414,3 +447,168 @@ def test_verified_edit_returns_fact_to_draft(
     assert updated.status_code == 200
     assert "Draft" in updated.text
     assert "Career fact updated" in updated.text
+
+
+def test_job_sources_and_discover_pages(
+    client: TestClient, session_factory: sessionmaker[Session]
+) -> None:
+    with session_factory() as session:
+        _seed_candidate(session)
+
+    fake_connector = FakeJobSourceConnector(
+        jobs=[
+            NormalizedJobPosting(
+                provider=JobSourceProvider.GREENHOUSE,
+                company_name="Acme",
+                title="Director, Platform Engineering",
+                location_text="Remote",
+                workplace_type=WorkplaceType.REMOTE,
+                description_raw="Lead platform engineering with Kubernetes and cloud reliability.",
+                description_normalized=(
+                    "Lead platform engineering with Kubernetes and cloud reliability."
+                ),
+                compensation_text="$200k",
+                source_url="https://boards.greenhouse.io/acme/jobs/1",
+                external_id="1",
+                internal_job_id="req-1",
+                source_updated_at=None,
+                raw_payload={"id": "1"},
+            )
+        ]
+    )
+    app = cast(Any, client.app)
+    app.dependency_overrides[job_source_connector_dependency] = lambda: fake_connector
+
+    new_page = client.get("/job-sources/new")
+    assert new_page.status_code == 200
+    assert "New Job Source" in new_page.text
+
+    create_response = client.post(
+        "/job-sources",
+        data={
+            "display_name": "Acme Greenhouse",
+            "company_name": "Acme",
+            "board_token": "acme",
+            "source_url": "https://boards.greenhouse.io/acme",
+        },
+        follow_redirects=False,
+    )
+    assert create_response.status_code == 303
+
+    detail_response = client.get(create_response.headers["location"])
+    assert detail_response.status_code == 200
+    assert "Sync now" in detail_response.text
+
+    source_id = create_response.headers["location"].split("/job-sources/")[1].split("?")[0]
+    sync_response = client.post(f"/job-sources/{source_id}/sync", follow_redirects=False)
+    assert sync_response.status_code == 303
+    assert sync_response.headers["location"].startswith("/job-import-runs/")
+
+    run_response = client.get(sync_response.headers["location"])
+    assert run_response.status_code == 200
+    assert "Succeeded" in run_response.text
+
+    discover_response = client.get("/discover")
+    assert discover_response.status_code == 200
+    assert "Director, Platform Engineering" in discover_response.text
+    assert "Strong Recommend" in discover_response.text or "Recommend" in discover_response.text
+
+    app.dependency_overrides.pop(job_source_connector_dependency, None)
+
+
+def test_empty_job_sources_page(client: TestClient) -> None:
+    response = client.get("/job-sources")
+
+    assert response.status_code == 200
+    assert "No job sources configured" in response.text
+
+
+def test_job_source_partial_run_detail_and_invalid_discover_filters(
+    client: TestClient, session_factory: sessionmaker[Session]
+) -> None:
+    with session_factory() as session:
+        _seed_candidate(session)
+        source = create_job_source_configuration(
+            session,
+            provider=JobSourceProvider.GREENHOUSE.value,
+            display_name="Acme Greenhouse",
+            company_name="Acme",
+            board_token="acme-partial-web",
+            source_url="https://boards.greenhouse.io/acme",
+        )
+        run_job_source_import(
+            session,
+            source_id=source.id,
+            connector=FakeJobSourceConnector(
+                jobs=[_greenhouse_posting("1"), _greenhouse_posting("2")]
+            ),
+        )
+        partial_run_id = run_job_source_import(
+            session,
+            source_id=source.id,
+            connector=FakeJobSourceConnector(
+                jobs=[_greenhouse_posting("1")],
+                job_failures=[
+                    JobSourceItemFailure(
+                        external_id="broken",
+                        message="Greenhouse job payload is missing title.",
+                    )
+                ],
+            ),
+        ).id
+
+    run_response = client.get(f"/job-import-runs/{partial_run_id}")
+    assert run_response.status_code == 200
+    assert "Partial" in run_response.text
+    assert "Greenhouse job payload is missing title." in run_response.text
+
+    invalid_source_response = client.get("/discover?source_id=not-a-uuid")
+    assert invalid_source_response.status_code == 422
+    assert "Invalid filter" in invalid_source_response.text
+
+    invalid_score_response = client.get("/discover?minimum_score=not-a-number")
+    assert invalid_score_response.status_code == 422
+    assert "Invalid filter" in invalid_score_response.text
+
+
+def test_greenhouse_job_detail_suppresses_raw_markup(
+    client: TestClient, session_factory: sessionmaker[Session]
+) -> None:
+    with session_factory() as session:
+        _seed_candidate(session)
+        source = create_job_source_configuration(
+            session,
+            provider=JobSourceProvider.GREENHOUSE.value,
+            display_name="Acme Greenhouse",
+            company_name="Acme",
+            board_token="acme-detail",
+            source_url="https://boards.greenhouse.io/acme",
+        )
+        run_job_source_import(
+            session,
+            source_id=source.id,
+            connector=FakeJobSourceConnector(
+                jobs=[
+                    _greenhouse_posting(
+                        "raw-html",
+                        description="Visible normalized text",
+                        raw_description="<script>alert(1)</script><p>Visible normalized text</p>",
+                    )
+                ]
+            ),
+        )
+        job = (
+            session.query(JobLeadModel).filter(JobLeadModel.external_id.endswith(":raw-html")).one()
+        )
+        job_id = job.id
+
+    response = client.get(f"/jobs/{job_id}")
+
+    assert response.status_code == 200
+    assert (
+        "Original Greenhouse markup is retained for provenance and not rendered in the UI."
+        in response.text
+    )
+    assert "<script>alert(1)</script>" not in response.text
+    assert "Open source posting" in response.text
+    assert 'rel="noopener noreferrer"' in response.text

@@ -1,0 +1,37 @@
+{% extends 'base.html' %}
+
+{% block content %}
+  <section class="page-header">
+    <div>
+      <h1>New Job Source</h1>
+      <p>Greenhouse public board configuration.</p>
+    </div>
+    <a href="/job-sources">Back to sources</a>
+  </section>
+
+  <section class="panel narrow-panel">
+    <form class="stack-form" method="post" action="/job-sources">
+      <div class="field-group">
+        <label for="display_name">Display name</label>
+        <input id="display_name" name="display_name" value="{{ form_values.display_name }}" required />
+        {% if form_errors.display_name %}<p class="field-error">{{ form_errors.display_name }}</p>{% endif %}
+      </div>
+      <div class="field-group">
+        <label for="company_name">Company name</label>
+        <input id="company_name" name="company_name" value="{{ form_values.company_name }}" required />
+        {% if form_errors.company_name %}<p class="field-error">{{ form_errors.company_name }}</p>{% endif %}
+      </div>
+      <div class="field-group">
+        <label for="board_token">Board token</label>
+        <input id="board_token" name="board_token" value="{{ form_values.board_token }}" required />
+        {% if form_errors.board_token %}<p class="field-error">{{ form_errors.board_token }}</p>{% endif %}
+      </div>
+      <div class="field-group">
+        <label for="source_url">Source URL</label>
+        <input id="source_url" name="source_url" value="{{ form_values.source_url }}" />
+        {% if form_errors.source_url %}<p class="field-error">{{ form_errors.source_url }}</p>{% endif %}
+      </div>
+      <button type="submit">Create source</button>
+    </form>
+  </section>
+{% endblock %}

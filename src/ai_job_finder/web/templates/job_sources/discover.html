@@ -1,0 +1,92 @@
+{% extends 'base.html' %}
+
+{% block content %}
+  <section class="page-header">
+    <div>
+      <h1>Discover</h1>
+      <p>Ranked queue of active imported leads.</p>
+    </div>
+    <a class="button-link" href="/job-sources">Manage sources</a>
+  </section>
+
+  <section class="panel">
+    <form class="filter-form filter-form-wide" method="get" action="/discover">
+      <div class="field-group">
+        <label for="source_id">Source</label>
+        <select id="source_id" name="source_id">
+          <option value="">All sources</option>
+          {% for source in sources %}
+            <option value="{{ source.id }}" {% if selected.source_id == source.id|string %}selected{% endif %}>{{ source.display_name }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="field-group"><label for="company">Company</label><input id="company" name="company" value="{{ selected.company }}" /></div>
+      <div class="field-group"><label for="location">Location</label><input id="location" name="location" value="{{ selected.location }}" /></div>
+      <div class="field-group"><label for="minimum_score">Minimum score</label><input id="minimum_score" name="minimum_score" value="{{ selected.minimum_score }}" /></div>
+      <div class="field-group">
+        <label for="source_posting_status">Source status</label>
+        <select id="source_posting_status" name="source_posting_status"><option value="">All</option>{% for option in source_posting_statuses %}<option value="{{ option.value }}" {% if selected.source_posting_status == option.value %}selected{% endif %}>{{ option.value|humanize }}</option>{% endfor %}</select>
+      </div>
+      <div class="field-group">
+        <label for="workflow_status">Workflow status</label>
+        <select id="workflow_status" name="workflow_status"><option value="">All</option>{% for option in posting_statuses %}<option value="{{ option.value }}" {% if selected.workflow_status == option.value %}selected{% endif %}>{{ option.value|humanize }}</option>{% endfor %}</select>
+      </div>
+      <div class="field-group">
+        <label for="recommendation">Recommendation</label>
+        <select id="recommendation" name="recommendation"><option value="">All</option>{% for option in recommendations %}<option value="{{ option.value }}" {% if selected.recommendation == option.value %}selected{% endif %}>{{ option.value|humanize }}</option>{% endfor %}</select>
+      </div>
+      <div class="field-group">
+        <label for="workplace_type">Workplace</label>
+        <select id="workplace_type" name="workplace_type"><option value="">All</option>{% for option in workplace_types %}<option value="{{ option.value }}" {% if selected.workplace_type == option.value %}selected{% endif %}>{{ option.value|humanize }}</option>{% endfor %}</select>
+      </div>
+      <button type="submit">Apply</button>
+    </form>
+  </section>
+
+  {% if lead_items %}
+    <section class="panel">
+      <div class="table-wrap">
+        <table class="job-table">
+          <thead>
+            <tr>
+              <th>Company</th><th>Title</th><th>Location</th><th>Source</th><th>Freshness</th><th>Score</th><th>Recommendation</th><th>Workflow</th><th>Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for item in lead_items %}
+              <tr>
+                <td>{{ item.job.company_name }}</td>
+                <td>{{ item.job.title }}</td>
+                <td>{{ item.job.location_text or 'Not specified' }}</td>
+                <td>{{ item.observation.provider|humanize }}</td>
+                <td>{{ item.observation.source_updated_at|datetime if item.observation.source_updated_at else item.observation.first_seen_at|datetime }}</td>
+                <td>{% if item.latest_evaluation %}{{ '%.1f'|format(item.latest_evaluation.overall_score) }}{% else %}<span class="muted">No score</span>{% endif %}</td>
+                <td>{% if item.latest_evaluation %}<span class="badge badge-recommendation">{{ item.latest_evaluation.recommendation|humanize }}</span>{% else %}<span class="muted">Not available</span>{% endif %}</td>
+                <td><span class="badge badge-status">{{ item.job.posting_status|humanize }}</span></td>
+                <td>
+                  <div class="actions-row">
+                    {% if item.job.source_url %}<a href="{{ item.job.source_url }}" target="_blank" rel="noopener noreferrer">Source</a>{% endif %}
+                    <a href="/jobs/{{ item.job.id }}">Detail</a>
+                  </div>
+                  <form class="inline-controls" method="post" action="/discover/jobs/{{ item.job.id }}/status">
+                    <select name="posting_status" aria-label="Workflow status">
+                      {% for option in posting_statuses %}<option value="{{ option.value }}" {% if option.value == item.job.posting_status %}selected{% endif %}>{{ option.value|humanize }}</option>{% endfor %}
+                    </select>
+                    <button type="submit">Save</button>
+                  </form>
+                </td>
+              </tr>
+              {% if item.latest_evaluation %}
+                <tr><td colspan="9"><p class="preformatted">{{ item.latest_evaluation.explanation }}</p></td></tr>
+              {% endif %}
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  {% else %}
+    {% with title='No active imported leads', message='Sync a source to populate the discovery queue.', action_href='/job-sources', action_label='Manage sources' %}
+      {% include 'components/empty_state.html' %}
+    {% endwith %}
+  {% endif %}
+{% endblock %}

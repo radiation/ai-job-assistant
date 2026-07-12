@@ -91,6 +91,23 @@ class JobLeadSource(StrEnum):
     MANUAL = "manual"
     REFERRAL = "referral"
     RECRUITER = "recruiter"
+    GREENHOUSE = "greenhouse"
+
+
+class JobSourceProvider(StrEnum):
+    GREENHOUSE = "greenhouse"
+
+
+class JobImportRunStatus(StrEnum):
+    RUNNING = "running"
+    SUCCEEDED = "succeeded"
+    FAILED = "failed"
+    PARTIAL = "partial"
+
+
+class SourcePostingStatus(StrEnum):
+    OPEN = "open"
+    CLOSED = "closed"
 
 
 class WorkplaceType(StrEnum):

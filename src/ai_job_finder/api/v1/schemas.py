@@ -11,13 +11,16 @@ from ai_job_finder.domain.enums import (
     CareerFactProposalReviewStatus,
     EvidenceTag,
     ExtractionRunStatus,
+    JobImportRunStatus,
     JobLeadSource,
+    JobSourceProvider,
     PostingStatus,
     ProvenanceType,
     Recommendation,
     RemotePreference,
     SourceDocumentExtractionStatus,
     SourceDocumentType,
+    SourcePostingStatus,
     WorkplaceType,
 )
 
@@ -145,9 +148,78 @@ class JobLeadResponse(BaseModel):
     description_normalized: str
     compensation_text: str | None
     discovered_at: datetime
+    source_posting_status: SourcePostingStatus
     posting_status: PostingStatus
     created_at: datetime
     updated_at: datetime
+
+
+class JobSourceConfigurationCreateRequest(BaseModel):
+    provider: JobSourceProvider = JobSourceProvider.GREENHOUSE
+    display_name: str = Field(min_length=1, max_length=200)
+    company_name: str = Field(min_length=1, max_length=200)
+    board_token: str = Field(min_length=1, max_length=200)
+    source_url: str | None = Field(default=None, max_length=500)
+    enabled: bool = True
+
+
+class JobSourceConfigurationUpdateRequest(BaseModel):
+    display_name: str = Field(min_length=1, max_length=200)
+    company_name: str = Field(min_length=1, max_length=200)
+    board_token: str = Field(min_length=1, max_length=200)
+    source_url: str | None = Field(default=None, max_length=500)
+
+
+class JobSourceConfigurationResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    provider: JobSourceProvider
+    display_name: str
+    company_name: str
+    board_token: str
+    source_url: str | None
+    enabled: bool
+    last_successful_sync_at: datetime | None
+    last_sync_status: JobImportRunStatus | None
+    last_sync_error: str | None
+    created_at: datetime
+    updated_at: datetime
+
+
+class JobImportRunResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    source_configuration_id: UUID
+    provider: JobSourceProvider
+    status: JobImportRunStatus
+    started_at: datetime
+    completed_at: datetime | None
+    jobs_fetched: int
+    jobs_created: int
+    jobs_updated: int
+    jobs_unchanged: int
+    jobs_closed: int
+    jobs_failed: int
+    evaluations_created: int
+    evaluation_failures: int
+    error_message: str | None
+    connector_version: str
+
+
+class DiscoveredLeadResponse(BaseModel):
+    job: JobLeadResponse
+    latest_evaluation: JobEvaluationResponse | None
+    source_configuration_id: UUID
+    observation_id: UUID
+    external_post_id: str
+    external_internal_job_id: str | None
+    canonical_url: str | None
+    first_seen_at: datetime
+    last_seen_at: datetime
+    source_updated_at: datetime | None
+    duplicate_hint_key: str
 
 
 class JobLeadStatusPatchRequest(BaseModel):

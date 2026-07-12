@@ -1,11 +1,16 @@
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from uuid import UUID
 
 import pytest
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
 
+from ai_job_finder.application.job_imports import (
+    create_job_source_configuration,
+    run_job_source_import,
+)
 from ai_job_finder.application.services import (
     create_candidate_profile,
     create_career_fact,
@@ -19,16 +24,24 @@ from ai_job_finder.domain.enums import (
     CareerFactLifecycle,
     EvidenceTag,
     JobLeadSource,
+    JobSourceProvider,
     ProvenanceType,
     RemotePreference,
+    SourcePostingStatus,
     WorkplaceType,
 )
 from ai_job_finder.domain.errors import SingleCandidateViolationError
+from ai_job_finder.domain.job_sources import NormalizedJobPosting
 from ai_job_finder.infrastructure.database.models import (
     CandidateProfileModel,
     CareerFactModel,
     JobEvaluationModel,
+    JobImportRunModel,
+    JobLeadModel,
+    JobSourceConfigurationModel,
+    JobSourceObservationModel,
 )
+from ai_job_finder.infrastructure.job_sources.fake import FakeJobSourceConnector
 
 
 def test_job_lead_uniqueness_constraint(session_factory: sessionmaker[Session]) -> None:
@@ -292,3 +305,187 @@ def test_previous_evaluation_history_is_preserved(session_factory: sessionmaker[
             "foundation_v1",
             "candidate_evidence_v2",
         }
+
+
+def _import_posting(
+    external_id: str, *, title: str = "Director, Platform Engineering"
+) -> NormalizedJobPosting:
+    return NormalizedJobPosting(
+        provider=JobSourceProvider.GREENHOUSE,
+        company_name="Acme",
+        title=title,
+        location_text="Remote",
+        workplace_type=WorkplaceType.REMOTE,
+        description_raw="Lead platform engineering with Kubernetes and cloud reliability.",
+        description_normalized="Lead platform engineering with Kubernetes and cloud reliability.",
+        compensation_text=None,
+        source_url=f"https://boards.greenhouse.io/acme/jobs/{external_id}",
+        external_id=external_id,
+        internal_job_id=f"req-{external_id}",
+        source_updated_at=datetime(2026, 1, 2, tzinfo=UTC),
+        raw_payload={"id": external_id},
+    )
+
+
+def test_job_source_uniqueness_constraint(session_factory: sessionmaker[Session]) -> None:
+    with session_factory() as session:
+        session.add_all(
+            [
+                JobSourceConfigurationModel(
+                    id=new_uuid(),
+                    provider=JobSourceProvider.GREENHOUSE.value,
+                    display_name="Acme",
+                    company_name="Acme",
+                    board_token="acme",
+                    source_url=None,
+                    enabled=True,
+                    created_at=utc_now(),
+                    updated_at=utc_now(),
+                ),
+                JobSourceConfigurationModel(
+                    id=new_uuid(),
+                    provider=JobSourceProvider.GREENHOUSE.value,
+                    display_name="Acme Duplicate",
+                    company_name="Acme",
+                    board_token="acme",
+                    source_url=None,
+                    enabled=True,
+                    created_at=utc_now(),
+                    updated_at=utc_now(),
+                ),
+            ]
+        )
+        with pytest.raises(IntegrityError):
+            session.commit()
+        session.rollback()
+
+
+def test_job_source_observation_linkage_idempotency_closure_and_reactivation(
+    session_factory: sessionmaker[Session],
+) -> None:
+    with session_factory() as session:
+        candidate = create_candidate_profile(
+            session,
+            full_name="Jordan Lee",
+            preferred_locations=["Remote"],
+            remote_preference=RemotePreference.FLEXIBLE.value,
+            target_levels=["director"],
+            target_functions=["platform engineering"],
+        )
+        fact = create_career_fact(
+            session,
+            candidate_profile_id=candidate.id,
+            category=CareerFactCategory.PLATFORM.value,
+            source_organization="Example",
+            statement="Built platform",
+            metric=None,
+            technologies=["Kubernetes"],
+            leadership_scope="30 engineers",
+            business_outcome="Faster delivery",
+            approved_wording="Built platform",
+            evidence_tags=[EvidenceTag.PLATFORM_ENGINEERING.value, EvidenceTag.CLOUD.value],
+            provenance_type=ProvenanceType.PROJECT_NOTES.value,
+            source_reference="doc",
+        )
+        transition_career_fact(
+            session,
+            fact_id=fact.id,
+            lifecycle_status=CareerFactLifecycle.VERIFIED.value,
+        )
+        source = create_job_source_configuration(
+            session,
+            provider=JobSourceProvider.GREENHOUSE.value,
+            display_name="Acme",
+            company_name="Acme",
+            board_token="acme",
+            source_url=None,
+        )
+
+        first_run = run_job_source_import(
+            session,
+            source_id=source.id,
+            connector=FakeJobSourceConnector(jobs=[_import_posting("1"), _import_posting("2")]),
+        )
+        second_run = run_job_source_import(
+            session,
+            source_id=source.id,
+            connector=FakeJobSourceConnector(jobs=[_import_posting("1"), _import_posting("2")]),
+        )
+        close_run = run_job_source_import(
+            session,
+            source_id=source.id,
+            connector=FakeJobSourceConnector(jobs=[_import_posting("1")]),
+        )
+        reactivate_run = run_job_source_import(
+            session,
+            source_id=source.id,
+            connector=FakeJobSourceConnector(jobs=[_import_posting("1"), _import_posting("2")]),
+        )
+
+        observations = list(session.query(JobSourceObservationModel).all())
+        jobs = list(session.query(JobLeadModel).all())
+        evaluations = list(session.query(JobEvaluationModel).all())
+        assert first_run.jobs_created == 2
+        assert second_run.jobs_unchanged == 2
+        assert close_run.jobs_closed == 1
+        assert reactivate_run.jobs_updated == 1
+        assert len(observations) == 2
+        assert len(jobs) == 2
+        assert len(evaluations) == 2
+        assert all(observation.job_lead_id for observation in observations)
+        assert {job.source_posting_status for job in jobs} == {SourcePostingStatus.OPEN.value}
+
+
+def test_running_import_uniqueness_is_per_source(
+    session_factory: sessionmaker[Session],
+) -> None:
+    with session_factory() as session:
+        first_source = create_job_source_configuration(
+            session,
+            provider=JobSourceProvider.GREENHOUSE.value,
+            display_name="Acme",
+            company_name="Acme",
+            board_token="acme-a",
+            source_url=None,
+        )
+        second_source = create_job_source_configuration(
+            session,
+            provider=JobSourceProvider.GREENHOUSE.value,
+            display_name="Acme EU",
+            company_name="Acme",
+            board_token="acme-b",
+            source_url=None,
+        )
+
+        session.add_all(
+            [
+                JobImportRunModel(
+                    id=new_uuid(),
+                    source_configuration_id=first_source.id,
+                    provider=JobSourceProvider.GREENHOUSE.value,
+                    status="running",
+                    connector_version="fake",
+                ),
+                JobImportRunModel(
+                    id=new_uuid(),
+                    source_configuration_id=second_source.id,
+                    provider=JobSourceProvider.GREENHOUSE.value,
+                    status="running",
+                    connector_version="fake",
+                ),
+            ]
+        )
+        session.commit()
+
+        session.add(
+            JobImportRunModel(
+                id=new_uuid(),
+                source_configuration_id=first_source.id,
+                provider=JobSourceProvider.GREENHOUSE.value,
+                status="running",
+                connector_version="fake",
+            )
+        )
+        with pytest.raises(IntegrityError):
+            session.commit()
+        session.rollback()

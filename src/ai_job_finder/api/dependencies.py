@@ -8,7 +8,10 @@ from sqlalchemy.orm import Session
 
 from ai_job_finder.application.extraction import CareerFactExtractor
 from ai_job_finder.domain.errors import ExtractionProviderUnavailableError
+from ai_job_finder.domain.job_sources import JobSourceConnector
 from ai_job_finder.infrastructure.database.session import get_db_session
+from ai_job_finder.infrastructure.job_sources.fake import FileBackedFakeJobSourceConnector
+from ai_job_finder.infrastructure.job_sources.greenhouse import GreenhouseJobSourceConnector
 from ai_job_finder.infrastructure.llm.fake import FakeCareerFactExtractor
 from ai_job_finder.infrastructure.llm.vertex import VertexGeminiCareerFactExtractor
 from ai_job_finder.infrastructure.storage import DocumentStorage, LocalDocumentStorage
@@ -52,4 +55,19 @@ def career_fact_extractor_dependency(
         schema_version=settings.extraction_schema_version,
         temperature=settings.extraction_temperature,
         timeout_seconds=settings.extraction_timeout_seconds,
+    )
+
+
+def job_source_connector_dependency(
+    settings: Annotated[Settings, Depends(settings_dependency)],
+) -> JobSourceConnector:
+    if settings.greenhouse_fake_fixture_path is not None:
+        return FileBackedFakeJobSourceConnector(settings.greenhouse_fake_fixture_path)
+    return GreenhouseJobSourceConnector(
+        api_base_url=settings.greenhouse_api_base_url,
+        timeout_seconds=settings.greenhouse_timeout_seconds,
+        transient_retry_count=settings.greenhouse_transient_retry_count,
+        user_agent=settings.greenhouse_user_agent,
+        max_response_bytes=settings.greenhouse_max_response_bytes,
+        max_jobs=settings.greenhouse_max_jobs,
     )

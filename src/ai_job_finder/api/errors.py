@@ -28,6 +28,15 @@ def install_error_handlers(app: FastAPI) -> None:
             "invalid_proposal_edit": 422,
             "invalid_proposal_transition": 409,
             "merge_target_mismatch": 409,
+            "duplicate_job_source": 409,
+            "invalid_job_source": 422,
+            "job_source_disabled": 409,
+            "job_source_provider_failure": 502,
+            "job_source_timeout": 504,
+            "malformed_job_source_payload": 502,
+            "suspicious_empty_job_source_result": 409,
+            "overlapping_job_import": 409,
+            "missing_candidate": 409,
         }
         status_code = status_code_by_code.get(exc.code, 409)
         if not _is_api_request(request):

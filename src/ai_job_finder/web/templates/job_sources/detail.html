@@ -1,0 +1,65 @@
+{% extends 'base.html' %}
+
+{% block content %}
+  <section class="page-header">
+    <div>
+      <h1>{{ source.display_name }}</h1>
+      <p>{{ source.company_name }} · {{ source.provider|humanize }}</p>
+    </div>
+    <div class="actions-row">
+      <form method="post" action="/job-sources/{{ source.id }}/sync"><button type="submit">Sync now</button></form>
+      {% if source.enabled %}
+        <form method="post" action="/job-sources/{{ source.id }}/disable"><button class="button-secondary" type="submit">Disable</button></form>
+      {% else %}
+        <form method="post" action="/job-sources/{{ source.id }}/enable"><button type="submit">Enable</button></form>
+      {% endif %}
+    </div>
+  </section>
+
+  <section class="detail-grid">
+    <article class="panel">
+      <h2>Source</h2>
+      <dl class="detail-list">
+        <div><dt>Board token</dt><dd>{{ source.board_token }}</dd></div>
+        <div><dt>Enabled</dt><dd>{{ 'Yes' if source.enabled else 'No' }}</dd></div>
+        <div><dt>Configured URL</dt><dd>{% if source.source_url %}<a href="{{ source.source_url }}" target="_blank" rel="noopener noreferrer">Open board</a>{% else %}Not provided{% endif %}</dd></div>
+        <div><dt>Active imported jobs</dt><dd>{{ active_imported_count }}</dd></div>
+      </dl>
+    </article>
+    <article class="panel">
+      <h2>Last sync</h2>
+      <dl class="detail-list">
+        <div><dt>Status</dt><dd>{{ source.last_sync_status|humanize if source.last_sync_status else 'Not synced' }}</dd></div>
+        <div><dt>Successful at</dt><dd>{{ source.last_successful_sync_at|datetime if source.last_successful_sync_at else 'Never' }}</dd></div>
+        <div><dt>Error</dt><dd>{{ source.last_sync_error or 'None' }}</dd></div>
+      </dl>
+    </article>
+  </section>
+
+  <section class="panel">
+    <div class="section-row">
+      <h2>Import runs</h2>
+      <a href="/discover?source_id={{ source.id }}">Review imported jobs</a>
+    </div>
+    {% if runs %}
+      <table class="job-table">
+        <thead><tr><th>Status</th><th>Started</th><th>Fetched</th><th>Created</th><th>Updated</th><th>Closed</th><th></th></tr></thead>
+        <tbody>
+          {% for run in runs %}
+            <tr>
+              <td><span class="badge badge-status">{{ run.status|humanize }}</span></td>
+              <td>{{ run.started_at|datetime }}</td>
+              <td>{{ run.jobs_fetched }}</td>
+              <td>{{ run.jobs_created }}</td>
+              <td>{{ run.jobs_updated }}</td>
+              <td>{{ run.jobs_closed }}</td>
+              <td><a href="/job-import-runs/{{ run.id }}">View run</a></td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    {% else %}
+      <p class="muted">No import runs yet.</p>
+    {% endif %}
+  </section>
+{% endblock %}

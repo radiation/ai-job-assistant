@@ -1,0 +1,50 @@
+{% extends 'base.html' %}
+
+{% block content %}
+  <section class="page-header">
+    <div>
+      <h1>Job Sources</h1>
+      <p>Configured public boards for Greenhouse discovery.</p>
+    </div>
+    <a class="button-link" href="/job-sources/new">Add source</a>
+  </section>
+
+  {% if source_items %}
+    <section class="panel">
+      <div class="table-wrap">
+        <table class="job-table">
+          <thead>
+            <tr>
+              <th>Provider</th>
+              <th>Company</th>
+              <th>Token</th>
+              <th>Enabled</th>
+              <th>Last sync</th>
+              <th>Result</th>
+              <th>Active jobs</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for item in source_items %}
+              <tr>
+                <td>{{ item.source.provider|humanize }}</td>
+                <td>{{ item.source.company_name }}</td>
+                <td>{{ item.source.board_token }}</td>
+                <td>{{ 'Yes' if item.source.enabled else 'No' }}</td>
+                <td>{{ item.source.last_successful_sync_at|datetime if item.source.last_successful_sync_at else 'Never' }}</td>
+                <td>{{ item.source.last_sync_status|humanize if item.source.last_sync_status else 'Not synced' }}</td>
+                <td>{{ item.active_imported_count }}</td>
+                <td><a href="/job-sources/{{ item.source.id }}">View</a></td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  {% else %}
+    {% with title='No job sources configured', message='Add a Greenhouse board to start discovery.', action_href='/job-sources/new', action_label='Add source' %}
+      {% include 'components/empty_state.html' %}
+    {% endwith %}
+  {% endif %}
+{% endblock %}
