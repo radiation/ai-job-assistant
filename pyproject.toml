@@ -36,6 +36,8 @@ ai-job-finder-validate = "ai_job_finder.dev:validate_main"
 ai-job-finder-vertex-smoke = "ai_job_finder.live_smoke:main"
 ai-job-finder-sync-source = "ai_job_finder.sync_source:main"
 ai-job-finder-greenhouse-smoke = "ai_job_finder.greenhouse_smoke:main"
+ai-job-finder-detect-source = "ai_job_finder.detect_source:main"
+ai-job-finder-source-detection-smoke = "ai_job_finder.source_detection_smoke:main"
 
 [build-system]
 requires = ["setuptools>=75"]

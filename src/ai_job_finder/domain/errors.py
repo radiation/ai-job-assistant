@@ -73,6 +73,46 @@ class DuplicateJobSourceError(DomainError):
     code = "duplicate_job_source"
 
 
+class UnsafeUrlError(DomainError):
+    code = "unsafe_url"
+
+
+class BlockedRedirectError(DomainError):
+    code = "blocked_redirect"
+
+
+class UnavailablePageError(DomainError):
+    code = "unavailable_page"
+
+
+class UnsupportedContentTypeError(DomainError):
+    code = "unsupported_content_type"
+
+
+class OversizedResponseError(DomainError):
+    code = "oversized_response"
+
+
+class NoProviderDetectedError(DomainError):
+    code = "no_provider_detected"
+
+
+class AmbiguousSourceDetectionError(DomainError):
+    code = "ambiguous_candidates"
+
+
+class GreenhouseValidationUnavailableError(DomainError):
+    code = "greenhouse_validation_unavailable"
+
+
+class SourceDetectionApprovalError(DomainError):
+    code = "source_detection_approval_failed"
+
+
+class SourceSyncAfterCreationError(DomainError):
+    code = "sync_failure_after_source_creation"
+
+
 class InvalidJobSourceError(DomainError):
     code = "invalid_job_source"
 

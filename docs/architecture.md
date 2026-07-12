@@ -6,7 +6,7 @@ The current vertical slice extends that foundation with a reviewed candidate kno
 
 The document-assisted ingestion slice adds uploadable source documents, deterministic text extraction, provider-neutral LLM fact extraction, and a separate proposal review queue. AI output is never canonical evidence until a reviewer accepts or merges a proposal, and accepted proposals become draft career facts rather than verified evidence.
 
-The Greenhouse discovery slice adds configured public job-board sources, provider-neutral job normalization, idempotent source observations, import-run history, source posting closure/reactivation, and a ranked review queue. Scheduling and background workers are deliberately deferred; sync is explicit through web, API, or CLI entry points.
+The Greenhouse discovery slice adds deterministic source detection, configured public job-board sources, provider-neutral job normalization, idempotent source observations, import-run history, source posting closure/reactivation, and a ranked review queue. Scheduling and background workers are deliberately deferred; detection approval and sync are explicit through web, API, or CLI entry points.
 
 ## Layering
 
@@ -16,6 +16,7 @@ The Greenhouse discovery slice adds configured public job-board sources, provide
 - `infrastructure.llm`: provider-specific adapters for direct model inference. Domain and application code depend only on the extractor protocol.
 - `infrastructure.storage`: local document storage behind a small storage interface; cloud storage can replace it later without changing application services.
 - `infrastructure.job_sources`: provider-specific job source connectors. The Greenhouse adapter owns HTTP, timeout/retry behavior, response parsing, and HTML-to-plain-text normalization.
+- `infrastructure.public_fetcher`: SSRF-safe public-page fetching for source detection. It validates schemes, hosts, DNS results, redirects, ports, content type, byte limits, retries, and timeouts before application services inspect bounded page/script text.
 - `api`: versioned HTTP endpoints and transport schemas.
 
 ## Request Flow
@@ -39,6 +40,7 @@ erDiagram
     JobLead ||--o{ JobEvaluation : produces
     JobSourceConfiguration ||--o{ JobImportRun : records
     JobSourceConfiguration ||--o{ JobSourceObservation : observes
+    JobSourceConfiguration ||--o{ SourceDetectionRun : created_from
     JobLead ||--o{ JobSourceObservation : linked_from
 
     CandidateProfile {
@@ -155,6 +157,21 @@ erDiagram
         int evaluations_created
     }
 
+    SourceDetectionRun {
+        uuid id PK
+        string company_name
+        string input_url
+        string normalized_url
+        string final_url
+        string status
+        string detected_provider
+        json candidate_tokens
+        string validated_token
+        int validated_job_count
+        json evidence
+        uuid created_source_configuration_id FK
+    }
+
     JobSourceObservation {
         uuid id PK
         uuid source_configuration_id FK
@@ -231,6 +248,10 @@ The current scoring version is `candidate_evidence_v2`.
 ## Greenhouse Discovery
 
 `JobSourceConnector` is the provider-neutral boundary. Application services call `fetch_jobs(source)` and receive normalized postings; infrastructure adapters own provider HTTP details. The Greenhouse connector uses the public Job Board API with no authentication, an explicit timeout, bounded retry for transient failures, an application user agent, `content=true` to fetch full job content, and hard limits for response size and maximum job count.
+
+Source detection is a separate application service. It persists a `SourceDetectionRun` before work starts and always moves it to a terminal state. Detection can inspect one supplied public careers URL through the SSRF-safe fetcher, bounded linked scripts, or a small deterministic set of generated company-name candidates. It records concise evidence categories, candidate tokens, validation outcomes, sample titles, and existing-source warnings, but never stores raw page HTML.
+
+Greenhouse validation reuses the same connector boundary through a read-only `validate_board_token(token)` method. Validation distinguishes invalid tokens, valid empty boards, malformed responses, and provider unavailability. Multiple validated tokens mark the run `ambiguous`; source creation remains a separate approval step and may optionally trigger the existing import service.
 
 Greenhouse HTML is preserved in source provenance but converted to safe plain text for scoring. Jinja autoescaping handles rendered values in the web console; source markup is never trusted or rendered back into the UI. Source URLs are normalized to `http` and `https` only.
 

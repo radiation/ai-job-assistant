@@ -35,6 +35,7 @@ from ai_job_finder.domain.enums import (
     ProvenanceType,
     Recommendation,
     RemotePreference,
+    SourceDetectionRunStatus,
     SourceDocumentExtractionStatus,
     SourceDocumentType,
     SourcePostingStatus,
@@ -435,6 +436,9 @@ class JobSourceConfigurationModel(Base):
     observations: Mapped[list[JobSourceObservationModel]] = relationship(
         back_populates="source_configuration", cascade="all, delete-orphan"
     )
+    detection_runs: Mapped[list[SourceDetectionRunModel]] = relationship(
+        back_populates="created_source_configuration"
+    )
 
     def to_snapshot(self) -> JobSourceConfigurationSnapshot:
         return JobSourceConfigurationSnapshot(
@@ -451,6 +455,52 @@ class JobSourceConfigurationModel(Base):
             created_at=self.created_at,
             updated_at=self.updated_at,
         )
+
+
+class SourceDetectionRunModel(Base):
+    __tablename__ = "source_detection_runs"
+    __table_args__ = (
+        CheckConstraint(
+            "((status = 'running') AND completed_at IS NULL) OR "
+            "((status <> 'running') AND completed_at IS NOT NULL)",
+            name="source_detection_runs_completed_at_consistent",
+        ),
+        Index("ix_source_detection_runs_status", "status"),
+        Index("ix_source_detection_runs_started_at", "started_at"),
+        Index(
+            "ix_source_detection_runs_created_source_configuration_id",
+            "created_source_configuration_id",
+        ),
+    )
+
+    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True)
+    company_name: Mapped[str | None] = mapped_column(String(200))
+    input_url: Mapped[str | None] = mapped_column(String(500))
+    normalized_url: Mapped[str | None] = mapped_column(String(500))
+    final_url: Mapped[str | None] = mapped_column(String(500))
+    status: Mapped[str] = mapped_column(
+        String(30), default=SourceDetectionRunStatus.RUNNING.value, nullable=False
+    )
+    detected_provider: Mapped[str | None] = mapped_column(String(50))
+    candidate_tokens: Mapped[list[dict[str, Any]]] = mapped_column(JSON, default=list)
+    validated_token: Mapped[str | None] = mapped_column(String(200))
+    validated_company_name: Mapped[str | None] = mapped_column(String(200))
+    validated_job_count: Mapped[int | None] = mapped_column(Integer)
+    evidence: Mapped[list[dict[str, Any]]] = mapped_column(JSON, default=list)
+    error_message: Mapped[str | None] = mapped_column(Text)
+    created_source_configuration_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("job_source_configurations.id", ondelete="SET NULL")
+    )
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utc_now, onupdate=utc_now
+    )
+
+    created_source_configuration: Mapped[JobSourceConfigurationModel | None] = relationship(
+        back_populates="detection_runs"
+    )
 
 
 class JobImportRunModel(Base):

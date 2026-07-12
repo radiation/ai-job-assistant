@@ -9,11 +9,16 @@ from sqlalchemy.orm import Session
 from ai_job_finder.application.extraction import CareerFactExtractor
 from ai_job_finder.domain.errors import ExtractionProviderUnavailableError
 from ai_job_finder.domain.job_sources import JobSourceConnector
+from ai_job_finder.domain.source_detection import GreenhouseBoardValidator, PublicPageFetcher
 from ai_job_finder.infrastructure.database.session import get_db_session
 from ai_job_finder.infrastructure.job_sources.fake import FileBackedFakeJobSourceConnector
 from ai_job_finder.infrastructure.job_sources.greenhouse import GreenhouseJobSourceConnector
 from ai_job_finder.infrastructure.llm.fake import FakeCareerFactExtractor
 from ai_job_finder.infrastructure.llm.vertex import VertexGeminiCareerFactExtractor
+from ai_job_finder.infrastructure.public_fetcher import (
+    PublicPageFetcherConfig,
+    SafePublicPageFetcher,
+)
 from ai_job_finder.infrastructure.storage import DocumentStorage, LocalDocumentStorage
 from ai_job_finder.settings import Settings, get_settings
 
@@ -70,4 +75,26 @@ def job_source_connector_dependency(
         user_agent=settings.greenhouse_user_agent,
         max_response_bytes=settings.greenhouse_max_response_bytes,
         max_jobs=settings.greenhouse_max_jobs,
+    )
+
+
+def greenhouse_board_validator_dependency(
+    settings: Annotated[Settings, Depends(settings_dependency)],
+) -> GreenhouseBoardValidator:
+    connector = job_source_connector_dependency(settings)
+    return connector  # type: ignore[return-value]
+
+
+def public_page_fetcher_dependency(
+    settings: Annotated[Settings, Depends(settings_dependency)],
+) -> PublicPageFetcher:
+    return SafePublicPageFetcher(
+        PublicPageFetcherConfig(
+            timeout_seconds=settings.source_detection_timeout_seconds,
+            transient_retry_count=settings.source_detection_transient_retry_count,
+            max_response_bytes=settings.source_detection_max_response_bytes,
+            max_redirects=settings.source_detection_max_redirects,
+            allowed_ports=settings.source_detection_allowed_ports,
+            user_agent=settings.greenhouse_user_agent,
+        )
     )

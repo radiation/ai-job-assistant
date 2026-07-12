@@ -1,0 +1,31 @@
+{% extends 'base.html' %}
+
+{% block content %}
+  <section class="page-header">
+    <div>
+      <h1>Detect Job Source</h1>
+      <p>Check a careers page or conservative company token candidates for Greenhouse.</p>
+    </div>
+    <a class="button-link button-secondary" href="/job-source-detections">Detection runs</a>
+  </section>
+
+  <section class="panel narrow-panel">
+    <form class="stack-form" method="post" action="/job-sources/detect">
+      <div class="field-group">
+        <label for="company_name">Company name</label>
+        <input id="company_name" name="company_name" value="{{ form_values.company_name }}" />
+        {% if form_errors.company_name %}<p class="form-error">{{ form_errors.company_name }}</p>{% endif %}
+      </div>
+      <div class="field-group">
+        <label for="input_url">Careers URL</label>
+        <input id="input_url" name="input_url" value="{{ form_values.input_url }}" />
+        {% if form_errors.input_url %}<p class="form-error">{{ form_errors.input_url }}</p>{% endif %}
+      </div>
+      <div class="field-group">
+        <label for="brand_alias">Known brand alias</label>
+        <input id="brand_alias" name="brand_alias" value="{{ form_values.brand_alias }}" />
+      </div>
+      <button type="submit">Run detection</button>
+    </form>
+  </section>
+{% endblock %}

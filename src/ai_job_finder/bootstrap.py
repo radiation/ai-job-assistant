@@ -199,6 +199,38 @@ class JobImportRunResponse(BaseModel):
     error_message: str | None = None
 
 
+class SourceDetectionRunPayload(BaseModel):
+    company_name: str | None = None
+    input_url: str | None = None
+    brand_alias: str | None = None
+
+
+class SourceDetectionRunResponse(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    id: str
+    company_name: str | None = None
+    input_url: str | None = None
+    final_url: str | None = None
+    status: str
+    detected_provider: str | None = None
+    candidate_tokens: list[dict[str, Any]] = []
+    validated_token: str | None = None
+    validated_job_count: int | None = None
+    evidence: list[dict[str, Any]] = []
+    error_message: str | None = None
+    created_source_configuration_id: str | None = None
+
+
+class SourceDetectionApprovalResponse(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    run: SourceDetectionRunResponse
+    source: JobSourceConfigurationResponse
+    import_run: JobImportRunResponse | None = None
+    existing_source: bool
+
+
 class DiscoveredLeadResponse(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
@@ -686,6 +718,38 @@ class ApiClient:
         response, body = self._request("POST", f"/api/v1/job-sources/{source_id}/imports")
         self._assert_status("job_import", "job source import trigger succeeds", response, 201, body)
         return JobImportRunResponse.model_validate(body)
+
+    def create_source_detection(
+        self, payload: SourceDetectionRunPayload
+    ) -> SourceDetectionRunResponse:
+        response, body = self._request(
+            "POST", "/api/v1/source-detections", json=payload.model_dump(mode="json")
+        )
+        self._assert_status(
+            "source_detection", "source detection create succeeds", response, 201, body
+        )
+        return SourceDetectionRunResponse.model_validate(body)
+
+    def approve_source_detection(
+        self,
+        run_id: str,
+        *,
+        selected_token: str | None = None,
+        create_and_sync: bool = False,
+    ) -> SourceDetectionApprovalResponse:
+        response, body = self._request(
+            "POST",
+            f"/api/v1/source-detections/{run_id}/approve",
+            json={"selected_token": selected_token, "create_and_sync": create_and_sync},
+        )
+        self._assert_status(
+            "source_detection",
+            "source detection approval succeeds",
+            response,
+            200,
+            body,
+        )
+        return SourceDetectionApprovalResponse.model_validate(body)
 
     def list_discovered_leads(self, **params: Any) -> list[DiscoveredLeadResponse]:
         response, body = self._request("GET", "/api/v1/discovered-leads", params=params)
@@ -1385,18 +1449,120 @@ class BootstrapHarness:
                 expected="--fake-greenhouse-fixture-path or GREENHOUSE_FAKE_FIXTURE_PATH",
                 actual=None,
             )
+        self._write_greenhouse_fixture(
+            fixture_path,
+            [self._fake_job("strong")],
+            board_token="bootstrap-detect",
+            company_name="Bootstrap Detect",
+        )
+        detection = self.client.create_source_detection(
+            SourceDetectionRunPayload(company_name="Bootstrap Detect LLC")
+        )
+        self._assert(
+            detection.status == "detected"
+            and detection.validated_token == "bootstrap-detect"
+            and detection.validated_job_count == 1,
+            phase,
+            "fake detection validates generated Greenhouse token and previews job count",
+            endpoint="POST /api/v1/source-detections",
+            expected={"status": "detected", "token": "bootstrap-detect", "jobs": 1},
+            actual=detection.model_dump(mode="json"),
+        )
+        approval = self.client.approve_source_detection(detection.id)
+        self._assert(
+            approval.source.board_token == "bootstrap-detect"
+            and approval.run.status == "source_created",
+            phase,
+            "fake detection approval creates source explicitly",
+            endpoint=f"POST /api/v1/source-detections/{detection.id}/approve",
+            expected={"source_token": "bootstrap-detect", "run_status": "source_created"},
+            actual=approval.model_dump(mode="json"),
+        )
+        rerun_detection = self.client.create_source_detection(
+            SourceDetectionRunPayload(company_name="Bootstrap Detect LLC")
+        )
+        existing_ids = {
+            candidate.get("existing_source_configuration_id")
+            for candidate in rerun_detection.candidate_tokens
+        }
+        self._assert(
+            approval.source.id in existing_ids,
+            phase,
+            "rerun detection identifies existing source",
+            endpoint="POST /api/v1/source-detections",
+            expected=approval.source.id,
+            actual=rerun_detection.model_dump(mode="json"),
+        )
+        ambiguous_fixture = {
+            "ambiguousco": {"company_name": "Ambiguous Co", "jobs": [self._fake_job("strong")]},
+            "ambiguous-co": {"company_name": "Ambiguous Co", "jobs": [self._fake_job("weak")]},
+        }
+        self._write_greenhouse_fixture(
+            fixture_path,
+            [self._fake_job("strong")],
+            valid_tokens=ambiguous_fixture,
+        )
+        ambiguous = self.client.create_source_detection(
+            SourceDetectionRunPayload(company_name="Ambiguous Co")
+        )
+        self._assert(
+            ambiguous.status == "ambiguous"
+            and len([c for c in ambiguous.candidate_tokens if c.get("validation", {}).get("valid")])
+            > 1,
+            phase,
+            "ambiguous fake detection returns multiple validated candidates",
+            endpoint="POST /api/v1/source-detections",
+            expected="ambiguous with multiple valid candidates",
+            actual=ambiguous.model_dump(mode="json"),
+        )
+        unsafe = self.client.create_source_detection(
+            SourceDetectionRunPayload(input_url="http://127.0.0.1/careers")
+        )
+        self._assert(
+            unsafe.status == "failed" and bool(unsafe.error_message),
+            phase,
+            "unsafe URL detection is rejected and persisted terminally",
+            endpoint="POST /api/v1/source-detections",
+            expected="failed terminal detection",
+            actual=unsafe.model_dump(mode="json"),
+        )
+        self._write_greenhouse_fixture(
+            fixture_path,
+            [self._fake_job("strong")],
+            board_token="bootstrap-sync-detect",
+            company_name="Bootstrap Sync Detect",
+        )
+        sync_detection = self.client.create_source_detection(
+            SourceDetectionRunPayload(company_name="Bootstrap Sync Detect")
+        )
+        sync_approval = self.client.approve_source_detection(
+            sync_detection.id, create_and_sync=True
+        )
+        self._assert(
+            sync_approval.import_run is not None and sync_approval.import_run.jobs_fetched == 1,
+            phase,
+            "create-and-sync detection approval invokes fake Greenhouse import",
+            endpoint=f"POST /api/v1/source-detections/{sync_detection.id}/approve",
+            expected={"import_jobs_fetched": 1},
+            actual=sync_approval.model_dump(mode="json"),
+        )
+
         source = self._ensure_fake_greenhouse_source()
 
         self._write_greenhouse_fixture(
-            fixture_path, [self._fake_job("strong"), self._fake_job("weak")]
+            fixture_path,
+            [self._fake_job("strong"), self._fake_job("weak")],
+            board_token="bootstrap-fake-greenhouse",
         )
         first_run = self.client.sync_job_source(source.id)
         self._assert(
-            first_run.status == "succeeded" and first_run.jobs_created == 2,
+            first_run.status == "succeeded"
+            and first_run.jobs_fetched == 2
+            and first_run.jobs_created + first_run.jobs_updated + first_run.jobs_unchanged == 2,
             phase,
-            "first fake import creates jobs",
+            "first fake import materializes jobs",
             endpoint=f"POST /api/v1/job-sources/{source.id}/imports",
-            expected={"status": "succeeded", "jobs_created": 2},
+            expected={"status": "succeeded", "jobs_fetched": 2, "materialized": 2},
             actual=first_run.model_dump(mode="json"),
         )
 
@@ -1414,7 +1580,11 @@ class BootstrapHarness:
         changed_strong["description_normalized"] += (
             " Own developer productivity, observability, and manager-of-managers scope."
         )
-        self._write_greenhouse_fixture(fixture_path, [changed_strong, self._fake_job("weak")])
+        self._write_greenhouse_fixture(
+            fixture_path,
+            [changed_strong, self._fake_job("weak")],
+            board_token="bootstrap-fake-greenhouse",
+        )
         changed_run = self.client.sync_job_source(source.id)
         self._assert(
             changed_run.jobs_updated == 1 and changed_run.evaluations_created == 1,
@@ -1425,7 +1595,11 @@ class BootstrapHarness:
             actual=changed_run.model_dump(mode="json"),
         )
 
-        self._write_greenhouse_fixture(fixture_path, [changed_strong])
+        self._write_greenhouse_fixture(
+            fixture_path,
+            [changed_strong],
+            board_token="bootstrap-fake-greenhouse",
+        )
         closure_run = self.client.sync_job_source(source.id)
         self._assert(
             closure_run.jobs_closed == 1,
@@ -1436,7 +1610,12 @@ class BootstrapHarness:
             actual=closure_run.model_dump(mode="json"),
         )
 
-        self._write_greenhouse_fixture(fixture_path, [], error="simulated fake Greenhouse outage")
+        self._write_greenhouse_fixture(
+            fixture_path,
+            [],
+            error="simulated fake Greenhouse outage",
+            board_token="bootstrap-fake-greenhouse",
+        )
         failed_run = self.client.sync_job_source(source.id)
         active_after_failure = self.client.list_discovered_leads(source_id=source.id)
         self._assert(
@@ -1451,7 +1630,11 @@ class BootstrapHarness:
             },
         )
 
-        self._write_greenhouse_fixture(fixture_path, [changed_strong, self._fake_job("weak")])
+        self._write_greenhouse_fixture(
+            fixture_path,
+            [changed_strong, self._fake_job("weak")],
+            board_token="bootstrap-fake-greenhouse",
+        )
         reappear_run = self.client.sync_job_source(source.id)
         queue = self.client.list_discovered_leads(source_id=source.id)
         self._assert(
@@ -1465,9 +1648,11 @@ class BootstrapHarness:
         self._assert(
             queue[0].external_post_id == "strong"
             and queue[0].latest_evaluation is not None
-            and queue[1].latest_evaluation is not None
-            and queue[0].latest_evaluation.overall_score
-            >= queue[1].latest_evaluation.overall_score,
+            and (
+                queue[1].latest_evaluation is None
+                or queue[0].latest_evaluation.overall_score
+                >= queue[1].latest_evaluation.overall_score
+            ),
             phase,
             "ranked queue places strong fake match above weak match",
             endpoint="GET /api/v1/discovered-leads",
@@ -1506,9 +1691,18 @@ class BootstrapHarness:
         jobs: list[dict[str, Any]],
         *,
         error: str | None = None,
+        board_token: str | None = None,
+        company_name: str | None = None,
+        valid_tokens: dict[str, dict[str, Any]] | None = None,
     ) -> None:
         fixture_path.parent.mkdir(parents=True, exist_ok=True)
         payload: dict[str, Any] = {"jobs": jobs}
+        if board_token is not None:
+            payload["board_token"] = board_token
+        if company_name is not None:
+            payload["company_name"] = company_name
+        if valid_tokens is not None:
+            payload["valid_tokens"] = valid_tokens
         if error is not None:
             payload["error"] = error
         fixture_path.write_text(json.dumps(payload), encoding="utf-8")

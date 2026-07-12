@@ -60,7 +60,7 @@ uv run ai-job-finder-validate
 - `ai-job-finder-fast-checks` runs `ruff check .`, `ruff format --check .`, and `mypy .`.
 - `ai-job-finder-bootstrap` exercises the candidate knowledge-base slice end-to-end through the public HTTP API and prints a concise acceptance summary.
 - `ai-job-finder-bootstrap --document-ingestion` optionally exercises upload, extraction, proposal acceptance, rejection, and duplicate upload handling. Configure the running app with `EXTRACTION_ENABLED=true` and `EXTRACTION_PROVIDER=fake` for this local fake-extractor phase.
-- `ai-job-finder-bootstrap --fake-greenhouse` optionally exercises fake Greenhouse source creation, idempotent import, update, closure, failed import safety, reactivation, and ranked discovery. Start the app with `GREENHOUSE_FAKE_FIXTURE_PATH=/tmp/ai-job-finder-fake-greenhouse.json` and pass the same path through `--fake-greenhouse-fixture-path` if it differs from the environment.
+- `ai-job-finder-bootstrap --fake-greenhouse` optionally exercises fake Greenhouse source detection, approval, existing-source detection, ambiguity, unsafe URL rejection, create-and-sync, source creation, idempotent import, update, closure, failed import safety, reactivation, and ranked discovery. Start the app with `GREENHOUSE_FAKE_FIXTURE_PATH=/tmp/ai-job-finder-fake-greenhouse.json` and pass the same path through `--fake-greenhouse-fixture-path` if it differs from the environment.
 - `ai-job-finder-sync-source --source-id <uuid>` runs the same source import service used by the web and API sync action.
 - `ai-job-finder-greenhouse-smoke` is skipped unless `AI_JOB_FINDER_RUN_GREENHOUSE_SMOKE=true`; when enabled it performs one fetch-only call to a configured public Greenhouse board token and does not persist jobs.
 - `ai-job-finder-vertex-smoke` is skipped unless `AI_JOB_FINDER_RUN_VERTEX_SMOKE=true`; when enabled it makes one live Vertex call against a small fixture and prints model, prompt version, token usage, and proposal count.
@@ -113,7 +113,23 @@ HTMX is used only for job status updates, evaluation refresh on the detail page,
 
 ## Greenhouse Job Discovery
 
-This slice supports only the official public Greenhouse Job Board API. It does not use Harvest APIs, customer credentials, application submission endpoints, HTML scraping, browser automation, scheduling, referrals, resume generation, or application submission.
+This slice supports only deterministic Greenhouse public source detection and the official public Greenhouse Job Board API. It does not use Harvest APIs, customer credentials, application submission endpoints, broad crawling, search engines, LinkedIn, browser automation, JavaScript execution, scheduling, referrals, resume generation, or application submission.
+
+Source detection starts from a company name, a careers URL, or both. A supplied URL is the primary target. Company-name-only detection generates a small bounded set of conservative token candidates, including lowercased, punctuation-removed, whitespace-collapsed, legal-suffix-stripped, and explicitly supplied alias variants. Generated candidates are shown only after validating through Greenhouse; the app returns `not_detected` or `ambiguous` instead of guessing.
+
+Use `/job-sources/detect`, `/job-source-detections`, `/job-source-detections/{run_id}`, the API endpoints under `/api/v1/source-detections`, or the CLI:
+
+```bash
+uv run ai-job-finder-detect-source \
+	--company "Duolingo" \
+	--url https://careers.duolingo.com
+```
+
+Detection persists a `SourceDetectionRun` with terminal status `detected`, `not_detected`, `ambiguous`, `failed`, or `source_created`. The preview shows provider, company input, original/final URL, validated token, job count, sample titles, evidence, observed-versus-generated source, and whether a source already exists. Creating a source is never automatic: use `--create`, `--create-and-sync`, the approval API, or the explicit web buttons. Ambiguous runs require selecting a validated token; the app does not auto-select by job count.
+
+Supported Greenhouse signals are deterministic references to `boards-api.greenhouse.io/v1/boards/<token>/jobs`, `/departments`, `/offices`, `boards.greenhouse.io/<token>`, `job-boards.greenhouse.io/<token>`, and embedded board-token configuration. Generic mentions of Greenhouse are ignored. Linked scripts are inspected only when page HTML does not already yield a validated token, with same-origin scripts by default, known Greenhouse hosts allowed, maximum script count, per-script bytes, total bytes, no recursion, no execution, and the same SSRF checks as page fetches.
+
+The public-page fetcher fails closed: it allows only HTTP/HTTPS, rejects embedded credentials, blocks localhost, loopback, private, link-local, multicast, metadata and other non-public addresses after DNS resolution, validates every redirect target, caps redirects, restricts ports to normal web ports unless configured, sets explicit timeouts, caps bytes, validates content type, retries only transient failures, and never sends cookies or authenticated sessions.
 
 To identify a Greenhouse board token, open a public board URL such as `https://boards.greenhouse.io/acme`; the token is the final path segment, `acme`. Configure it from `/job-sources/new` or through `POST /api/v1/job-sources` with provider `greenhouse`, company name, board token, and optional source URL.
 
@@ -146,7 +162,17 @@ AI_JOB_FINDER_GREENHOUSE_SMOKE_COMPANY=Acme \
 uv run ai-job-finder-greenhouse-smoke
 ```
 
+Optional read-only source-detection live smoke:
+
+```bash
+AI_JOB_FINDER_RUN_SOURCE_DETECTION_SMOKE=true \
+AI_JOB_FINDER_SOURCE_DETECTION_SMOKE_URL=https://careers.example.com \
+uv run ai-job-finder-source-detection-smoke
+```
+
 Normal tests, hooks, and CI do not call live Greenhouse.
+
+Lever and Ashby detection are deferred. Future providers can add provider-specific signal extraction and validation behind the same detection-run and approval boundary without adding broad discovery or automatic source creation.
 
 Same-source overlap is rejected explicitly. Only one `running` import run may exist per source at a time, and stale overlap messages include the existing run start time for diagnosis. Different sources can still sync independently.
 
@@ -434,7 +460,7 @@ Useful options:
 - `--verbose` prints HTTP progress while the harness runs.
 - `--json-output path/to/file.json` writes structured run metadata and per-phase outcomes.
 - `--document-ingestion` runs the optional fake-extractor document-ingestion phase. Start the app with `EXTRACTION_ENABLED=true EXTRACTION_PROVIDER=fake` for this phase.
-- `--fake-greenhouse` runs the optional fake-Greenhouse import phase. Start the app with `GREENHOUSE_FAKE_FIXTURE_PATH=/tmp/ai-job-finder-fake-greenhouse.json` so the server uses the file-backed fake connector, then run the harness with the same path.
+- `--fake-greenhouse` runs the optional fake-Greenhouse detection and import phase. Start the app with `GREENHOUSE_FAKE_FIXTURE_PATH=/tmp/ai-job-finder-fake-greenhouse.json` so the server uses the file-backed fake connector, then run the harness with the same path.
 
 Expected summary output is concise:
 
@@ -467,7 +493,7 @@ Safety model:
 - Destructive reset is also refused for non-localhost targets unless `--allow-non-localhost-destructive` is supplied.
 - The harness does not delete unrelated jobs or user-created records.
 - The optional document-ingestion phase uses public upload and proposal-review API routes. It does not require live Vertex access when the app is configured with the fake extractor.
-- The optional fake-Greenhouse phase uses public source/import/discovery API routes. It does not call live Greenhouse when the app is configured with the file-backed fake connector.
+- The optional fake-Greenhouse phase uses public source-detection/source/import/discovery API routes. It does not call live Greenhouse when the app is configured with the file-backed fake connector.
 
 JSON output captures:
 
@@ -519,3 +545,4 @@ If you need to bypass hooks temporarily, use Git's standard `--no-verify` flag f
 - [Architecture Decision 0002](docs/decisions/0002-candidate-knowledge-base.md)
 - [Architecture Decision 0003](docs/decisions/0003-document-assisted-career-fact-ingestion.md)
 - [Architecture Decision 0004](docs/decisions/0004-greenhouse-job-discovery-ingestion.md)
+- [Architecture Decision 0005](docs/decisions/0005-deterministic-greenhouse-source-detection.md)

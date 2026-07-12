@@ -39,6 +39,14 @@ class Settings(BaseSettings):
     greenhouse_max_jobs: int | None = 2_000
     greenhouse_fake_fixture_path: Path | None = None
     job_source_stale_after_seconds: int = 3600
+    source_detection_timeout_seconds: float = 8.0
+    source_detection_transient_retry_count: int = 1
+    source_detection_max_response_bytes: int = 1_000_000
+    source_detection_max_redirects: int = 5
+    source_detection_allowed_ports: list[int] = [80, 443]
+    source_detection_max_linked_scripts: int = 4
+    source_detection_max_script_bytes: int = 200_000
+    source_detection_total_script_bytes: int = 500_000
 
     @field_validator("greenhouse_fake_fixture_path", mode="before")
     @classmethod

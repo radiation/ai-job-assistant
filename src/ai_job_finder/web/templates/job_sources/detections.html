@@ -1,0 +1,40 @@
+{% extends 'base.html' %}
+
+{% block content %}
+  <section class="page-header">
+    <div>
+      <h1>Source Detections</h1>
+      <p>Recent deterministic Greenhouse source detection runs.</p>
+    </div>
+    <a class="button-link" href="/job-sources/detect">Detect source</a>
+  </section>
+
+  {% if runs %}
+    <section class="panel">
+      <div class="table-wrap">
+        <table class="job-table">
+          <thead>
+            <tr><th>Status</th><th>Company</th><th>URL</th><th>Token</th><th>Jobs</th><th>Started</th><th></th></tr>
+          </thead>
+          <tbody>
+            {% for run in runs %}
+              <tr>
+                <td><span class="badge badge-status">{{ run.status|humanize }}</span></td>
+                <td>{{ run.company_name or 'Not provided' }}</td>
+                <td>{{ run.final_url or run.input_url or 'Company candidates only' }}</td>
+                <td>{{ run.validated_token or 'None' }}</td>
+                <td>{{ run.validated_job_count if run.validated_job_count is not none else 'Unknown' }}</td>
+                <td>{{ run.started_at|datetime }}</td>
+                <td><a href="/job-source-detections/{{ run.id }}">View</a></td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  {% else %}
+    {% with title='No detection runs yet', message='Run a Greenhouse source detection to preview candidates before creating a source.', action_href='/job-sources/detect', action_label='Detect source' %}
+      {% include 'components/empty_state.html' %}
+    {% endwith %}
+  {% endif %}
+{% endblock %}

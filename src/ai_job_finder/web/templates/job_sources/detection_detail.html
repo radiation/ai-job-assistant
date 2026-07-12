@@ -1,0 +1,104 @@
+{% extends 'base.html' %}
+
+{% block content %}
+  <section class="page-header">
+    <div>
+      <h1>Source Detection</h1>
+      <p>{{ run.company_name or 'No company supplied' }} · <span class="badge badge-status">{{ run.status|humanize }}</span></p>
+    </div>
+    <div class="actions-row">
+      <a class="button-link button-secondary" href="/job-source-detections">All runs</a>
+      <a class="button-link" href="/job-sources/detect">Detect another</a>
+    </div>
+  </section>
+
+  {% if manual_error %}
+    <div class="flash flash-error">{{ manual_error }}</div>
+  {% endif %}
+
+  <section class="detail-grid">
+    <article class="panel">
+      <h2>Preview</h2>
+      <dl class="detail-list">
+        <div><dt>Provider</dt><dd>{{ run.detected_provider|humanize if run.detected_provider else 'None' }}</dd></div>
+        <div><dt>Original URL</dt><dd>{{ run.input_url or 'Not supplied' }}</dd></div>
+        <div><dt>Final URL</dt><dd>{{ run.final_url or 'Not available' }}</dd></div>
+        <div><dt>Validated token</dt><dd>{{ run.validated_token or 'Not selected' }}</dd></div>
+        <div><dt>Job count</dt><dd>{{ run.validated_job_count if run.validated_job_count is not none else 'Unknown' }}</dd></div>
+        <div><dt>Created source</dt><dd>{% if run.created_source_configuration_id %}<a href="/job-sources/{{ run.created_source_configuration_id }}">Open source</a>{% else %}Not created{% endif %}</dd></div>
+      </dl>
+      {% if run.error_message %}<p class="form-error">{{ run.error_message }}</p>{% endif %}
+    </article>
+
+    <article class="panel">
+      <h2>Manual Token</h2>
+      <form class="stack-form" method="post" action="/job-source-detections/{{ run.id }}/validate-token">
+        <div class="field-group"><label for="board_token">Greenhouse token</label><input id="board_token" name="board_token" /></div>
+        <button type="submit">Validate token</button>
+      </form>
+      {% if manual_candidate %}
+        <dl class="detail-list compact-list">
+          <div><dt>Token</dt><dd>{{ manual_candidate.token }}</dd></div>
+          <div><dt>Status</dt><dd>{{ manual_candidate.validation.status|humanize }}</dd></div>
+          <div><dt>Jobs</dt><dd>{{ manual_candidate.validation.job_count if manual_candidate.validation.job_count is not none else 'Unknown' }}</dd></div>
+          <div><dt>Existing source</dt><dd>{{ manual_candidate.existing_source_configuration_id or 'No' }}</dd></div>
+        </dl>
+      {% endif %}
+    </article>
+  </section>
+
+  <section class="panel">
+    <div class="section-row"><h2>Candidates</h2><p class="muted">Observed tokens may be invalid; generated tokens are shown only after validation.</p></div>
+    {% if run.candidate_tokens %}
+      <form class="stack-form" method="post" action="/job-source-detections/{{ run.id }}/approve">
+        <div class="table-wrap">
+          <table class="job-table">
+            <thead><tr><th>Select</th><th>Token</th><th>Source</th><th>Validation</th><th>Jobs</th><th>Samples</th><th>Existing source</th></tr></thead>
+            <tbody>
+              {% for candidate in run.candidate_tokens %}
+                <tr>
+                  <td>{% if candidate.validation.valid %}<input type="radio" name="selected_token" value="{{ candidate.token }}" {% if candidate.token == run.validated_token %}checked{% endif %} />{% else %}<span class="muted">Invalid</span>{% endif %}</td>
+                  <td>{{ candidate.token }}</td>
+                  <td>{{ candidate.source|humanize }}</td>
+                  <td>{{ candidate.validation.status|humanize }}</td>
+                  <td>{{ candidate.validation.job_count if candidate.validation.job_count is not none else 'Unknown' }}</td>
+                  <td>{{ candidate.validation.sample_titles|join(', ') if candidate.validation.sample_titles else 'None' }}</td>
+                  <td>{% if candidate.existing_source_configuration_id %}<a href="/job-sources/{{ candidate.existing_source_configuration_id }}">Existing</a>{% else %}No{% endif %}</td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+        {% if run.status in ['detected', 'ambiguous'] %}
+          <div class="actions-row actions-left">
+            <button type="submit" name="action" value="create">Create source</button>
+            <button type="submit" name="action" value="create_and_sync" class="button-secondary">Create and sync</button>
+          </div>
+        {% endif %}
+      </form>
+    {% else %}
+      <p class="muted">No candidate tokens were validated from the supplied input.</p>
+    {% endif %}
+  </section>
+
+  <section class="panel">
+    <h2>Evidence</h2>
+    {% if run.evidence %}
+      <table class="job-table">
+        <thead><tr><th>Category</th><th>Token</th><th>Source</th><th>Location</th></tr></thead>
+        <tbody>
+          {% for item in run.evidence %}
+            <tr>
+              <td>{{ item.category|humanize }}</td>
+              <td>{{ item.token or 'None' }}</td>
+              <td>{{ item.source|humanize if item.source else 'Unknown' }}</td>
+              <td>{{ item.source_url or item.snippet or 'Generated' }}</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    {% else %}
+      <p class="muted">No deterministic Greenhouse evidence was found. Generic Greenhouse mentions are ignored.</p>
+    {% endif %}
+  </section>
+{% endblock %}

@@ -18,6 +18,7 @@ from ai_job_finder.domain.enums import (
     ProvenanceType,
     Recommendation,
     RemotePreference,
+    SourceDetectionRunStatus,
     SourceDocumentExtractionStatus,
     SourceDocumentType,
     SourcePostingStatus,
@@ -206,6 +207,55 @@ class JobImportRunResponse(BaseModel):
     evaluation_failures: int
     error_message: str | None
     connector_version: str
+
+
+class SourceDetectionRunCreateRequest(BaseModel):
+    company_name: str | None = Field(default=None, max_length=200)
+    input_url: str | None = Field(default=None, max_length=500)
+    brand_alias: str | None = Field(default=None, max_length=200)
+
+
+class ManualGreenhouseTokenValidationRequest(BaseModel):
+    board_token: str = Field(min_length=1, max_length=200)
+
+
+class SourceDetectionApprovalRequest(BaseModel):
+    selected_token: str | None = Field(default=None, max_length=200)
+    create_and_sync: bool = False
+
+
+class SourceDetectionRunResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    company_name: str | None
+    input_url: str | None
+    normalized_url: str | None
+    final_url: str | None
+    status: SourceDetectionRunStatus
+    detected_provider: JobSourceProvider | None
+    candidate_tokens: list[dict[str, object]]
+    validated_token: str | None
+    validated_company_name: str | None
+    validated_job_count: int | None
+    evidence: list[dict[str, object]]
+    error_message: str | None
+    created_source_configuration_id: UUID | None
+    started_at: datetime
+    completed_at: datetime | None
+    created_at: datetime
+    updated_at: datetime
+
+
+class ManualGreenhouseTokenValidationResponse(BaseModel):
+    candidate: dict[str, object]
+
+
+class SourceDetectionApprovalResponse(BaseModel):
+    run: SourceDetectionRunResponse
+    source: JobSourceConfigurationResponse
+    import_run: JobImportRunResponse | None = None
+    existing_source: bool
 
 
 class DiscoveredLeadResponse(BaseModel):

@@ -14,6 +14,7 @@ from ai_job_finder.domain.job_sources import (
     JobSourceItemFailure,
     NormalizedJobPosting,
 )
+from ai_job_finder.domain.source_detection import GreenhouseBoardValidation
 
 
 @dataclass(slots=True)
@@ -23,6 +24,7 @@ class FakeJobSourceConnector:
     connector_version: str = "fake-greenhouse-v1"
     suspicious_empty: bool = False
     error: Exception | None = None
+    valid_tokens: set[str] = field(default_factory=set)
 
     def fetch_jobs(self, source: JobSourceConfigurationSnapshot) -> JobSourceFetchResult:
         if self.error is not None:
@@ -33,6 +35,21 @@ class FakeJobSourceConnector:
             connector_version=self.connector_version,
             suspicious_empty=self.suspicious_empty,
             job_failures=list(self.job_failures),
+        )
+
+    def validate_board_token(self, board_token: str) -> GreenhouseBoardValidation:
+        token = board_token.strip().lower()
+        valid_tokens = self.valid_tokens or {"acme"}
+        if token not in valid_tokens:
+            return GreenhouseBoardValidation(token=token, status="invalid", valid=False)
+        titles = [job.title for job in self.jobs[:5]]
+        return GreenhouseBoardValidation(
+            token=token,
+            status="valid_empty" if not self.jobs else "valid",
+            valid=True,
+            job_count=len(self.jobs),
+            sample_titles=titles,
+            company_name=self.jobs[0].company_name if self.jobs else None,
         )
 
 
@@ -60,6 +77,46 @@ class FileBackedFakeJobSourceConnector:
             connector_version=self.connector_version,
             suspicious_empty=bool(payload.get("suspicious_empty", False)),
             job_failures=[_job_failure_from_fixture(item) for item in job_failures_payload],
+        )
+
+    def validate_board_token(self, board_token: str) -> GreenhouseBoardValidation:
+        payload = json.loads(self.fixture_path.read_text(encoding="utf-8"))
+        if not isinstance(payload, dict):
+            raise JobSourceProviderError("Fake Greenhouse fixture must be a JSON object.")
+        token = board_token.strip().lower()
+        valid_tokens_payload = payload.get("valid_tokens")
+        if isinstance(valid_tokens_payload, dict):
+            token_payload = valid_tokens_payload.get(token)
+            if not isinstance(token_payload, dict):
+                return GreenhouseBoardValidation(token=token, status="invalid", valid=False)
+            jobs_payload = token_payload.get("jobs", [])
+            if not isinstance(jobs_payload, list):
+                raise JobSourceProviderError("Fake Greenhouse fixture jobs must be a list.")
+            titles = [str(item["title"]) for item in jobs_payload[:5] if isinstance(item, dict)]
+            company_name = token_payload.get("company_name")
+            return GreenhouseBoardValidation(
+                token=token,
+                status="valid_empty" if not jobs_payload else "valid",
+                valid=True,
+                job_count=len(jobs_payload),
+                sample_titles=titles,
+                company_name=company_name if isinstance(company_name, str) else None,
+            )
+        source_token = str(payload.get("board_token") or "acme").lower()
+        if token != source_token:
+            return GreenhouseBoardValidation(token=token, status="invalid", valid=False)
+        jobs_payload = payload.get("jobs", [])
+        if not isinstance(jobs_payload, list):
+            raise JobSourceProviderError("Fake Greenhouse fixture jobs must be a list.")
+        titles = [str(item["title"]) for item in jobs_payload[:5] if isinstance(item, dict)]
+        company_name = payload.get("company_name")
+        return GreenhouseBoardValidation(
+            token=token,
+            status="valid_empty" if not jobs_payload else "valid",
+            valid=True,
+            job_count=len(jobs_payload),
+            sample_titles=titles,
+            company_name=company_name if isinstance(company_name, str) else None,
         )
 
 

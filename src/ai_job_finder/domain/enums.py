@@ -105,6 +105,15 @@ class JobImportRunStatus(StrEnum):
     PARTIAL = "partial"
 
 
+class SourceDetectionRunStatus(StrEnum):
+    RUNNING = "running"
+    DETECTED = "detected"
+    NOT_DETECTED = "not_detected"
+    AMBIGUOUS = "ambiguous"
+    FAILED = "failed"
+    SOURCE_CREATED = "source_created"
+
+
 class SourcePostingStatus(StrEnum):
     OPEN = "open"
     CLOSED = "closed"
