@@ -17,6 +17,8 @@ After reading `AGENTS.md` and this index, keep focused context ahead of broad se
 
 Before implementation, produce the impact analysis described in `AGENTS.md` and `repository-navigation.md`. If the impact surface changes materially, update the analysis before broadening the edit set.
 
+For CodeGraph setup, refresh commands, validation examples, and known limitations, read `codegraph.md` and `codegraph-validation.md`.
+
 ## Task-to-Document Map
 
 ### Domain enum, state, scoring, or lifecycle change
@@ -89,6 +91,14 @@ Read:
 - `repository-navigation.md`
 - applicable ADRs
 
+### CodeGraph setup, indexing, or validation
+
+Read:
+
+- `codegraph.md`
+- `codegraph-validation.md`
+- `repository-navigation.md`
+
 ## Source of Truth
 
 - Executable behavior: source code and tests
@@ -96,5 +106,6 @@ Read:
 - Accepted architectural intent: ADRs
 - Current broad product behavior: README and architecture docs
 - Navigation and agent workflow: this directory, `AGENTS.md`, and CodeGraph
+- CodeGraph setup and validation: `codegraph.md` and `codegraph-validation.md`
 
 When documentation and code disagree, investigate before editing. Do not silently choose one.

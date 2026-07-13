@@ -1,14 +1,15 @@
 # Current Priorities
 
-## Current Documentation Slice
+## Current AI Development Infrastructure State
 
-1. add agent instructions
-2. add focused AI-context maps
-3. add prompt recipes
+1. agent instructions are established
+2. focused AI-context maps are established
+3. prompt recipes are established
+4. CodeGraph is installed, initialized, indexed, and validated for representative traces
 
-No application behavior changes belong in this slice.
+No application behavior changes belong in AI-context or CodeGraph infrastructure slices.
 
-CodeGraph installation, configuration, indexing, representative trace validation, and index tuning are follow-up infrastructure work, not part of this documentation-only slice.
+Future CodeGraph tuning should be driven by source-verified indexing gaps, not by speculative configuration.
 
 ## Goal
 

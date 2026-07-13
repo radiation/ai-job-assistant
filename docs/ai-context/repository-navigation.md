@@ -14,6 +14,8 @@
 
 Use CodeGraph as a navigation and impact-analysis aid, then verify graph results against source before editing.
 
+Setup and validation details live in `codegraph.md` and `codegraph-validation.md`.
+
 Include:
 
 ```text
@@ -23,6 +25,8 @@ alembic/
 ```
 
 Optionally include `docs/` for text lookup.
+
+Validated baseline indexing currently includes Python source, tests, Alembic migrations, selected YAML workflow/config files, and `docker-compose.yml`. It does not include Markdown docs, `pyproject.toml`, Jinja templates, or static assets.
 
 Exclude:
 
@@ -41,6 +45,20 @@ uploaded documents
 local document storage
 generated artifacts
 ```
+
+`.codegraph/` is generated local index state and is ignored by the root `.gitignore`.
+
+No committed `codegraph.json` is currently required. Add one only if a source-verified indexing gap requires project-specific extension or exclude tuning.
+
+## Refresh Commands
+
+```bash
+codegraph sync .
+codegraph status . --json
+codegraph files -p . --format flat --no-metadata
+```
+
+Use `codegraph index .` for a full rebuild when incremental sync appears stale.
 
 ## Query Recipes
 
@@ -86,3 +104,10 @@ Risks:
 10. Find migration history for persisted run entities.
 
 Verify graph results against source and record misses.
+
+Known validation cautions:
+
+- `affected` can miss relevant tests; use `callers` and targeted test reads.
+- Common method names such as `commit` may over-resolve to unrelated helpers.
+- Alembic string table names are not semantic ORM-to-migration edges.
+- Route decorators, dependency injection, Jinja templates, settings, CLI entry-point strings, and parametrized tests need direct source verification.

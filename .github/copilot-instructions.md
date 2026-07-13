@@ -17,4 +17,4 @@ Keep provider-specific HTTP, SDK, retry, parsing, and storage behavior in infras
 
 Do not add deferred product behavior unless explicitly requested. In particular, do not add broad discovery, browser automation, scheduling, background workers, autonomous source creation, application submission, referrals, resume generation, Lever/Ashby support, fuzzy merging, embeddings, OCR, multi-candidate ownership, or agent frameworks.
 
-For this AI-context foundation slice, do not change application behavior, Python source, tests, migrations, dependencies, Docker/runtime configuration, CI/hooks, or public contracts.
+For AI-context and CodeGraph infrastructure slices, do not change application behavior, Python source, tests, migrations, dependencies, Docker/runtime configuration, CI/hooks, or public contracts.

@@ -206,6 +206,9 @@ tempCodeRunnerFile.py
 # Ruff stuff:
 .ruff_cache/
 
+# CodeGraph local index state
+.codegraph/
+
 # PyPI configuration file
 .pypirc
 

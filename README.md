@@ -24,7 +24,7 @@ The current product slice centers on a single reviewed candidate profile, a cano
 
 ## AI Development Context
 
-Agent instructions live in `AGENTS.md`. Focused repository maps for AI-assisted development start at `docs/ai-context/README.md`.
+Agent instructions live in `AGENTS.md`. Focused repository maps for AI-assisted development start at `docs/ai-context/README.md`. CodeGraph setup and validation notes live under `docs/ai-context/codegraph.md`.
 
 ## Setup
 
