@@ -35,6 +35,7 @@ from ai_job_finder.application.source_detection import (
     validate_greenhouse_token,
 )
 from ai_job_finder.domain.enums import (
+    JobLocationEligibilityStatus,
     JobSourceProvider,
     PostingStatus,
     Recommendation,
@@ -108,7 +109,13 @@ def job_sources_list(request: Request, session: DbSession, flash: str | None = N
     items = [
         SourceListItem(
             source=source,
-            active_imported_count=len(list_ranked_discovered_leads(session, source_id=source.id)),
+            active_imported_count=len(
+                list_ranked_discovered_leads(
+                    session,
+                    source_id=source.id,
+                    include_ineligible=True,
+                )
+            ),
         )
         for source in list_job_source_configurations(session)
     ]
@@ -393,7 +400,11 @@ def job_sources_detail(
             "source": source,
             "runs": runs,
             "active_imported_count": len(
-                list_ranked_discovered_leads(session, source_id=source.id)
+                list_ranked_discovered_leads(
+                    session,
+                    source_id=source.id,
+                    include_ineligible=True,
+                )
             ),
             "flash_messages": flashes,
         },
@@ -462,6 +473,7 @@ def discover_queue(
     minimum_score: str | None = None,
     location: str | None = None,
     workplace_type: str | None = None,
+    location_eligibility: str | None = None,
 ) -> Response:
     try:
         parsed_source_id = UUID(source_id) if source_id else None
@@ -471,6 +483,12 @@ def discover_queue(
         parsed_minimum_score = float(minimum_score) if minimum_score else None
     except ValueError:
         return _render_filter_error(request, "Minimum score must be a valid number.")
+    try:
+        parsed_location_eligibility = (
+            JobLocationEligibilityStatus(location_eligibility) if location_eligibility else None
+        )
+    except ValueError:
+        return _render_filter_error(request, "Location eligibility filter is invalid.")
     items = list_ranked_discovered_leads(
         session,
         source_id=parsed_source_id,
@@ -481,6 +499,7 @@ def discover_queue(
         minimum_score=parsed_minimum_score,
         location=optional_str(location),
         workplace_type=optional_str(workplace_type),
+        location_eligibility=parsed_location_eligibility,
     )
     return render_template(
         request,
@@ -493,6 +512,7 @@ def discover_queue(
             "source_posting_statuses": list(SourcePostingStatus),
             "recommendations": list(Recommendation),
             "workplace_types": list(WorkplaceType),
+            "location_eligibilities": list(JobLocationEligibilityStatus),
             "selected": {
                 "source_id": source_id or "",
                 "company": company or "",
@@ -502,6 +522,7 @@ def discover_queue(
                 "minimum_score": minimum_score or "",
                 "location": location or "",
                 "workplace_type": workplace_type or "",
+                "location_eligibility": location_eligibility or "",
             },
         },
     )

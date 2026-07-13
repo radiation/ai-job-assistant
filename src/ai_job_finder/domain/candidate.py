@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from uuid import UUID
 
@@ -24,6 +24,7 @@ class CandidateProfileSnapshot:
     is_active: bool
     created_at: datetime
     updated_at: datetime
+    acceptable_remote_geographies: list[str] = field(default_factory=list)
 
 
 @dataclass(frozen=True, slots=True)

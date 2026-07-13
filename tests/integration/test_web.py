@@ -276,6 +276,7 @@ def test_candidate_first_run_setup_and_validation(client: TestClient) -> None:
         data={
             "full_name": "",
             "preferred_locations": "Seattle",
+            "acceptable_remote_geographies": "United States",
             "remote_preference": "flexible",
             "target_levels": "director",
             "target_functions": "platform engineering",
@@ -294,6 +295,7 @@ def test_candidate_edit_success(client: TestClient, session_factory: sessionmake
         data={
             "full_name": "Jordan Lee",
             "preferred_locations": "Seattle\nNew York",
+            "acceptable_remote_geographies": "United States\nCanada",
             "remote_preference": "hybrid",
             "target_levels": "director\nsenior director",
             "target_functions": "platform engineering\ninfrastructure",
@@ -303,6 +305,7 @@ def test_candidate_edit_success(client: TestClient, session_factory: sessionmake
     assert response.status_code == 200
     assert "Candidate profile updated" in response.text
     assert "New York" in response.text
+    assert "Canada" in response.text
 
 
 def test_career_fact_create_form_and_detail(
@@ -511,7 +514,12 @@ def test_job_sources_and_discover_pages(
     discover_response = client.get("/discover")
     assert discover_response.status_code == 200
     assert "Director, Platform Engineering" in discover_response.text
+    assert "Needs Review" in discover_response.text
     assert "Strong Recommend" in discover_response.text or "Recommend" in discover_response.text
+
+    filtered_discover_response = client.get("/discover?location_eligibility=needs_review")
+    assert filtered_discover_response.status_code == 200
+    assert "Director, Platform Engineering" in filtered_discover_response.text
 
     app.dependency_overrides.pop(job_source_connector_dependency, None)
 

@@ -119,6 +119,26 @@ class SourcePostingStatus(StrEnum):
     CLOSED = "closed"
 
 
+class JobLocationEligibilityStatus(StrEnum):
+    ELIGIBLE = "eligible"
+    NEEDS_REVIEW = "needs_review"
+    INELIGIBLE = "ineligible"
+
+
+class JobLocationEligibilityReason(StrEnum):
+    PREFERRED_LOCATION_MATCH = "preferred_location_match"
+    REMOTE_GEOGRAPHY_MATCH = "remote_geography_match"
+    PRESENCE_REQUIRED_OUTSIDE_PREFERRED_GEOGRAPHY = "presence_required_outside_preferred_geography"
+    REMOTE_GEOGRAPHY_UNCLEAR = "remote_geography_unclear"
+    MISSING_LOCATION_DATA = "missing_location_data"
+    MISSING_WORKPLACE_TYPE = "missing_workplace_type"
+    CONFLICTING_LOCATION_SIGNALS = "conflicting_location_signals"
+    MULTIPLE_LOCATIONS_REQUIRE_REVIEW = "multiple_locations_require_review"
+    BROAD_REGION_REQUIRES_REVIEW = "broad_region_requires_review"
+    INTERNATIONAL_LOCATION_NOT_APPROVED = "international_location_not_approved"
+    CANDIDATE_REMOTE_GEOGRAPHY_NOT_CONFIGURED = "candidate_remote_geography_not_configured"
+
+
 class WorkplaceType(StrEnum):
     REMOTE = "remote"
     HYBRID = "hybrid"

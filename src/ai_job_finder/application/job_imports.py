@@ -16,8 +16,10 @@ from ai_job_finder.domain.common import new_uuid, utc_now
 from ai_job_finder.domain.enums import (
     JobImportRunStatus,
     JobLeadSource,
+    JobLocationEligibilityStatus,
     JobSourceProvider,
     SourcePostingStatus,
+    WorkplaceType,
 )
 from ai_job_finder.domain.errors import (
     DuplicateJobSourceError,
@@ -33,6 +35,11 @@ from ai_job_finder.domain.job_sources import (
     JobSourceConnector,
     JobSourceItemFailure,
     NormalizedJobPosting,
+)
+from ai_job_finder.domain.location_eligibility import (
+    JobLocationEligibilityResult,
+    JobLocationSignals,
+    classify_job_location_eligibility,
 )
 from ai_job_finder.domain.scoring import evaluate_job_fit
 from ai_job_finder.infrastructure.database.models import (
@@ -51,6 +58,7 @@ class RankedDiscoveredLead:
     job: JobLeadModel
     observation: JobSourceObservationModel
     latest_evaluation: JobEvaluationModel | None
+    location_eligibility: JobLocationEligibilityResult
 
 
 def _normalize_optional_str(value: str | None) -> str | None:
@@ -245,6 +253,23 @@ def _verified_facts(session: Session, candidate_id: UUID) -> list[CareerFactMode
                 CareerFactModel.archived_at.is_(None),
             )
         )
+    )
+
+
+def _location_signals_for_observation(
+    job: JobLeadModel,
+    observation: JobSourceObservationModel,
+) -> JobLocationSignals:
+    payload = observation.normalized_payload or {}
+    offices = payload.get("offices")
+    metadata = payload.get("metadata")
+    return JobLocationSignals(
+        location_text=job.location_text,
+        workplace_type=WorkplaceType(job.workplace_type) if job.workplace_type else None,
+        offices=[str(value) for value in offices if isinstance(value, str)]
+        if isinstance(offices, list)
+        else [],
+        metadata=metadata if isinstance(metadata, dict) else {},
     )
 
 
@@ -700,7 +725,10 @@ def list_ranked_discovered_leads(
     minimum_score: float | None = None,
     location: str | None = None,
     workplace_type: str | None = None,
+    location_eligibility: JobLocationEligibilityStatus | None = None,
+    include_ineligible: bool = False,
 ) -> list[RankedDiscoveredLead]:
+    candidate = _current_candidate(session)
     latest = _latest_evaluation_subquery().subquery()
     query = (
         select(JobSourceObservationModel, JobLeadModel, JobEvaluationModel)
@@ -736,10 +764,28 @@ def list_ranked_discovered_leads(
         query = query.where(JobLeadModel.workplace_type == workplace_type)
 
     rows = session.execute(query).all()
-    items = [
-        RankedDiscoveredLead(job=job, observation=observation, latest_evaluation=evaluation)
-        for observation, job, evaluation in rows
-    ]
+    items: list[RankedDiscoveredLead] = []
+    for observation, job, evaluation in rows:
+        eligibility = classify_job_location_eligibility(
+            candidate.to_snapshot(),
+            _location_signals_for_observation(job, observation),
+        )
+        if location_eligibility is not None and eligibility.status is not location_eligibility:
+            continue
+        if (
+            location_eligibility is None
+            and not include_ineligible
+            and eligibility.status is JobLocationEligibilityStatus.INELIGIBLE
+        ):
+            continue
+        items.append(
+            RankedDiscoveredLead(
+                job=job,
+                observation=observation,
+                latest_evaluation=evaluation,
+                location_eligibility=eligibility,
+            )
+        )
     return sorted(
         items,
         key=lambda item: (

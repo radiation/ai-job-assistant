@@ -34,6 +34,14 @@
           {% if form_errors.preferred_locations %}<p class="field-error">{{ form_errors.preferred_locations }}</p>{% endif %}
         </div>
         <div class="field-group">
+          <label for="acceptable_remote_geographies">Acceptable remote geographies</label>
+          <textarea id="acceptable_remote_geographies" name="acceptable_remote_geographies" rows="4">{{ form_values.acceptable_remote_geographies }}</textarea>
+          <p class="muted">Enter one value per line or separate with commas.</p>
+          {% if form_errors.acceptable_remote_geographies %}<p class="field-error">{{ form_errors.acceptable_remote_geographies }}</p>{% endif %}
+        </div>
+      </div>
+      <div class="field-grid">
+        <div class="field-group">
           <label for="target_levels">Target levels</label>
           <textarea id="target_levels" name="target_levels" rows="4">{{ form_values.target_levels }}</textarea>
           <p class="muted">Enter one value per line or separate with commas.</p>

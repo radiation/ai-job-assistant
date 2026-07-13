@@ -62,6 +62,7 @@ class CandidateProfileModel(Base):
     id: Mapped[UUID] = mapped_column(Uuid, primary_key=True)
     full_name: Mapped[str] = mapped_column(String(200))
     preferred_locations: Mapped[list[str]] = mapped_column(JSON, default=list)
+    acceptable_remote_geographies: Mapped[list[str]] = mapped_column(JSON, default=list)
     remote_preference: Mapped[str] = mapped_column(String(20))
     target_levels: Mapped[list[str]] = mapped_column(JSON, default=list)
     target_functions: Mapped[list[str]] = mapped_column(JSON, default=list)
@@ -89,6 +90,7 @@ class CandidateProfileModel(Base):
             id=self.id,
             full_name=self.full_name,
             preferred_locations=list(self.preferred_locations),
+            acceptable_remote_geographies=list(self.acceptable_remote_geographies),
             remote_preference=RemotePreference(self.remote_preference),
             target_levels=list(self.target_levels),
             target_functions=list(self.target_functions),

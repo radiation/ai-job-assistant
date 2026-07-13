@@ -16,6 +16,7 @@
     <dl class="detail-list">
       <div><dt>Full name</dt><dd>{{ candidate.full_name }}</dd></div>
       <div><dt>Preferred locations</dt><dd>{{ candidate.preferred_locations|join(', ') or 'Not specified' }}</dd></div>
+      <div><dt>Acceptable remote geographies</dt><dd>{{ candidate.acceptable_remote_geographies|join(', ') or 'Not specified' }}</dd></div>
       <div><dt>Remote preference</dt><dd>{{ candidate.remote_preference|humanize }}</dd></div>
       <div><dt>Target levels</dt><dd>{{ candidate.target_levels|join(', ') or 'Not specified' }}</dd></div>
       <div><dt>Target functions</dt><dd>{{ candidate.target_functions|join(', ') or 'Not specified' }}</dd></div>
