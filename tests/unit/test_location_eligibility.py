@@ -135,6 +135,13 @@ def test_conflicting_signals_need_review() -> None:
     assert result.reasons == [JobLocationEligibilityReason.CONFLICTING_LOCATION_SIGNALS]
 
 
+def test_remote_geography_conflicts_with_presence_required_workplace() -> None:
+    result = classify(JobLocationSignals("Remote - US", WorkplaceType.HYBRID))
+
+    assert result.status is JobLocationEligibilityStatus.NEEDS_REVIEW
+    assert result.reasons == [JobLocationEligibilityReason.CONFLICTING_LOCATION_SIGNALS]
+
+
 def test_broad_region_needs_review() -> None:
     result = classify(JobLocationSignals("Europe", WorkplaceType.REMOTE))
 

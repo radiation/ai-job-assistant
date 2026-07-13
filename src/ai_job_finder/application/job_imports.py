@@ -729,6 +729,7 @@ def list_ranked_discovered_leads(
     include_ineligible: bool = False,
 ) -> list[RankedDiscoveredLead]:
     candidate = _current_candidate(session)
+    candidate_snapshot = candidate.to_snapshot()
     latest = _latest_evaluation_subquery().subquery()
     query = (
         select(JobSourceObservationModel, JobLeadModel, JobEvaluationModel)
@@ -767,7 +768,7 @@ def list_ranked_discovered_leads(
     items: list[RankedDiscoveredLead] = []
     for observation, job, evaluation in rows:
         eligibility = classify_job_location_eligibility(
-            candidate.to_snapshot(),
+            candidate_snapshot,
             _location_signals_for_observation(job, observation),
         )
         if location_eligibility is not None and eligibility.status is not location_eligibility:

@@ -187,7 +187,7 @@ def _has_conflicting_signals(
     text = " ".join(_normalize(value) for value in raw_values if value)
     if workplace_type is WorkplaceType.REMOTE:
         return bool(re.search(r"\b(?:hybrid|on[ -]?site|onsite|in office)\b", text))
-    return any(_is_remote_only(value) for value in raw_values if value)
+    return bool(re.search(r"\bremote\b", text))
 
 
 def _normalized_location_parts(value: str | None) -> list[str]:
