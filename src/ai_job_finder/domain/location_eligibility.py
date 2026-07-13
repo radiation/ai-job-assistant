@@ -39,7 +39,10 @@ def classify_job_location_eligibility(
         _canonical_remote_geography(value) for value in candidate.acceptable_remote_geographies
     ]
 
-    if _has_conflicting_signals(workplace_type, locations):
+    if _has_conflicting_signals(
+        workplace_type,
+        [signals.location_text, *signals.offices],
+    ):
         return _result(
             JobLocationEligibilityStatus.NEEDS_REVIEW,
             JobLocationEligibilityReason.CONFLICTING_LOCATION_SIGNALS,
@@ -171,22 +174,37 @@ def _result(
 def _location_values(signals: JobLocationSignals) -> list[str]:
     values: list[str] = []
     for value in [signals.location_text, *signals.offices]:
-        if value is None:
-            continue
-        if _has_multiple_location_delimiter(value):
-            values.extend(_split_multiple_locations(value))
-        else:
-            values.append(value)
+        values.extend(_normalized_location_parts(value))
     return _dedupe([_normalize(value) for value in values if _normalize(value)])
 
 
-def _has_conflicting_signals(workplace_type: WorkplaceType | None, locations: list[str]) -> bool:
+def _has_conflicting_signals(
+    workplace_type: WorkplaceType | None,
+    raw_values: list[str | None],
+) -> bool:
     if workplace_type is None:
         return False
-    text = " ".join(locations)
+    text = " ".join(_normalize(value) for value in raw_values if value)
     if workplace_type is WorkplaceType.REMOTE:
         return bool(re.search(r"\b(?:hybrid|on[ -]?site|onsite|in office)\b", text))
-    return any(_is_remote_only(location) for location in locations)
+    return any(_is_remote_only(value) for value in raw_values if value)
+
+
+def _normalized_location_parts(value: str | None) -> list[str]:
+    if value is None:
+        return []
+    parts = _split_location_parts(value)
+    if len(parts) <= 1:
+        return parts
+
+    geographic_parts = [part for part in parts if not _is_workplace_marker(part)]
+    return geographic_parts or parts
+
+
+def _split_location_parts(value: str) -> list[str]:
+    if _has_multiple_location_delimiter(value):
+        return _split_multiple_locations(value)
+    return [value]
 
 
 def _has_multiple_location_delimiter(value: str) -> bool:
@@ -195,6 +213,17 @@ def _has_multiple_location_delimiter(value: str) -> bool:
 
 def _split_multiple_locations(value: str) -> list[str]:
     return [part.strip() for part in re.split(r"\s(?:or|and)\s|[;/|]", value) if part.strip()]
+
+
+def _is_workplace_marker(value: str) -> bool:
+    return _normalize(value) in {
+        "remote",
+        "hybrid",
+        "onsite",
+        "on site",
+        "office",
+        "in office",
+    }
 
 
 def _non_remote_locations(locations: list[str]) -> list[str]:

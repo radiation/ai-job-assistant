@@ -61,8 +61,36 @@ def test_edinburgh_hybrid_is_ineligible_without_approved_market() -> None:
     assert result.reasons == [JobLocationEligibilityReason.INTERNATIONAL_LOCATION_NOT_APPROVED]
 
 
+def test_edinburgh_hybrid_suffix_is_not_treated_as_multiple_locations() -> None:
+    result = classify(JobLocationSignals("Edinburgh / Hybrid", WorkplaceType.HYBRID))
+
+    assert result.status is JobLocationEligibilityStatus.INELIGIBLE
+    assert result.reasons == [JobLocationEligibilityReason.INTERNATIONAL_LOCATION_NOT_APPROVED]
+
+
+def test_new_york_hybrid_suffix_is_eligible() -> None:
+    result = classify(JobLocationSignals("New York / Hybrid", WorkplaceType.HYBRID))
+
+    assert result.status is JobLocationEligibilityStatus.ELIGIBLE
+    assert result.reasons == [JobLocationEligibilityReason.PREFERRED_LOCATION_MATCH]
+
+
+def test_new_york_onsite_suffix_is_eligible() -> None:
+    result = classify(JobLocationSignals("New York | Onsite", WorkplaceType.ONSITE))
+
+    assert result.status is JobLocationEligibilityStatus.ELIGIBLE
+    assert result.reasons == [JobLocationEligibilityReason.PREFERRED_LOCATION_MATCH]
+
+
 def test_remote_us_is_eligible_with_configured_remote_geography() -> None:
     result = classify(JobLocationSignals("Remote - US", WorkplaceType.REMOTE))
+
+    assert result.status is JobLocationEligibilityStatus.ELIGIBLE
+    assert result.reasons == [JobLocationEligibilityReason.REMOTE_GEOGRAPHY_MATCH]
+
+
+def test_remote_us_suffix_is_eligible() -> None:
+    result = classify(JobLocationSignals("Remote / United States", WorkplaceType.REMOTE))
 
     assert result.status is JobLocationEligibilityStatus.ELIGIBLE
     assert result.reasons == [JobLocationEligibilityReason.REMOTE_GEOGRAPHY_MATCH]
@@ -123,6 +151,13 @@ def test_international_location_outside_approved_geography_is_ineligible() -> No
 
 def test_multiple_locations_including_approved_market_need_review() -> None:
     result = classify(JobLocationSignals("New York / Edinburgh", WorkplaceType.HYBRID))
+
+    assert result.status is JobLocationEligibilityStatus.NEEDS_REVIEW
+    assert result.reasons == [JobLocationEligibilityReason.MULTIPLE_LOCATIONS_REQUIRE_REVIEW]
+
+
+def test_multiple_locations_with_pipe_still_need_review() -> None:
+    result = classify(JobLocationSignals("New York | London", WorkplaceType.HYBRID))
 
     assert result.status is JobLocationEligibilityStatus.NEEDS_REVIEW
     assert result.reasons == [JobLocationEligibilityReason.MULTIPLE_LOCATIONS_REQUIRE_REVIEW]
