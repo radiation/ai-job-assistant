@@ -22,6 +22,10 @@ The current product slice centers on a single reviewed candidate profile, a cano
 - ruff
 - pre-commit
 
+## AI Development Context
+
+Agent instructions live in `AGENTS.md`. Focused repository maps for AI-assisted development start at `docs/ai-context/README.md`.
+
 ## Setup
 
 1. Copy `.env.example` to `.env` and adjust the database URLs if needed.
