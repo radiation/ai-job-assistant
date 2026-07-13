@@ -39,6 +39,10 @@
         <label for="workplace_type">Workplace</label>
         <select id="workplace_type" name="workplace_type"><option value="">All</option>{% for option in workplace_types %}<option value="{{ option.value }}" {% if selected.workplace_type == option.value %}selected{% endif %}>{{ option.value|humanize }}</option>{% endfor %}</select>
       </div>
+      <div class="field-group">
+        <label for="location_eligibility">Eligibility</label>
+        <select id="location_eligibility" name="location_eligibility"><option value="">Actionable</option>{% for option in location_eligibilities %}<option value="{{ option.value }}" {% if selected.location_eligibility == option.value %}selected{% endif %}>{{ option.value|humanize }}</option>{% endfor %}</select>
+      </div>
       <button type="submit">Apply</button>
     </form>
   </section>
@@ -49,7 +53,7 @@
         <table class="job-table">
           <thead>
             <tr>
-              <th>Company</th><th>Title</th><th>Location</th><th>Source</th><th>Freshness</th><th>Score</th><th>Recommendation</th><th>Workflow</th><th>Actions</th>
+              <th>Company</th><th>Title</th><th>Location</th><th>Eligibility</th><th>Source</th><th>Freshness</th><th>Score</th><th>Recommendation</th><th>Workflow</th><th>Actions</th>
             </tr>
           </thead>
           <tbody>
@@ -58,6 +62,7 @@
                 <td>{{ item.job.company_name }}</td>
                 <td>{{ item.job.title }}</td>
                 <td>{{ item.job.location_text or 'Not specified' }}</td>
+                <td><span class="badge badge-status">{{ item.location_eligibility.status|humanize }}</span></td>
                 <td>{{ item.observation.provider|humanize }}</td>
                 <td>{{ item.observation.source_updated_at|datetime if item.observation.source_updated_at else item.observation.first_seen_at|datetime }}</td>
                 <td>{% if item.latest_evaluation %}{{ '%.1f'|format(item.latest_evaluation.overall_score) }}{% else %}<span class="muted">No score</span>{% endif %}</td>
@@ -77,7 +82,7 @@
                 </td>
               </tr>
               {% if item.latest_evaluation %}
-                <tr><td colspan="9"><p class="preformatted">{{ item.latest_evaluation.explanation }}</p></td></tr>
+                <tr><td colspan="10"><p class="preformatted">{{ item.latest_evaluation.explanation }}</p></td></tr>
               {% endif %}
             {% endfor %}
           </tbody>

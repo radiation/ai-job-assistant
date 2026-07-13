@@ -12,12 +12,14 @@ from sqlalchemy.orm import Session, sessionmaker
 from ai_job_finder.application.job_imports import (
     create_job_source_configuration,
     duplicate_hint_key,
+    list_ranked_discovered_leads,
     run_job_source_import,
 )
 from ai_job_finder.application.services import (
     create_candidate_profile,
     create_career_fact,
     transition_career_fact,
+    update_candidate_profile,
     update_job_lead_status,
 )
 from ai_job_finder.domain.enums import (
@@ -25,6 +27,7 @@ from ai_job_finder.domain.enums import (
     CareerFactLifecycle,
     EvidenceTag,
     JobImportRunStatus,
+    JobLocationEligibilityStatus,
     JobSourceProvider,
     PostingStatus,
     ProvenanceType,
@@ -74,6 +77,39 @@ def _seed_candidate(session: Session) -> UUID:
         session,
         full_name="Jordan Lee",
         preferred_locations=["Remote", "Seattle"],
+        remote_preference=RemotePreference.FLEXIBLE.value,
+        target_levels=["director"],
+        target_functions=["platform engineering"],
+    )
+    fact = create_career_fact(
+        session,
+        candidate_profile_id=candidate.id,
+        category=CareerFactCategory.PLATFORM.value,
+        source_organization="Example Cloud",
+        statement="Built a cloud platform.",
+        metric="40% faster delivery",
+        technologies=["Python", "Kubernetes"],
+        leadership_scope="30 engineers",
+        business_outcome="Faster delivery",
+        approved_wording="Built a cloud platform with measurable impact.",
+        evidence_tags=[EvidenceTag.PLATFORM_ENGINEERING.value, EvidenceTag.CLOUD.value],
+        provenance_type=ProvenanceType.PROJECT_NOTES.value,
+        source_reference="review packet",
+    )
+    transition_career_fact(
+        session,
+        fact_id=fact.id,
+        lifecycle_status=CareerFactLifecycle.VERIFIED.value,
+    )
+    return candidate.id
+
+
+def _seed_location_sensitive_candidate(session: Session) -> UUID:
+    candidate = create_candidate_profile(
+        session,
+        full_name="Jordan Lee",
+        preferred_locations=["New York City"],
+        acceptable_remote_geographies=["United States"],
         remote_preference=RemotePreference.FLEXIBLE.value,
         target_levels=["director"],
         target_functions=["platform engineering"],
@@ -227,6 +263,70 @@ def test_import_idempotency_material_change_and_evaluation_history(
         assert changed_run.evaluations_created == 1
         assert len(list(session.scalars(select(JobLeadModel)))) == 1
         assert len(list(session.scalars(select(JobEvaluationModel)))) == 2
+
+
+def test_discovered_leads_default_to_actionable_location_eligibility(
+    session_factory: sessionmaker[Session],
+) -> None:
+    with session_factory() as session:
+        _seed_location_sensitive_candidate(session)
+        source_id = _create_source(session)
+
+        run_job_source_import(
+            session,
+            source_id=source_id,
+            connector=FakeJobSourceConnector(
+                jobs=[
+                    _posting("nyc", location="New York, NY", internal_job_id="req-nyc"),
+                    _posting("edinburgh", location="Edinburgh", internal_job_id="req-edi"),
+                ]
+            ),
+        )
+
+        visible = list_ranked_discovered_leads(session)
+        all_items = list_ranked_discovered_leads(session, include_ineligible=True)
+        ineligible = list_ranked_discovered_leads(
+            session,
+            location_eligibility=JobLocationEligibilityStatus.INELIGIBLE,
+        )
+
+        assert {item.job.location_text for item in visible} == {"New York, NY"}
+        assert {item.job.location_text for item in all_items} == {"New York, NY", "Edinburgh"}
+        assert [item.job.location_text for item in ineligible] == ["Edinburgh"]
+
+
+def test_discovered_lead_location_eligibility_recomputes_from_candidate_preferences(
+    session_factory: sessionmaker[Session],
+) -> None:
+    with session_factory() as session:
+        candidate_id = _seed_location_sensitive_candidate(session)
+        source_id = _create_source(session)
+
+        run_job_source_import(
+            session,
+            source_id=source_id,
+            connector=FakeJobSourceConnector(
+                jobs=[_posting("edinburgh", location="Edinburgh", internal_job_id="req-edi")]
+            ),
+        )
+
+        assert list_ranked_discovered_leads(session) == []
+
+        update_candidate_profile(
+            session,
+            candidate_profile_id=candidate_id,
+            full_name="Jordan Lee Updated",
+            preferred_locations=["Edinburgh"],
+            acceptable_remote_geographies=["United Kingdom"],
+            remote_preference=RemotePreference.FLEXIBLE.value,
+            target_levels=["director"],
+            target_functions=["platform engineering"],
+        )
+
+        visible = list_ranked_discovered_leads(session)
+
+        assert [item.job.location_text for item in visible] == ["Edinburgh"]
+        assert visible[0].location_eligibility.status is JobLocationEligibilityStatus.ELIGIBLE
 
 
 def test_closure_safety_failure_empty_and_reactivation(

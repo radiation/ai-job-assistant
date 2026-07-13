@@ -17,13 +17,16 @@ def _create_candidate(client: TestClient) -> dict[str, Any]:
         json={
             "full_name": "Jordan Lee",
             "preferred_locations": ["Seattle", "Remote"],
+            "acceptable_remote_geographies": ["United States"],
             "remote_preference": "flexible",
             "target_levels": ["director"],
             "target_functions": ["platform engineering"],
         },
     )
     assert response.status_code == 201
-    return cast(dict[str, Any], response.json())
+    candidate = cast(dict[str, Any], response.json())
+    assert candidate["acceptable_remote_geographies"] == ["United States"]
+    return candidate
 
 
 def _create_fact(
@@ -447,10 +450,18 @@ def test_job_source_crud_sync_and_ranked_discovery(client: TestClient) -> None:
     leads = queue_response.json()
     assert len(leads) == 2
     assert leads[0]["job"]["external_id"].endswith(":strong")
+    assert leads[0]["location_eligibility"]["status"] == "needs_review"
+    assert leads[0]["location_eligibility"]["reasons"] == ["remote_geography_unclear"]
     assert (
         leads[0]["latest_evaluation"]["overall_score"]
         >= leads[1]["latest_evaluation"]["overall_score"]
     )
+
+    eligibility_response = client.get(
+        "/api/v1/discovered-leads", params={"location_eligibility": "needs_review"}
+    )
+    assert eligibility_response.status_code == 200
+    assert len(eligibility_response.json()) == 2
 
     filtered_response = client.get("/api/v1/discovered-leads", params={"recommendation": "decline"})
     assert filtered_response.status_code == 200

@@ -52,6 +52,7 @@ def create_candidate_profile(
     *,
     full_name: str,
     preferred_locations: list[str],
+    acceptable_remote_geographies: list[str] | None = None,
     remote_preference: str,
     target_levels: list[str],
     target_functions: list[str],
@@ -61,6 +62,7 @@ def create_candidate_profile(
         id=new_uuid(),
         full_name=full_name.strip(),
         preferred_locations=_normalize_list(preferred_locations),
+        acceptable_remote_geographies=_normalize_list(acceptable_remote_geographies or []),
         remote_preference=remote_preference,
         target_levels=_normalize_list(target_levels),
         target_functions=_normalize_list(target_functions),
@@ -94,6 +96,7 @@ def update_candidate_profile(
     candidate_profile_id: UUID,
     full_name: str,
     preferred_locations: list[str],
+    acceptable_remote_geographies: list[str] | None = None,
     remote_preference: str,
     target_levels: list[str],
     target_functions: list[str],
@@ -101,6 +104,7 @@ def update_candidate_profile(
     candidate = get_candidate_profile(session, candidate_profile_id)
     candidate.full_name = full_name.strip()
     candidate.preferred_locations = _normalize_list(preferred_locations)
+    candidate.acceptable_remote_geographies = _normalize_list(acceptable_remote_geographies or [])
     candidate.remote_preference = remote_preference
     candidate.target_levels = _normalize_list(target_levels)
     candidate.target_functions = _normalize_list(target_functions)

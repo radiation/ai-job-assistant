@@ -13,6 +13,8 @@ from ai_job_finder.domain.enums import (
     ExtractionRunStatus,
     JobImportRunStatus,
     JobLeadSource,
+    JobLocationEligibilityReason,
+    JobLocationEligibilityStatus,
     JobSourceProvider,
     PostingStatus,
     ProvenanceType,
@@ -29,6 +31,7 @@ from ai_job_finder.domain.enums import (
 class CandidateProfileCreateRequest(BaseModel):
     full_name: str = Field(min_length=1, max_length=200)
     preferred_locations: list[str] = Field(default_factory=list)
+    acceptable_remote_geographies: list[str] = Field(default_factory=list)
     remote_preference: RemotePreference
     target_levels: list[str] = Field(default_factory=list)
     target_functions: list[str] = Field(default_factory=list)
@@ -37,6 +40,7 @@ class CandidateProfileCreateRequest(BaseModel):
 class CandidateProfileUpdateRequest(BaseModel):
     full_name: str = Field(min_length=1, max_length=200)
     preferred_locations: list[str] = Field(default_factory=list)
+    acceptable_remote_geographies: list[str] = Field(default_factory=list)
     remote_preference: RemotePreference
     target_levels: list[str] = Field(default_factory=list)
     target_functions: list[str] = Field(default_factory=list)
@@ -48,6 +52,7 @@ class CandidateProfileResponse(BaseModel):
     id: UUID
     full_name: str
     preferred_locations: list[str]
+    acceptable_remote_geographies: list[str]
     remote_preference: RemotePreference
     target_levels: list[str]
     target_functions: list[str]
@@ -258,9 +263,16 @@ class SourceDetectionApprovalResponse(BaseModel):
     existing_source: bool
 
 
+class JobLocationEligibilityResponse(BaseModel):
+    status: JobLocationEligibilityStatus
+    reasons: list[JobLocationEligibilityReason]
+    summary: str
+
+
 class DiscoveredLeadResponse(BaseModel):
     job: JobLeadResponse
     latest_evaluation: JobEvaluationResponse | None
+    location_eligibility: JobLocationEligibilityResponse
     source_configuration_id: UUID
     observation_id: UUID
     external_post_id: str

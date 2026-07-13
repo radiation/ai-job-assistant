@@ -37,6 +37,7 @@ from ai_job_finder.api.v1.schemas import (
     JobLeadResponse,
     JobLeadStatusPatchRequest,
     JobLeadUpdateRequest,
+    JobLocationEligibilityResponse,
     JobSourceConfigurationCreateRequest,
     JobSourceConfigurationResponse,
     JobSourceConfigurationUpdateRequest,
@@ -107,6 +108,7 @@ from ai_job_finder.domain.enums import (
     CareerFactLifecycle,
     CareerFactProposalReviewStatus,
     EvidenceTag,
+    JobLocationEligibilityStatus,
     SourceDocumentType,
 )
 from ai_job_finder.domain.errors import NotFoundError
@@ -146,6 +148,7 @@ def post_candidate_profile(
         session,
         full_name=payload.full_name,
         preferred_locations=payload.preferred_locations,
+        acceptable_remote_geographies=payload.acceptable_remote_geographies,
         remote_preference=payload.remote_preference.value,
         target_levels=payload.target_levels,
         target_functions=payload.target_functions,
@@ -174,6 +177,7 @@ def put_candidate_profile(
         candidate_profile_id=candidate.id,
         full_name=payload.full_name,
         preferred_locations=payload.preferred_locations,
+        acceptable_remote_geographies=payload.acceptable_remote_geographies,
         remote_preference=payload.remote_preference.value,
         target_levels=payload.target_levels,
         target_functions=payload.target_functions,
@@ -729,6 +733,7 @@ def get_discovered_leads(
     minimum_score: float | None = None,
     location: str | None = None,
     workplace_type: str | None = None,
+    location_eligibility: JobLocationEligibilityStatus | None = None,
 ) -> list[DiscoveredLeadResponse]:
     items = list_ranked_discovered_leads(
         session,
@@ -740,6 +745,7 @@ def get_discovered_leads(
         minimum_score=minimum_score,
         location=location,
         workplace_type=workplace_type,
+        location_eligibility=location_eligibility,
     )
     return [
         DiscoveredLeadResponse(
@@ -748,6 +754,11 @@ def get_discovered_leads(
                 JobEvaluationResponse.model_validate(item.latest_evaluation)
                 if item.latest_evaluation
                 else None
+            ),
+            location_eligibility=JobLocationEligibilityResponse(
+                status=item.location_eligibility.status,
+                reasons=item.location_eligibility.reasons,
+                summary=item.location_eligibility.summary,
             ),
             source_configuration_id=item.observation.source_configuration_id,
             observation_id=item.observation.id,

@@ -58,6 +58,7 @@ def _candidate_form_defaults() -> dict[str, str]:
     return {
         "full_name": "",
         "preferred_locations": "",
+        "acceptable_remote_geographies": "",
         "remote_preference": RemotePreference.FLEXIBLE.value,
         "target_levels": "",
         "target_functions": "",
@@ -70,6 +71,7 @@ def _candidate_form_values(candidate: Any | None = None) -> dict[str, str]:
     return {
         "full_name": candidate.full_name,
         "preferred_locations": "\n".join(candidate.preferred_locations),
+        "acceptable_remote_geographies": "\n".join(candidate.acceptable_remote_geographies),
         "remote_preference": candidate.remote_preference,
         "target_levels": "\n".join(candidate.target_levels),
         "target_functions": "\n".join(candidate.target_functions),
@@ -219,6 +221,7 @@ async def candidate_create(request: Request, session: DbSession) -> Response:
     values = {
         "full_name": str(form.get("full_name", "")),
         "preferred_locations": str(form.get("preferred_locations", "")),
+        "acceptable_remote_geographies": str(form.get("acceptable_remote_geographies", "")),
         "remote_preference": str(form.get("remote_preference", "")),
         "target_levels": str(form.get("target_levels", "")),
         "target_functions": str(form.get("target_functions", "")),
@@ -228,6 +231,9 @@ async def candidate_create(request: Request, session: DbSession) -> Response:
             {
                 "full_name": values["full_name"],
                 "preferred_locations": split_multivalue(values["preferred_locations"]),
+                "acceptable_remote_geographies": split_multivalue(
+                    values["acceptable_remote_geographies"]
+                ),
                 "remote_preference": values["remote_preference"],
                 "target_levels": split_multivalue(values["target_levels"]),
                 "target_functions": split_multivalue(values["target_functions"]),
@@ -252,6 +258,7 @@ async def candidate_create(request: Request, session: DbSession) -> Response:
         session,
         full_name=payload.full_name,
         preferred_locations=payload.preferred_locations,
+        acceptable_remote_geographies=payload.acceptable_remote_geographies,
         remote_preference=payload.remote_preference.value,
         target_levels=payload.target_levels,
         target_functions=payload.target_functions,
@@ -289,6 +296,7 @@ async def candidate_update(request: Request, session: DbSession) -> Response:
     values = {
         "full_name": str(form.get("full_name", "")),
         "preferred_locations": str(form.get("preferred_locations", "")),
+        "acceptable_remote_geographies": str(form.get("acceptable_remote_geographies", "")),
         "remote_preference": str(form.get("remote_preference", "")),
         "target_levels": str(form.get("target_levels", "")),
         "target_functions": str(form.get("target_functions", "")),
@@ -298,6 +306,9 @@ async def candidate_update(request: Request, session: DbSession) -> Response:
             {
                 "full_name": values["full_name"],
                 "preferred_locations": split_multivalue(values["preferred_locations"]),
+                "acceptable_remote_geographies": split_multivalue(
+                    values["acceptable_remote_geographies"]
+                ),
                 "remote_preference": values["remote_preference"],
                 "target_levels": split_multivalue(values["target_levels"]),
                 "target_functions": split_multivalue(values["target_functions"]),
@@ -323,6 +334,7 @@ async def candidate_update(request: Request, session: DbSession) -> Response:
         candidate_profile_id=candidate.id,
         full_name=payload.full_name,
         preferred_locations=payload.preferred_locations,
+        acceptable_remote_geographies=payload.acceptable_remote_geographies,
         remote_preference=payload.remote_preference.value,
         target_levels=payload.target_levels,
         target_functions=payload.target_functions,
