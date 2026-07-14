@@ -1,16 +1,44 @@
 {% extends 'base.html' %}
 
 {% block content %}
-  <section class="page-header">
+  <section class="page-header discovery-page-header">
     <div>
-      <h1>Discover</h1>
-      <p>Ranked queue of active imported leads.</p>
+      <h1>Discovered jobs</h1>
+      <p>Compact review queue for imported leads and actionable follow-up.</p>
     </div>
-    <a class="button-link" href="/job-sources">Manage sources</a>
+    <div class="table-actions">
+      <a class="button-link" href="/job-sources">Manage sources</a>
+    </div>
   </section>
 
-  <section class="panel">
-    <form class="filter-form filter-form-wide" method="get" action="/discover">
+  <section class="discovery-stats-grid" aria-label="Discovery queue summary">
+    <article class="panel summary-card">
+      <p class="summary-label">Total discovered</p>
+      <strong>{{ queue_stats.total_discovered }}</strong>
+    </article>
+    <article class="panel summary-card">
+      <p class="summary-label">Currently shown</p>
+      <strong>{{ queue_stats.currently_shown }}</strong>
+    </article>
+    <article class="panel summary-card">
+      <p class="summary-label">Needs review</p>
+      <strong>{{ queue_stats.needs_review }}</strong>
+    </article>
+    <article class="panel summary-card">
+      <p class="summary-label">Ineligible</p>
+      <strong>{{ queue_stats.ineligible }}</strong>
+    </article>
+  </section>
+
+  <section class="panel filters-panel discovery-filters-panel">
+    <div class="section-row discovery-filters-header">
+      <div>
+        <h2>Queue filters</h2>
+        <p class="muted">Default view shows actionable jobs and keeps ineligible roles out of the queue.</p>
+      </div>
+      <a class="button-link button-secondary" href="/discover">Reset filters</a>
+    </div>
+    <form class="filter-form filter-form-wide discovery-filter-form" method="get" action="/discover">
       <div class="field-group">
         <label for="source_id">Source</label>
         <select id="source_id" name="source_id">
@@ -41,57 +69,138 @@
       </div>
       <div class="field-group">
         <label for="location_eligibility">Eligibility</label>
-        <select id="location_eligibility" name="location_eligibility"><option value="">Actionable</option>{% for option in location_eligibilities %}<option value="{{ option.value }}" {% if selected.location_eligibility == option.value %}selected{% endif %}>{{ option.value|humanize }}</option>{% endfor %}</select>
+        <select id="location_eligibility" name="location_eligibility"><option value="">Actionable only</option>{% for option in location_eligibilities %}<option value="{{ option.value }}" {% if selected.location_eligibility == option.value %}selected{% endif %}>{{ option.value|humanize }}</option>{% endfor %}</select>
       </div>
-      <button type="submit">Apply</button>
+      <div class="filter-actions">
+        <button type="submit">Apply filters</button>
+      </div>
     </form>
   </section>
 
   {% if lead_items %}
-    <section class="panel">
-      <div class="table-wrap">
-        <table class="job-table">
-          <thead>
-            <tr>
-              <th>Company</th><th>Title</th><th>Location</th><th>Eligibility</th><th>Source</th><th>Freshness</th><th>Score</th><th>Recommendation</th><th>Workflow</th><th>Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            {% for item in lead_items %}
-              <tr>
-                <td>{{ item.job.company_name }}</td>
-                <td>{{ item.job.title }}</td>
-                <td>{{ item.job.location_text or 'Not specified' }}</td>
-                <td><span class="badge badge-status">{{ item.location_eligibility.status|humanize }}</span></td>
-                <td>{{ item.observation.provider|humanize }}</td>
-                <td>{{ item.observation.source_updated_at|datetime if item.observation.source_updated_at else item.observation.first_seen_at|datetime }}</td>
-                <td>{% if item.latest_evaluation %}{{ '%.1f'|format(item.latest_evaluation.overall_score) }}{% else %}<span class="muted">No score</span>{% endif %}</td>
-                <td>{% if item.latest_evaluation %}<span class="badge badge-recommendation">{{ item.latest_evaluation.recommendation|humanize }}</span>{% else %}<span class="muted">Not available</span>{% endif %}</td>
-                <td><span class="badge badge-status">{{ item.job.posting_status|humanize }}</span></td>
-                <td>
-                  <div class="actions-row">
-                    {% if item.job.source_url %}<a href="{{ item.job.source_url }}" target="_blank" rel="noopener noreferrer">Source</a>{% endif %}
-                    <a href="/jobs/{{ item.job.id }}">Detail</a>
-                  </div>
-                  <form class="inline-controls" method="post" action="/discover/jobs/{{ item.job.id }}/status">
-                    <select name="posting_status" aria-label="Workflow status">
+    <section class="discovery-queue" aria-label="Discovered job review queue">
+      <div class="section-row discovery-queue-header">
+        <div>
+          <h2>Review queue</h2>
+          <p class="muted">Open a row for requisition details and follow the detail view for full match analysis.</p>
+        </div>
+      </div>
+      <div class="discovery-stack">
+        {% for item in lead_items %}
+          {% set workplace_label = item.job.workplace_type|humanize if item.job.workplace_type else 'Not specified' %}
+          {% set full_location = item.job.location_text or 'Not specified' %}
+          {% set location_primary = full_location %}
+          {% set location_qualifier = '' %}
+          {% if ' with ' in full_location.lower() %}
+            {% set location_parts = full_location.split(' with ', 1) %}
+            {% set location_primary = location_parts[0] %}
+            {% set location_qualifier = location_parts[1][0:1].upper() ~ location_parts[1][1:] %}
+          {% endif %}
+          {% if item.job.workplace_type and item.job.workplace_type.value == 'remote' and location_primary.lower().startswith('remote ') %}
+            {% set location_primary = location_primary[7:] %}
+          {% endif %}
+          <details class="panel discovery-item">
+            <summary class="discovery-summary">
+              <div class="discovery-row-grid">
+                <div
+                  class="discovery-fit-block {% if item.latest_evaluation %}discovery-fit-{{ item.latest_evaluation.recommendation.value|replace('_', '-') }}{% else %}discovery-fit-unscored{% endif %}"
+                  {% if item.latest_evaluation %}
+                    aria-label="Fit score {{ '%.1f'|format(item.latest_evaluation.overall_score) }}, {{ item.latest_evaluation.recommendation|humanize }}"
+                    title="Fit score {{ '%.1f'|format(item.latest_evaluation.overall_score) }} · {{ item.latest_evaluation.recommendation|humanize }}"
+                  {% else %}
+                    aria-label="No fit score available"
+                    title="No fit score available"
+                  {% endif %}
+                >
+                  <span class="discovery-fit-label">Fit</span>
+                  <strong>{% if item.latest_evaluation %}{{ '%.1f'|format(item.latest_evaluation.overall_score) }}{% else %}N/A{% endif %}</strong>
+                </div>
+                <div class="discovery-primary">
+                  <p class="discovery-company">{{ item.job.company_name }}</p>
+                  <h3>{{ item.job.title }}</h3>
+                </div>
+                <div class="discovery-summary-meta" aria-label="Job metadata" title="{{ workplace_label }} · {{ full_location }}">
+                  <p class="discovery-inline-meta" aria-label="{{ workplace_label }} in {{ full_location }}">
+                    <span>{{ workplace_label }}</span>
+                    <span class="discovery-meta-separator" aria-hidden="true">&middot;</span>
+                    <span>{{ location_primary }}</span>
+                  </p>
+                  {% if location_qualifier %}
+                    <p class="discovery-inline-meta discovery-inline-meta-qualifier muted">{{ location_qualifier }}</p>
+                  {% endif %}
+                  <p class="discovery-inline-meta muted">
+                    <span>{{ item.observation.provider|humanize }}</span>
+                    <span class="discovery-meta-separator" aria-hidden="true">&middot;</span>
+                    <span>Updated {{ (item.observation.source_updated_at or item.observation.first_seen_at).strftime('%b %d') }}</span>
+                  </p>
+                </div>
+                <div class="discovery-summary-evaluation" aria-label="Eligibility summary">
+                  <span class="badge badge-eligibility {% if item.location_eligibility.status.value == 'eligible' %}badge-eligibility-good{% elif item.location_eligibility.status.value == 'needs_review' %}badge-eligibility-caution{% else %}badge-eligibility-risk{% endif %}">{{ item.location_eligibility.status|humanize }}</span>
+                </div>
+                <div class="discovery-summary-actions">
+                  <span class="badge badge-status">{{ item.job.posting_status|humanize }}</span>
+                  <form class="inline-controls discovery-inline-controls" method="post" action="/discover/jobs/{{ item.job.id }}/status">
+                    <input type="hidden" name="return_to" value="{{ return_to }}" />
+                    <label class="sr-only" for="posting-status-{{ item.job.id }}">Workflow status for {{ item.job.company_name }} {{ item.job.title }}</label>
+                    <select id="posting-status-{{ item.job.id }}" name="posting_status" aria-label="Workflow status">
                       {% for option in posting_statuses %}<option value="{{ option.value }}" {% if option.value == item.job.posting_status %}selected{% endif %}>{{ option.value|humanize }}</option>{% endfor %}
                     </select>
                     <button type="submit">Save</button>
                   </form>
-                </td>
-              </tr>
-              {% if item.latest_evaluation %}
-                <tr><td colspan="10"><p class="preformatted">{{ item.latest_evaluation.explanation }}</p></td></tr>
-              {% endif %}
-            {% endfor %}
-          </tbody>
-        </table>
+                </div>
+                <div class="discovery-summary-disclosure">
+                  <span class="discovery-chevron" aria-hidden="true">&#9662;</span>
+                </div>
+              </div>
+            </summary>
+            <div class="discovery-expanded">
+              <div class="discovery-expanded-grid">
+                <article class="discovery-description">
+                  <h4>Job requisition</h4>
+                  <p class="preformatted">{{ item.job.description_normalized }}</p>
+                </article>
+                <aside class="discovery-expanded-side">
+                  <dl class="detail-list compact-detail-list discovery-expanded-meta">
+                    <div><dt>Eligibility summary</dt><dd>{{ item.location_eligibility.summary }}</dd></div>
+                    <div><dt>Source status</dt><dd>{{ item.job.source_posting_status|humanize }}</dd></div>
+                    <div><dt>Observed</dt><dd>{{ item.observation.first_seen_at|datetime }}</dd></div>
+                    <div><dt>Last refreshed</dt><dd>{{ item.observation.source_updated_at|datetime if item.observation.source_updated_at else item.observation.last_seen_at|datetime }}</dd></div>
+                  </dl>
+                  <div class="table-actions wrap-actions discovery-secondary-actions">
+                    {% if item.job.source_url %}<a class="button-link button-secondary" href="{{ item.job.source_url }}" target="_blank" rel="noopener noreferrer">Open source posting</a>{% endif %}
+                    <a class="button-link button-secondary" href="/jobs/{{ item.job.id }}">View match analysis</a>
+                  </div>
+                </aside>
+              </div>
+            </div>
+          </details>
+        {% endfor %}
       </div>
     </section>
   {% else %}
-    {% with title='No active imported leads', message='Sync a source to populate the discovery queue.', action_href='/job-sources', action_label='Manage sources' %}
-      {% include 'components/empty_state.html' %}
-    {% endwith %}
+    {% if has_filters %}
+      {% with title='No matching discovered leads', message='Try widening the filters or reset to the default actionable queue.', action_href='/discover', action_label='Reset filters' %}
+        {% include 'components/empty_state.html' %}
+      {% endwith %}
+    {% else %}
+      {% with title='No active imported leads', message='Sync a source to populate the discovery queue.', action_href='/job-sources', action_label='Manage sources' %}
+        {% include 'components/empty_state.html' %}
+      {% endwith %}
+    {% endif %}
   {% endif %}
+
+  <script>
+    document.addEventListener("DOMContentLoaded", function () {
+      for (const region of document.querySelectorAll(".discovery-summary-actions")) {
+        region.addEventListener("click", function (event) {
+          event.stopPropagation();
+        });
+        region.addEventListener("keydown", function (event) {
+          if (event.key === " " || event.key === "Enter") {
+            event.stopPropagation();
+          }
+        });
+      }
+    });
+  </script>
 {% endblock %}

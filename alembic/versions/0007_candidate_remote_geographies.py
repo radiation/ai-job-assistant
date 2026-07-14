@@ -1,6 +1,6 @@
 """candidate remote geographies
 
-Revision ID: 0007_candidate_remote_geographies
+Revision ID: 0007_remote_geographies
 Revises: 0006_source_detection_runs
 Create Date: 2026-07-13 00:00:00.000000
 
@@ -12,7 +12,7 @@ import sqlalchemy as sa
 
 from alembic import op
 
-revision = "0007_candidate_remote_geographies"
+revision = "0007_remote_geographies"
 down_revision = "0006_source_detection_runs"
 branch_labels = None
 depends_on = None
