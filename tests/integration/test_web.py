@@ -43,6 +43,7 @@ def _seed_candidate(
         session,
         full_name="Jordan Lee",
         preferred_locations=["Seattle", "Remote"],
+        acceptable_remote_geographies=["United States"],
         remote_preference=RemotePreference.FLEXIBLE.value,
         target_levels=["director"],
         target_functions=["platform engineering"],
@@ -99,19 +100,26 @@ def _seed_job(session: Session, *, external_id: str = "job-1") -> UUID:
 def _greenhouse_posting(
     external_id: str,
     *,
+    company_name: str = "Acme",
+    title: str = "Director, Platform Engineering",
+    location_text: str = "Remote",
+    workplace_type: WorkplaceType = WorkplaceType.REMOTE,
     description: str = "Lead platform engineering with Kubernetes and cloud reliability.",
     raw_description: str | None = None,
 ) -> NormalizedJobPosting:
     return NormalizedJobPosting(
         provider=JobSourceProvider.GREENHOUSE,
-        company_name="Acme",
-        title="Director, Platform Engineering",
-        location_text="Remote",
-        workplace_type=WorkplaceType.REMOTE,
+        company_name=company_name,
+        title=title,
+        location_text=location_text,
+        workplace_type=workplace_type,
         description_raw=raw_description or description,
         description_normalized=description,
         compensation_text="$200k",
-        source_url=f"https://boards.greenhouse.io/acme/jobs/{external_id}",
+        source_url=(
+            f"https://boards.greenhouse.io/{company_name.casefold().replace(' ', '-')}/jobs/"
+            f"{external_id}"
+        ),
         external_id=external_id,
         internal_job_id=f"req-{external_id}",
         source_updated_at=None,
@@ -460,23 +468,35 @@ def test_job_sources_and_discover_pages(
 
     fake_connector = FakeJobSourceConnector(
         jobs=[
-            NormalizedJobPosting(
-                provider=JobSourceProvider.GREENHOUSE,
-                company_name="Acme",
-                title="Director, Platform Engineering",
-                location_text="Remote",
-                workplace_type=WorkplaceType.REMOTE,
-                description_raw="Lead platform engineering with Kubernetes and cloud reliability.",
-                description_normalized=(
-                    "Lead platform engineering with Kubernetes and cloud reliability."
+            _greenhouse_posting("review-1"),
+            _greenhouse_posting(
+                "eligible-1",
+                company_name="Northstar",
+                title=(
+                    "Senior Director of Platform Engineering, Reliability, and Developer "
+                    "Productivity"
                 ),
-                compensation_text="$200k",
-                source_url="https://boards.greenhouse.io/acme/jobs/1",
-                external_id="1",
-                internal_job_id="req-1",
-                source_updated_at=None,
-                raw_payload={"id": "1"},
-            )
+                location_text=(
+                    "Remote United States with quarterly travel to Seattle, WA and "
+                    "Bay Area planning sessions"
+                ),
+                workplace_type=WorkplaceType.REMOTE,
+                description=(
+                    "Lead an internal platform portfolio across cloud infrastructure, CI/CD, "
+                    "developer experience, and service reliability."
+                ),
+            ),
+            _greenhouse_posting(
+                "ineligible-1",
+                company_name="East Coast Systems",
+                title="VP, Infrastructure and Developer Experience",
+                location_text="New York, NY metropolitan area with weekly onsite leadership",
+                workplace_type=WorkplaceType.ONSITE,
+                description=(
+                    "Own infrastructure strategy and onsite leadership for platform and "
+                    "workplace systems."
+                ),
+            ),
         ]
     )
     app = cast(Any, client.app)
@@ -511,15 +531,84 @@ def test_job_sources_and_discover_pages(
     assert run_response.status_code == 200
     assert "Succeeded" in run_response.text
 
+    with session_factory() as session:
+        review_job = (
+            session.query(JobLeadModel).filter(JobLeadModel.external_id.endswith(":review-1")).one()
+        )
+        review_job_id = review_job.id
+
     discover_response = client.get("/discover")
     assert discover_response.status_code == 200
+    assert "Discovered jobs" in discover_response.text
+    assert "Queue filters" in discover_response.text
+    assert "Total discovered" in discover_response.text
+    assert "Currently shown" in discover_response.text
+    assert "Needs review" in discover_response.text
+    assert "Ineligible" in discover_response.text
+    assert "Matching the current source and search filters." not in discover_response.text
+    assert "Rows visible in this review queue." not in discover_response.text
+    assert "Jobs with location follow-up still required." not in discover_response.text
+    assert "Hidden by default until explicitly filtered in." not in discover_response.text
     assert "Director, Platform Engineering" in discover_response.text
+    assert (
+        "Senior Director of Platform Engineering, Reliability, and Developer "
+        "Productivity" in discover_response.text
+    )
+    assert (
+        "Remote United States with quarterly travel to Seattle, WA and Bay Area "
+        "planning sessions" in discover_response.text
+    )
+    assert "Remote" in discover_response.text
+    assert "Greenhouse" in discover_response.text
+    assert "Updated Jul" in discover_response.text
     assert "Needs Review" in discover_response.text
-    assert "Strong Recommend" in discover_response.text or "Recommend" in discover_response.text
+    assert "Fit" in discover_response.text
+    assert 'aria-label="Fit score ' in discover_response.text
+    assert "badge-recommendation" not in discover_response.text
+    assert "Job requisition" in discover_response.text
+    assert "Eligibility summary" in discover_response.text
+    assert "Source status" in discover_response.text
+    assert "Observed" in discover_response.text
+    assert "Last refreshed" in discover_response.text
+    assert (
+        "Lead platform engineering with Kubernetes and cloud reliability." in discover_response.text
+    )
+    assert "View match analysis" in discover_response.text
+    assert "Open source posting" in discover_response.text
+    assert "Matched verified evidence:" not in discover_response.text
+    assert "Positive signals:" not in discover_response.text
+    assert "Concerns:" not in discover_response.text
+    assert "Missing evidence:" not in discover_response.text
+    assert "East Coast Systems" not in discover_response.text
 
     filtered_discover_response = client.get("/discover?location_eligibility=needs_review")
     assert filtered_discover_response.status_code == 200
     assert "Director, Platform Engineering" in filtered_discover_response.text
+    assert "East Coast Systems" not in filtered_discover_response.text
+
+    ineligible_discover_response = client.get("/discover?location_eligibility=ineligible")
+    assert ineligible_discover_response.status_code == 200
+    assert "East Coast Systems" in ineligible_discover_response.text
+    assert (
+        "New York, NY metropolitan area with weekly onsite leadership"
+        in ineligible_discover_response.text
+    )
+
+    status_response = client.post(
+        f"/discover/jobs/{review_job_id}/status",
+        data={
+            "posting_status": "reviewing",
+            "return_to": "/discover?location_eligibility=needs_review",
+        },
+        follow_redirects=False,
+    )
+    assert status_response.status_code == 303
+    assert status_response.headers["location"] == "/discover?location_eligibility=needs_review"
+
+    with session_factory() as session:
+        updated_job = session.get(JobLeadModel, review_job_id)
+        assert updated_job is not None
+        assert updated_job.posting_status == "reviewing"
 
     app.dependency_overrides.pop(job_source_connector_dependency, None)
 
@@ -577,6 +666,32 @@ def test_job_source_partial_run_detail_and_invalid_discover_filters(
     invalid_score_response = client.get("/discover?minimum_score=not-a-number")
     assert invalid_score_response.status_code == 422
     assert "Invalid filter" in invalid_score_response.text
+
+
+def test_discover_empty_state_for_unmatched_filters(
+    client: TestClient, session_factory: sessionmaker[Session]
+) -> None:
+    with session_factory() as session:
+        _seed_candidate(session)
+        source = create_job_source_configuration(
+            session,
+            provider=JobSourceProvider.GREENHOUSE.value,
+            display_name="Acme Greenhouse",
+            company_name="Acme",
+            board_token="acme-empty-filter",
+            source_url="https://boards.greenhouse.io/acme",
+        )
+        run_job_source_import(
+            session,
+            source_id=source.id,
+            connector=FakeJobSourceConnector(jobs=[_greenhouse_posting("empty-filter-1")]),
+        )
+
+    response = client.get("/discover?company=Nope")
+
+    assert response.status_code == 200
+    assert "No matching discovered leads" in response.text
+    assert "Reset filters" in response.text
 
 
 def test_greenhouse_job_detail_suppresses_raw_markup(
