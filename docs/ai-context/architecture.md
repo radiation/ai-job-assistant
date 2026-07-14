@@ -45,10 +45,12 @@ Owns explicit use cases, orchestration, transaction behavior, run lifecycle hand
 Important modules:
 
 - `services.py`
-- `document_services.py`
+- `documents/`
 - `extraction.py`
-- `job_imports.py`
+- `job_sources/`
 - `source_detection.py`
+
+Broad application workflow modules should become feature packages only when they contain responsibilities with independent change reasons. Keep orchestration in application code, deterministic policy in domain code, and provider behavior in infrastructure adapters.
 
 ### Infrastructure
 
@@ -63,6 +65,8 @@ Provider-specific SDKs, HTTP policy, parsing, retries, and normalization stay he
 - JSON API: `src/ai_job_finder/api/`
 - Web: `src/ai_job_finder/web/`
 - CLI/smokes: top-level modules under `src/ai_job_finder/`
+
+The API v1 router is an explicit package under `api/v1/routes/`; `router.py` owns the `/api/v1` prefix and each feature module owns its handlers. Broad web workflows use route packages under `web/routes/` while focused route modules can remain single files.
 
 Delivery code must call application services rather than reproduce business logic.
 
@@ -79,10 +83,10 @@ Delivery code must call application services rather than reproduce business logi
 ## High-Impact Files
 
 - `application/services.py`
-- `infrastructure/database/models.py`
-- `api/v1/routes.py`
+- `infrastructure/database/models/`
+- `api/v1/routes/`
 - `api/v1/schemas.py`
-- `tests/integration/test_api.py`
-- `tests/integration/test_web.py`
+- `tests/integration/api/`
+- `tests/integration/web/`
 
 Use CodeGraph before changing them. Do not refactor them opportunistically.

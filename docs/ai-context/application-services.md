@@ -12,9 +12,11 @@ Before adding a service, query CodeGraph for existing equivalent behavior, calle
 
 ## Document Services
 
-Module: `application/document_services.py`
+Package: `application/documents/`
 
-Owns document metadata, storage coordination, text extraction workflow, and document retrieval behavior.
+Owns document metadata, storage coordination, extraction-run orchestration, proposal review flows, and document retrieval behavior.
+
+Use the package root for stable document workflows consumed by API, web, or tests. Keep duplicate matching and other low-level helpers in internal modules.
 
 ## Fact Extraction
 
@@ -26,9 +28,11 @@ AI output remains a proposal until review. Accepted proposals create draft facts
 
 ## Job Imports
 
-Module: `application/job_imports.py`
+Package: `application/job_sources/`
 
-Owns import-run creation, overlap checks, connector invocation, normalized posting processing, observation identity, checksums, savepoints, evaluation creation, closure/reactivation, and terminal status.
+Owns source-configuration workflows, import-run creation, overlap checks, connector invocation, payload identity, observation lifecycle, discovery ranking, savepoints, evaluation creation, closure/reactivation, and terminal status.
+
+When one application module accumulates workflows with distinct change reasons, split it into a feature package with an intentional root API. Keep transaction ownership explicit in the owning workflow module.
 
 ## Source Detection
 

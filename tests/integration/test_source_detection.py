@@ -12,7 +12,7 @@ from ai_job_finder.api.dependencies import (
     job_source_connector_dependency,
     public_page_fetcher_dependency,
 )
-from ai_job_finder.application.job_imports import create_job_source_configuration
+from ai_job_finder.application.job_sources import create_job_source_configuration
 from ai_job_finder.application.services import create_candidate_profile, create_career_fact
 from ai_job_finder.application.source_detection import (
     SourceDetectionConfig,

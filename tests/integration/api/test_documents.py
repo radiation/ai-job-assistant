@@ -15,7 +15,7 @@ from ai_job_finder.api.dependencies import (
     document_storage_dependency,
     settings_dependency,
 )
-from ai_job_finder.application.document_services import (
+from ai_job_finder.application.documents import (
     extract_document_text,
     start_extraction_run,
     upload_source_document,
@@ -308,7 +308,7 @@ def test_unexpected_post_processing_failure_marks_run_failed(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(
-        "ai_job_finder.application.document_services._find_duplicate_fact",
+        "ai_job_finder.application.documents.proposals._find_duplicate_fact",
         lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("post-processing boom")),
     )
     with _document_client(session_factory, raise_server_exceptions=False) as client:

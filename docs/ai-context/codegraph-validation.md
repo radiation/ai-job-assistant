@@ -93,7 +93,7 @@ codegraph query -p . -j CareerFactModel
 codegraph callers -p . -j accept_career_fact_proposal
 ```
 
-Graph summary: CodeGraph found manual career-fact creation through `application/services.py` and proposal acceptance through `application/document_services.py`.
+Graph summary: CodeGraph found manual career-fact creation through `application/services.py` and proposal acceptance through `application/documents/proposals.py`.
 
 Source verification: Manual creation uses the application service and deterministic lifecycle rules. Proposal acceptance creates a draft fact and links the proposal to the accepted fact. Merge links a proposal to an existing fact and only performs explicit narrow enrichment.
 
@@ -113,7 +113,7 @@ codegraph query -p . -j JobEvaluationModel
 codegraph callers -p . -j _create_evaluation
 ```
 
-Graph summary: CodeGraph found manual evaluation creation through `application/services.py`, import-triggered immutable evaluations through `application/job_imports.py`, and API/web/test callers.
+Graph summary: CodeGraph found manual evaluation creation through `application/services.py`, import-triggered immutable evaluations through `application/job_sources/imports.py`, and API/web/test callers.
 
 Source verification: Manual evaluation reuses deterministic scoring. Imports create new immutable evaluations for new or scoring-changed postings. Migration `0003` added `created_at` and removed the unique constraint that previously blocked immutable evaluation history.
 

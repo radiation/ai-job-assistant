@@ -85,7 +85,7 @@ codegraph query -p . -j run_job_source_import
 codegraph callers -p . -j run_job_source_import
 codegraph callees -p . -j run_job_source_import
 codegraph impact -p . -j SourcePostingStatus
-codegraph affected -p . src/ai_job_finder/application/job_imports.py
+codegraph affected -p . src/ai_job_finder/application/job_sources/imports.py
 codegraph node -p . run_job_source_import --limit 80
 ```
 

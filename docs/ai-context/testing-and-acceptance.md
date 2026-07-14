@@ -4,6 +4,8 @@
 
 Location: `tests/unit/`.
 
+Application workflow unit tests may live under feature paths such as `tests/unit/application/job_sources/` when a monolithic test file would otherwise track a decomposed application package poorly.
+
 Unit tests must not require PostgreSQL, Docker, Vertex, Greenhouse, or public URLs.
 
 ## Integration Tests
@@ -12,13 +14,16 @@ Location: `tests/integration/`.
 
 Important files:
 
-- `test_api.py`
-- `test_document_api.py`
+- `api/`
 - `test_source_detection.py`
-- `test_web.py`
+- `web/`
 - `test_db_constraints.py`
 
+The `api/` and `web/` integration directories mirror the route package organization. Keep duplicate test basenames package-qualified with `__init__.py` files.
+
 Use integration coverage for persistence, routes, schemas, cross-surface workflows, and constraints.
+
+Document workflow coverage remains integration-heavy because the behavior couples persistence, storage, extraction, and proposal review semantics.
 
 ## Acceptance Harness
 
@@ -27,6 +32,7 @@ uv run ai-job-finder-bootstrap
 ```
 
 Optional fake-backed phases cover document ingestion and Greenhouse detection/import. The harness uses public HTTP contracts, not direct database seeding.
+The harness lives under `src/ai_job_finder/bootstrap/`.
 
 ## Live Smokes
 

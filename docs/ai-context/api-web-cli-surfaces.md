@@ -2,7 +2,9 @@
 
 ## JSON API
 
-- `src/ai_job_finder/api/v1/routes.py`
+- `src/ai_job_finder/api/v1/routes/`
+	- `router.py` owns the `/api/v1` prefix and include order.
+	- feature route modules own endpoint handlers and local dependencies.
 - `src/ai_job_finder/api/v1/schemas.py`
 - `src/ai_job_finder/api/dependencies.py`
 - `src/ai_job_finder/api/errors.py`
@@ -14,6 +16,8 @@ Before changing an endpoint, inspect schemas, service callers, matching web/CLI 
 ## Server-Rendered Web
 
 - `src/ai_job_finder/web/routes/`
+	- `candidate/`, `documents/`, and `job_sources/` are route packages grouped by workflow.
+	- `jobs.py` remains the focused jobs route module.
 - `src/ai_job_finder/web/templates/`
 - `src/ai_job_finder/web/dependencies.py`
 
@@ -21,7 +25,7 @@ Jinja2 plus narrow HTMX fragments; not a SPA. Web routes call application servic
 
 ## CLI and Harness Modules
 
-- `bootstrap.py`
+- `bootstrap/`
 - `detect_source.py`
 - `sync_source.py`
 - `greenhouse_smoke.py`
