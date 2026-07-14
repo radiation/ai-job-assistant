@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from typing import Any
+from uuid import UUID
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, selectinload
@@ -21,6 +22,26 @@ from ai_job_finder.infrastructure.database.models import (
     JobSourceConfigurationModel,
     JobSourceObservationModel,
 )
+
+
+def count_active_job_source_observations(session: Session, source_id: UUID) -> int:
+    return _active_observation_count(session, source_id)
+
+
+def list_active_job_source_observation_counts(session: Session) -> dict[UUID, int]:
+    rows = (
+        session.execute(
+            select(
+                JobSourceObservationModel.source_configuration_id,
+                func.count(JobSourceObservationModel.id),
+            )
+            .where(JobSourceObservationModel.active.is_(True))
+            .group_by(JobSourceObservationModel.source_configuration_id)
+        )
+        .tuples()
+        .all()
+    )
+    return dict(rows)
 
 
 def _apply_job_fields(job_lead: JobLeadModel, posting: NormalizedJobPosting) -> None:

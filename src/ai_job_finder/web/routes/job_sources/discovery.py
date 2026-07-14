@@ -19,6 +19,7 @@ from ai_job_finder.domain.enums import (
     SourcePostingStatus,
     WorkplaceType,
 )
+from ai_job_finder.domain.errors import NotFoundError
 from ai_job_finder.web.dependencies import DbSession, optional_str, render_template
 
 router = APIRouter(tags=["web"])
@@ -162,5 +163,19 @@ async def discover_update_status(request: Request, job_id: UUID, session: DbSess
             and return_to.startswith("/discover")
         ):
             redirect_target = return_to
-    update_job_lead_status(session, job_id, PostingStatus(status_value).value)
+    try:
+        update_job_lead_status(session, job_id, PostingStatus(status_value).value)
+    except ValueError:
+        return _render_filter_error(request, "Select a valid posting status.")
+    except NotFoundError as exc:
+        return render_template(
+            request,
+            "errors/error.html",
+            {
+                "page_title": "Job Lead Not Found",
+                "title": "Job lead not found",
+                "message": str(exc),
+            },
+            status_code=404,
+        )
     return RedirectResponse(url=redirect_target, status_code=status.HTTP_303_SEE_OTHER)

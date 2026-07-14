@@ -10,11 +10,12 @@ from pydantic import ValidationError
 
 from ai_job_finder.api.v1.schemas import JobSourceConfigurationCreateRequest
 from ai_job_finder.application.job_sources import (
+    count_active_job_source_observations,
     create_job_source_configuration,
     get_job_source_configuration,
+    list_active_job_source_observation_counts,
     list_job_import_runs,
     list_job_source_configurations,
-    list_ranked_discovered_leads,
     set_job_source_enabled,
 )
 from ai_job_finder.domain.enums import (
@@ -52,16 +53,11 @@ def _validation_errors(exc: ValidationError) -> dict[str, str]:
 
 @router.get("/job-sources")
 def job_sources_list(request: Request, session: DbSession, flash: str | None = None) -> Response:
+    active_counts = list_active_job_source_observation_counts(session)
     items = [
         SourceListItem(
             source=source,
-            active_imported_count=len(
-                list_ranked_discovered_leads(
-                    session,
-                    source_id=source.id,
-                    include_ineligible=True,
-                )
-            ),
+            active_imported_count=active_counts.get(source.id, 0),
         )
         for source in list_job_source_configurations(session)
     ]
@@ -178,13 +174,7 @@ def job_sources_detail(
             "page_title": source.display_name,
             "source": source,
             "runs": runs,
-            "active_imported_count": len(
-                list_ranked_discovered_leads(
-                    session,
-                    source_id=source.id,
-                    include_ineligible=True,
-                )
-            ),
+            "active_imported_count": count_active_job_source_observations(session, source.id),
             "flash_messages": flashes,
         },
     )

@@ -10,7 +10,9 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
 from ai_job_finder.application.job_sources import (
+    count_active_job_source_observations,
     create_job_source_configuration,
+    list_active_job_source_observation_counts,
     list_ranked_discovered_leads,
     run_job_source_import,
 )
@@ -809,6 +811,40 @@ def test_same_external_id_on_different_boards_creates_distinct_observations(
 
         assert len(list(session.scalars(select(JobSourceObservationModel)))) == 2
         assert len(list(session.scalars(select(JobLeadModel)))) == 2
+
+
+def test_active_observation_counts_are_grouped_by_source(
+    session_factory: sessionmaker[Session],
+) -> None:
+    with session_factory() as session:
+        _seed_candidate(session)
+        first_source_id = _create_source(session)
+        second_source = create_job_source_configuration(
+            session,
+            provider=JobSourceProvider.GREENHOUSE.value,
+            display_name="Acme Europe",
+            company_name="Acme",
+            board_token="acme-eu",
+            source_url="https://boards.greenhouse.io/acme-eu",
+        )
+
+        run_job_source_import(
+            session,
+            source_id=first_source_id,
+            connector=FakeJobSourceConnector(jobs=[_posting("shared")]),
+        )
+        run_job_source_import(
+            session,
+            source_id=second_source.id,
+            connector=FakeJobSourceConnector(jobs=[_posting("shared")]),
+        )
+
+        counts = list_active_job_source_observation_counts(session)
+
+        assert counts[first_source_id] == 1
+        assert counts[second_source.id] == 1
+        assert count_active_job_source_observations(session, first_source_id) == 1
+        assert count_active_job_source_observations(session, second_source.id) == 1
 
 
 def test_concurrent_same_source_import_rejected(session_factory: sessionmaker[Session]) -> None:

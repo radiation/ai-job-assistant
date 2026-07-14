@@ -358,3 +358,34 @@ def test_discover_empty_state_for_unmatched_filters(
     assert response.status_code == 200
     assert "No matching discovered leads" in response.text
     assert "Reset filters" in response.text
+
+
+def test_discover_status_update_rejects_invalid_status_and_missing_job(
+    client: TestClient, session_factory: sessionmaker[Session]
+) -> None:
+    with session_factory() as session:
+        _seed_candidate(session)
+        job_id = _seed_job(session)
+
+    invalid_status_response = client.post(
+        f"/discover/jobs/{job_id}/status",
+        data={
+            "posting_status": "not-a-real-status",
+            "return_to": "/discover",
+        },
+        follow_redirects=False,
+    )
+    assert invalid_status_response.status_code == 422
+    assert "Invalid filter" in invalid_status_response.text
+    assert "Select a valid posting status." in invalid_status_response.text
+
+    missing_job_response = client.post(
+        "/discover/jobs/00000000-0000-0000-0000-000000000404/status",
+        data={
+            "posting_status": "reviewing",
+            "return_to": "/discover",
+        },
+        follow_redirects=False,
+    )
+    assert missing_job_response.status_code == 404
+    assert "Job lead not found" in missing_job_response.text
