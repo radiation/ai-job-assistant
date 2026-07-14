@@ -4,14 +4,16 @@
 
 Primary model hub:
 
-- `src/ai_job_finder/infrastructure/database/models.py`
+- `src/ai_job_finder/infrastructure/database/models/`
+	- `__init__.py` preserves the public import surface and imports every mapped class for Alembic metadata discovery.
+	- grouped modules hold candidate, document/proposal, job, and job-source mapped classes.
 
 Session/base:
 
 - `infrastructure/database/session.py`
 - `infrastructure/database/base.py`
 
-Treat `models.py` as high impact.
+Treat the `models` package facade and mapped-class modules as high impact.
 
 ## Migration History
 

@@ -416,13 +416,14 @@ uv run ai-job-finder-tests
 Run only the web integration tests when iterating on the server-rendered console:
 
 ```bash
-uv run pytest tests/integration/test_web.py
+uv run pytest tests/integration/web
 ```
 
 The repository keeps a clear split by directory:
 
 - `tests/unit` for fast unit tests
-- `tests/integration` for real-infrastructure integration tests
+- `tests/integration/api` and `tests/integration/web` for route-surface integration tests
+- `tests/integration` for remaining real-infrastructure integration tests
 
 ## Seed Development Data
 

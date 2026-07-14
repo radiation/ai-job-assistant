@@ -12,11 +12,12 @@ Location: `tests/integration/`.
 
 Important files:
 
-- `test_api.py`
-- `test_document_api.py`
+- `api/`
 - `test_source_detection.py`
-- `test_web.py`
+- `web/`
 - `test_db_constraints.py`
+
+The `api/` and `web/` integration directories mirror the route package organization. Keep duplicate test basenames package-qualified with `__init__.py` files.
 
 Use integration coverage for persistence, routes, schemas, cross-surface workflows, and constraints.
 
@@ -27,6 +28,7 @@ uv run ai-job-finder-bootstrap
 ```
 
 Optional fake-backed phases cover document ingestion and Greenhouse detection/import. The harness uses public HTTP contracts, not direct database seeding.
+The harness lives under `src/ai_job_finder/bootstrap/`.
 
 ## Live Smokes
 
