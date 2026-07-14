@@ -12,7 +12,7 @@ from ai_job_finder.api.v1.routes.dependencies import (
     SettingsDependency,
 )
 from ai_job_finder.api.v1.schemas import ExtractionRunResponse, SourceDocumentResponse
-from ai_job_finder.application.document_services import (
+from ai_job_finder.application.documents import (
     extract_document_text,
     get_source_document,
     list_extraction_runs,

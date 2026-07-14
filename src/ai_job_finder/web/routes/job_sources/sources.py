@@ -9,7 +9,7 @@ from fastapi.responses import RedirectResponse
 from pydantic import ValidationError
 
 from ai_job_finder.api.v1.schemas import JobSourceConfigurationCreateRequest
-from ai_job_finder.application.job_imports import (
+from ai_job_finder.application.job_sources import (
     create_job_source_configuration,
     get_job_source_configuration,
     list_job_import_runs,

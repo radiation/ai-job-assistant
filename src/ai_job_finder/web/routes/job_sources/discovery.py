@@ -7,7 +7,7 @@ from uuid import UUID
 from fastapi import APIRouter, Request, Response, status
 from fastapi.responses import RedirectResponse
 
-from ai_job_finder.application.job_imports import (
+from ai_job_finder.application.job_sources import (
     list_job_source_configurations,
     list_ranked_discovered_leads,
 )

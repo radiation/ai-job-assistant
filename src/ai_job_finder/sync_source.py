@@ -3,7 +3,7 @@ from __future__ import annotations
 import argparse
 from uuid import UUID
 
-from ai_job_finder.application.job_imports import run_job_source_import
+from ai_job_finder.application.job_sources import run_job_source_import
 from ai_job_finder.infrastructure.database.session import get_session_factory
 from ai_job_finder.infrastructure.job_sources.greenhouse import GreenhouseJobSourceConnector
 from ai_job_finder.settings import get_settings

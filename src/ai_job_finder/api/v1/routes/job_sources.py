@@ -19,7 +19,7 @@ from ai_job_finder.api.v1.schemas import (
     JobSourceConfigurationResponse,
     JobSourceConfigurationUpdateRequest,
 )
-from ai_job_finder.application.job_imports import (
+from ai_job_finder.application.job_sources import (
     create_job_source_configuration,
     get_job_import_run,
     get_job_source_configuration,

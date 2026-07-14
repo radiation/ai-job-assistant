@@ -45,10 +45,12 @@ Owns explicit use cases, orchestration, transaction behavior, run lifecycle hand
 Important modules:
 
 - `services.py`
-- `document_services.py`
+- `documents/`
 - `extraction.py`
-- `job_imports.py`
+- `job_sources/`
 - `source_detection.py`
+
+Broad application workflow modules should become feature packages only when they contain responsibilities with independent change reasons. Keep orchestration in application code, deterministic policy in domain code, and provider behavior in infrastructure adapters.
 
 ### Infrastructure
 

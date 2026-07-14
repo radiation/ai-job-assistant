@@ -10,7 +10,7 @@ from ai_job_finder.api.v1.schemas import (
     CareerFactProposalResponse,
     CareerFactProposalUpdateRequest,
 )
-from ai_job_finder.application.document_services import (
+from ai_job_finder.application.documents import (
     accept_career_fact_proposal,
     edit_career_fact_proposal,
     get_career_fact_proposal,

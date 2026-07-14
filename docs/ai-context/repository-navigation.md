@@ -112,3 +112,4 @@ Known validation cautions:
 - Alembic string table names are not semantic ORM-to-migration edges.
 - Route decorators, dependency injection, Jinja templates, settings, CLI entry-point strings, and parametrized tests need direct source verification.
 - API, web, model, and integration-test packages now use facades plus feature modules; verify both package `__init__.py` exports and feature-module handlers when tracing a path.
+- Application workflow packages may expose stable use cases from the package root while keeping transaction helpers, payload identity helpers, and duplicate-matching internals in feature modules; verify both the root export and the owning workflow module.

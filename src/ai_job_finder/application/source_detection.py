@@ -10,7 +10,7 @@ from uuid import UUID
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from ai_job_finder.application.job_imports import (
+from ai_job_finder.application.job_sources import (
     create_job_source_configuration,
     run_job_source_import,
 )

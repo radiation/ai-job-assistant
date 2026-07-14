@@ -5,7 +5,7 @@ from uuid import UUID
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session, sessionmaker
 
-from ai_job_finder.application.job_imports import (
+from ai_job_finder.application.job_sources import (
     create_job_source_configuration,
     run_job_source_import,
 )

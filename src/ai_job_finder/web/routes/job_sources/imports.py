@@ -10,7 +10,7 @@ from ai_job_finder.api.dependencies import (
     job_source_connector_dependency,
     settings_dependency,
 )
-from ai_job_finder.application.job_imports import (
+from ai_job_finder.application.job_sources import (
     get_job_import_run,
     get_job_source_configuration,
     run_job_source_import,

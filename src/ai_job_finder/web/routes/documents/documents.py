@@ -7,7 +7,7 @@ from fastapi.responses import RedirectResponse
 from starlette.datastructures import UploadFile as StarletteUploadFile
 
 from ai_job_finder.api.dependencies import career_fact_extractor_dependency
-from ai_job_finder.application.document_services import (
+from ai_job_finder.application.documents import (
     extract_document_text,
     get_source_document,
     list_source_documents,
