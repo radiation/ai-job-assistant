@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Annotated
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -25,6 +26,11 @@ from ai_job_finder.domain.enums import (
     SourceDocumentType,
     SourcePostingStatus,
     WorkplaceType,
+)
+from ai_job_finder.domain.job_searches import (
+    JobSearchDomain,
+    JobSearchRunStatus,
+    JobSearchSeniority,
 )
 
 
@@ -267,6 +273,124 @@ class JobLocationEligibilityResponse(BaseModel):
     status: JobLocationEligibilityStatus
     reasons: list[JobLocationEligibilityReason]
     summary: str
+
+
+class JobSearchDefinitionCreateRequest(BaseModel):
+    name: str = Field(min_length=1, max_length=200)
+    enabled: bool = True
+    title_include_patterns: list[str] = Field(default_factory=list)
+    title_exclude_patterns: list[str] = Field(default_factory=list)
+    target_domains: list[JobSearchDomain] = Field(default_factory=list)
+    target_seniority_levels: list[JobSearchSeniority] = Field(default_factory=list)
+    allowed_locations: list[str] = Field(default_factory=list)
+    allowed_remote_geographies: list[str] = Field(default_factory=list)
+    allowed_workplace_types: list[WorkplaceType] = Field(default_factory=list)
+    minimum_score_threshold: float = Field(ge=0.0, le=100.0)
+
+
+class JobSearchDefinitionUpdateRequest(JobSearchDefinitionCreateRequest):
+    pass
+
+
+class JobSearchDefinitionResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    name: str
+    enabled: bool
+    title_include_patterns: list[str]
+    title_exclude_patterns: list[str]
+    target_domains: list[JobSearchDomain]
+    target_seniority_levels: list[JobSearchSeniority]
+    allowed_locations: list[str]
+    allowed_remote_geographies: list[str]
+    allowed_workplace_types: list[WorkplaceType]
+    minimum_score_threshold: float
+    last_run_at: datetime | None = None
+    created_at: datetime
+    updated_at: datetime
+
+
+class JobSearchRunResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    search_definition_id: UUID
+    status: JobSearchRunStatus
+    started_at: datetime
+    completed_at: datetime | None
+    candidates_considered: Annotated[
+        int, Field(description="Number of candidate leads considered during this run.")
+    ]
+    matched_by_criteria: Annotated[
+        int,
+        Field(
+            description=(
+                "Number of candidate leads that matched the saved-search title, domain, "
+                "seniority, and location/workplace criteria before score threshold checks."
+            )
+        ),
+    ]
+    evaluated_count: Annotated[
+        int,
+        Field(
+            description=(
+                "Number of candidate leads for which a current evaluation was successfully "
+                "used during this run, whether reused or newly created."
+            )
+        ),
+    ]
+    above_threshold_count: Annotated[
+        int,
+        Field(
+            description=(
+                "Number of candidate leads whose current evaluation met or exceeded "
+                "the saved-search minimum score threshold."
+            )
+        ),
+    ]
+    excluded_count: Annotated[
+        int,
+        Field(
+            description=(
+                "Number of considered leads that did not end this run as final "
+                "saved-search matches, including criteria misses, threshold misses, "
+                "and per-lead failures."
+            )
+        ),
+    ]
+    failures_count: Annotated[
+        int, Field(description="Number of per-lead processing failures recorded during this run.")
+    ]
+    error_message: str | None
+    created_at: datetime
+    updated_at: datetime
+
+
+class JobSearchMatchResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    search_definition_id: UUID
+    search_run_id: UUID
+    job_lead_id: UUID
+    job_evaluation_id: UUID | None
+    scoring_version: str | None
+    score_at_match_time: float | None
+    recommendation_at_match_time: Recommendation | None
+    criteria_matched: bool
+    above_threshold: bool
+    matched: bool
+    matched_criteria: dict[str, list[str]]
+    exclusion_reasons: list[str]
+    inferred_domains: list[JobSearchDomain]
+    inferred_seniority_levels: list[JobSearchSeniority]
+    created_at: datetime
+
+
+class JobSearchRunDetailResponse(BaseModel):
+    run: JobSearchRunResponse
+    matches: list[JobSearchMatchResponse]
 
 
 class DiscoveredLeadResponse(BaseModel):

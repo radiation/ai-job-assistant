@@ -6,6 +6,8 @@ Location: `tests/unit/`.
 
 Application workflow unit tests may live under feature paths such as `tests/unit/application/job_sources/` when a monolithic test file would otherwise track a decomposed application package poorly.
 
+Saved-search workflow unit tests live under `tests/unit/application/job_searches/`. Calibration coverage lives in focused unit tests plus the version-controlled synthetic smoke fixture under `tests/fixtures/scoring/`.
+
 Unit tests must not require PostgreSQL, Docker, Vertex, Greenhouse, or public URLs.
 
 ## Integration Tests
@@ -56,3 +58,5 @@ Normal hooks and CI must not invoke them.
 Lifecycle changes should cover allowed/rejected transitions, timestamps, constraints, error mapping, and web controls.
 
 Import/detection changes should cover success, failures, partial behavior, idempotency, overlap/ambiguity, terminal status, and safety boundaries.
+
+Saved-search changes should cover deterministic matching semantics, threshold behavior, exact run-counter semantics, evaluation reuse, single-run evidence snapshot behavior, rerun history, per-run match uniqueness, and calibration ordering expectations.

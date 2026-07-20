@@ -7,6 +7,7 @@
       <p>Compact review queue for imported leads and actionable follow-up.</p>
     </div>
     <div class="table-actions">
+      <a class="button-link button-secondary" href="/job-searches">Saved searches</a>
       <a class="button-link" href="/job-sources">Manage sources</a>
     </div>
   </section>
@@ -39,6 +40,15 @@
       <a class="button-link button-secondary" href="/discover">Reset filters</a>
     </div>
     <form class="filter-form filter-form-wide discovery-filter-form" method="get" action="/discover">
+      <div class="field-group">
+        <label for="search_definition_id">Saved search</label>
+        <select id="search_definition_id" name="search_definition_id">
+          <option value="">All saved searches</option>
+          {% for search in saved_searches %}
+            <option value="{{ search.id }}" {% if selected.search_definition_id == search.id|string %}selected{% endif %}>{{ search.name }}</option>
+          {% endfor %}
+        </select>
+      </div>
       <div class="field-group">
         <label for="source_id">Source</label>
         <select id="source_id" name="source_id">

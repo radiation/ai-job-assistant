@@ -279,6 +279,85 @@ def test_job_sources_and_discover_pages(
     app.dependency_overrides.pop(job_source_connector_dependency, None)
 
 
+def test_saved_search_pages_and_discovery_filter(
+    client: TestClient, session_factory: sessionmaker[Session]
+) -> None:
+    with session_factory() as session:
+        _seed_candidate(session)
+
+    fake_connector = FakeJobSourceConnector(
+        jobs=[
+            _greenhouse_posting("strong", location_text="Remote United States"),
+            _greenhouse_posting(
+                "weak",
+                company_name="LedgerWorks",
+                title="Finance Operations Manager",
+                location_text="New York, NY",
+                workplace_type=WorkplaceType.ONSITE,
+                description="Own finance operations reporting and vendor invoices.",
+            ),
+        ]
+    )
+    app = cast(Any, client.app)
+    app.dependency_overrides[job_source_connector_dependency] = lambda: fake_connector
+
+    source_create = client.post(
+        "/job-sources",
+        data={
+            "display_name": "Acme Greenhouse",
+            "company_name": "Acme",
+            "board_token": "acme-search-web",
+            "source_url": "https://boards.greenhouse.io/acme",
+        },
+        follow_redirects=False,
+    )
+    source_id = source_create.headers["location"].split("/job-sources/")[1].split("?")[0]
+    sync_response = client.post(f"/job-sources/{source_id}/sync", follow_redirects=False)
+    assert sync_response.status_code == 303
+
+    search_new = client.get("/job-searches/new")
+    assert search_new.status_code == 200
+    assert "New Saved Search" in search_new.text
+
+    create_search = client.post(
+        "/job-searches",
+        data={
+            "name": "Platform roles",
+            "title_include_patterns": "platform engineering",
+            "title_exclude_patterns": "finance",
+            "target_domains": "platform_engineering",
+            "target_seniority_levels": "director",
+            "allowed_locations": "",
+            "allowed_remote_geographies": "United States",
+            "allowed_workplace_types": "remote",
+            "minimum_score_threshold": "70",
+        },
+        follow_redirects=False,
+    )
+    assert create_search.status_code == 303
+
+    detail = client.get(create_search.headers["location"])
+    assert detail.status_code == 200
+    assert "Run now" in detail.text
+
+    search_id = create_search.headers["location"].split("/job-searches/")[1]
+    run_response = client.post(f"/job-searches/{search_id}/runs", follow_redirects=False)
+    assert run_response.status_code == 303
+
+    run_detail = client.get(run_response.headers["location"])
+    assert run_detail.status_code == 200
+    assert "Matched jobs" in run_detail.text
+    assert "Director, Platform Engineering" in run_detail.text
+    assert "Finance Operations Manager" in run_detail.text
+
+    filtered_discover = client.get(f"/discover?search_definition_id={search_id}")
+    assert filtered_discover.status_code == 200
+    assert "Director, Platform Engineering" in filtered_discover.text
+    assert "Finance Operations Manager" not in filtered_discover.text
+
+    app.dependency_overrides.pop(job_source_connector_dependency, None)
+
+
 def test_empty_job_sources_page(client: TestClient) -> None:
     response = client.get("/job-sources")
 

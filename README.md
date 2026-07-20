@@ -337,6 +337,59 @@ Each fact carries a typed provenance source plus free-form source reference:
 - Explanations now include matched verified evidence, concerns, missing evidence, and the scoring version.
 - Historical evaluations remain stored by scoring version, so earlier `foundation_v1` rows are preserved.
 
+## Saved Searches And Calibration
+
+- Saved searches are provider-neutral definitions with deterministic title include/exclude matching, explicit domain and seniority values, location and workplace constraints, an `enabled` flag, and a minimum score threshold.
+- Manual saved-search runs evaluate existing imported leads only. They do not discover new jobs, create sources automatically, or schedule recurring work.
+- Each manual run records `running`, `completed`, `partial`, or `failed` status plus considered, criteria-matched, evaluations-used, above-threshold, excluded, and failure counts.
+- Match records persist the job lead, evaluation used, score at match time, matched criteria, exclusion reasons, inferred domains, inferred seniority, and threshold decision.
+- The discovered-jobs queue can be filtered live with a saved search and an additional minimum-score filter without mutating the underlying job lead or evaluation history.
+- Verified candidate evidence is loaded once at the start of a manual run as an immutable snapshot and reused for evaluation freshness checks and any newly created evaluations in that run.
+
+### Matching Semantics
+
+- Title matching is deterministic normalized substring matching.
+- Include patterns are additive and explainable.
+- Exclude patterns override includes.
+- Domain and seniority are inferred from deterministic title and description phrase rules; they are not LLM-derived.
+- Remote geography rules are explicit. A remote role with unclear geography does not satisfy a saved search that requires a specific remote geography.
+- Score thresholds gate whether a role is considered a final saved-search match, but they do not delete or suppress the underlying imported role or evaluation.
+- `matched_by_criteria` counts saved-search filter matches before score checks.
+- `above_threshold_count` counts leads whose current evaluation met the saved-search minimum score threshold.
+- Final saved-search matches satisfy both criteria matching and threshold acceptance.
+
+### Golden Set
+
+- The version-controlled calibration fixture lives at `tests/fixtures/scoring/golden_set_v1.json`.
+- The current fixture is explicitly a synthetic smoke/regression set, not a representative calibration of Bryan's full candidate profile against sanitized real roles.
+- The calibration candidate and every verified calibration fact now share one coherent synthetic candidate/profile identity.
+- Each case captures a stable case ID, job title, company, description, location/workplace data, expected qualitative bucket, optional score range, optional ordering group, and human rationale.
+- The calibration harness uses the current deterministic scorer and reports actual score, recommendation, scoring version, factor outputs, matched evidence, positive signals, concerns, and missing evidence.
+- Bucket expectations map to the current recommendation scale: `strong_fit` -> `strong_recommend`, `plausible_fit` -> `recommend`, `weak_fit` -> `hold`, `reject` -> `decline`.
+- A future representative calibration set should use sanitized real postings and a representative verified-fact snapshot before any autonomous threshold-based suppression of opportunities is trusted.
+
+### Operator Recipes
+
+Add a golden-set case:
+
+1. Append a new object to `tests/fixtures/scoring/golden_set_v1.json`.
+2. Set the expected bucket and optional min/max score bounds.
+3. Re-run the calibration harness and adjust expectations only when the current scorer behavior is intentionally accepted.
+4. Keep the synthetic smoke metadata accurate unless you are intentionally introducing a different fixture type.
+
+Run calibration:
+
+```bash
+uv run ai-job-finder-calibrate-scoring
+```
+
+Create and manually run a saved search:
+
+1. Open `/job-searches/new` in the web app or POST to `/api/v1/job-searches`.
+2. Configure title patterns, domains, seniority, location/workplace rules, and the minimum score threshold.
+3. Trigger a manual run from `/job-searches/{id}` or POST to `/api/v1/job-searches/{id}/runs`.
+4. Review matched and excluded jobs under `/job-search-runs/{run_id}`.
+
 ## Docker Compose Development Stack
 
 Treat Docker Compose as the primary local development environment:

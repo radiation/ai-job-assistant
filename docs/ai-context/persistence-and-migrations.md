@@ -23,12 +23,16 @@ Treat the `models` package facade and mapped-class modules as high impact.
 - `0004_document_assisted_fact_ingestion.py`
 - `0005_greenhouse_job_discovery.py`
 - `0006_source_detection_runs.py`
+- `0007_candidate_remote_geographies.py`
+- `0008_saved_job_searches.py`
 
 Schema changes require a new Alembic migration. Do not edit applied migrations unless explicitly required.
 
 ## Persistence Invariants
 
 Protect one active candidate, source identity/idempotency, immutable history, observation provenance, run status/overlap, and foreign-key links.
+
+Saved-search persistence also protects unique search names, valid threshold range, one running run per search definition, and one match row per job lead per run.
 
 Inspect `tests/integration/test_db_constraints.py` for constraint changes.
 

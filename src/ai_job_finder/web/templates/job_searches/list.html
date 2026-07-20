@@ -1,0 +1,49 @@
+{% extends 'base.html' %}
+
+{% block content %}
+  <section class="page-header">
+    <div>
+      <h1>Saved Searches</h1>
+      <p>Reusable deterministic role filters and score thresholds for imported leads.</p>
+    </div>
+    <div class="actions-row">
+      <a class="button-link" href="/job-searches/new">Create saved search</a>
+      <a class="button-link button-secondary" href="/discover">Review discovered jobs</a>
+    </div>
+  </section>
+
+  {% if search_items %}
+    <section class="panel">
+      <div class="table-wrap">
+        <table class="job-table">
+          <thead>
+            <tr>
+              <th>Name</th>
+              <th>Enabled</th>
+              <th>Threshold</th>
+              <th>Last run</th>
+              <th>Runs</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for item in search_items %}
+              <tr>
+                <td>{{ item.search.name }}</td>
+                <td>{{ 'Yes' if item.search.enabled else 'No' }}</td>
+                <td>{{ '%.1f'|format(item.search.minimum_score_threshold) }}</td>
+                <td>{{ item.search.last_run_at|datetime if item.search.last_run_at else 'Never' }}</td>
+                <td>{{ item.run_count }}</td>
+                <td><a href="/job-searches/{{ item.search.id }}">View</a></td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  {% else %}
+    {% with title='No saved searches configured', message='Create a deterministic search definition to review imported leads against your target titles, domains, and score threshold.', action_href='/job-searches/new', action_label='Create saved search' %}
+      {% include 'components/empty_state.html' %}
+    {% endwith %}
+  {% endif %}
+{% endblock %}

@@ -29,6 +29,7 @@ def install_error_handlers(app: FastAPI) -> None:
             "invalid_proposal_transition": 409,
             "merge_target_mismatch": 409,
             "duplicate_job_source": 409,
+            "duplicate_job_search": 409,
             "unsafe_url": 422,
             "blocked_redirect": 422,
             "unavailable_page": 502,
@@ -47,6 +48,7 @@ def install_error_handlers(app: FastAPI) -> None:
             "suspicious_empty_job_source_result": 409,
             "overlapping_job_import": 409,
             "missing_candidate": 409,
+            "job_search_definition_disabled": 409,
         }
         status_code = status_code_by_code.get(exc.code, 409)
         if not _is_api_request(request):

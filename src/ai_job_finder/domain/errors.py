@@ -73,6 +73,10 @@ class DuplicateJobSourceError(DomainError):
     code = "duplicate_job_source"
 
 
+class DuplicateJobSearchError(DomainError):
+    code = "duplicate_job_search"
+
+
 class UnsafeUrlError(DomainError):
     code = "unsafe_url"
 
@@ -143,3 +147,7 @@ class OverlappingJobImportError(DomainError):
 
 class MissingCandidateError(DomainError):
     code = "missing_candidate"
+
+
+class JobSearchDefinitionDisabledError(DomainError):
+    code = "job_search_definition_disabled"

@@ -1,0 +1,70 @@
+{% extends 'base.html' %}
+
+{% block content %}
+  <section class="page-header">
+    <div>
+      <h1>{{ search.name }}</h1>
+      <p>Saved search definition and manual run history.</p>
+    </div>
+    <div class="actions-row">
+      <form method="post" action="/job-searches/{{ search.id }}/runs"><button type="submit">Run now</button></form>
+      {% if search.enabled %}
+        <form method="post" action="/job-searches/{{ search.id }}/disable"><button class="button-secondary" type="submit">Disable</button></form>
+      {% else %}
+        <form method="post" action="/job-searches/{{ search.id }}/enable"><button type="submit">Enable</button></form>
+      {% endif %}
+    </div>
+  </section>
+
+  <section class="detail-grid">
+    <article class="panel">
+      <h2>Search criteria</h2>
+      <dl class="detail-list">
+        <div><dt>Threshold</dt><dd>{{ '%.1f'|format(search.minimum_score_threshold) }}</dd></div>
+        <div><dt>Enabled</dt><dd>{{ 'Yes' if search.enabled else 'No' }}</dd></div>
+        <div><dt>Title includes</dt><dd>{{ search.title_include_patterns|join(', ') or 'Not specified' }}</dd></div>
+        <div><dt>Title excludes</dt><dd>{{ search.title_exclude_patterns|join(', ') or 'Not specified' }}</dd></div>
+        <div><dt>Domains</dt><dd>{{ search.target_domains|join(', ') or 'Not specified' }}</dd></div>
+        <div><dt>Seniority</dt><dd>{{ search.target_seniority_levels|join(', ') or 'Not specified' }}</dd></div>
+        <div><dt>Allowed locations</dt><dd>{{ search.allowed_locations|join(', ') or 'Not specified' }}</dd></div>
+        <div><dt>Allowed remote geographies</dt><dd>{{ search.allowed_remote_geographies|join(', ') or 'Not specified' }}</dd></div>
+        <div><dt>Allowed workplace types</dt><dd>{{ search.allowed_workplace_types|join(', ') or 'Not specified' }}</dd></div>
+      </dl>
+    </article>
+    <article class="panel">
+      <h2>Run history</h2>
+      <p class="muted">Criteria matches satisfy the saved-search filters before scoring. Above threshold also requires the minimum score. Final matches satisfy both.</p>
+      {% if runs %}
+        <table class="job-table">
+          <thead><tr><th>Status</th><th>Started</th><th>Considered</th><th>Criteria matched</th><th>Evaluations used</th><th>Above threshold</th><th>Final matches</th><th></th></tr></thead>
+          <tbody>
+            {% for run in runs %}
+              <tr>
+                <td><span class="badge badge-status">{{ run.status|humanize }}</span></td>
+                <td>{{ run.started_at|datetime }}</td>
+                <td>{{ run.candidates_considered }}</td>
+                <td>{{ run.matched_by_criteria }}</td>
+                <td>{{ run.evaluated_count }}</td>
+                <td>{{ run.above_threshold_count }}</td>
+                <td>{{ run.candidates_considered - run.excluded_count }}</td>
+                <td><a href="/job-search-runs/{{ run.id }}">View run</a></td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      {% else %}
+        <p class="muted">No runs yet.</p>
+      {% endif %}
+    </article>
+  </section>
+
+  <section class="panel">
+    <h2>Edit saved search</h2>
+    <form method="post" action="/job-searches/{{ search.id }}" class="stacked-form">
+      {% include 'job_searches/_form.html' %}
+      <div class="actions-row">
+        <button type="submit">Save changes</button>
+      </div>
+    </form>
+  </section>
+{% endblock %}

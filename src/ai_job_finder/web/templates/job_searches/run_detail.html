@@ -1,0 +1,80 @@
+{% extends 'base.html' %}
+
+{% block content %}
+  <section class="page-header">
+    <div>
+      <h1>{{ search.name }}</h1>
+      <p>Manual saved-search run details.</p>
+    </div>
+    <div class="actions-row">
+      <a class="button-link button-secondary" href="/job-searches/{{ search.id }}">Back to search</a>
+      <a class="button-link" href="/discover?search_definition_id={{ search.id }}">Filter discovery queue</a>
+    </div>
+  </section>
+
+  <section class="detail-grid">
+    <article class="panel">
+      <h2>Run summary</h2>
+      <p class="muted">Criteria matched counts saved-search filters before score checks. Above threshold counts evaluated leads at or above the saved-search minimum. Final matches satisfy both and are shown in the matched table below.</p>
+      <dl class="detail-list">
+        <div><dt>Status</dt><dd>{{ run.status|humanize }}</dd></div>
+        <div><dt>Started</dt><dd>{{ run.started_at|datetime }}</dd></div>
+        <div><dt>Completed</dt><dd>{{ run.completed_at|datetime if run.completed_at else 'Running' }}</dd></div>
+        <div><dt>Considered</dt><dd>{{ run.candidates_considered }}</dd></div>
+        <div><dt>Criteria matched</dt><dd>{{ run.matched_by_criteria }}</dd></div>
+        <div><dt>Evaluations used</dt><dd>{{ run.evaluated_count }}</dd></div>
+        <div><dt>Above threshold</dt><dd>{{ run.above_threshold_count }}</dd></div>
+        <div><dt>Final matches</dt><dd>{{ match_records | selectattr('match.matched') | list | length }}</dd></div>
+        <div><dt>Excluded</dt><dd>{{ run.excluded_count }}</dd></div>
+        <div><dt>Failures</dt><dd>{{ run.failures_count }}</dd></div>
+        <div><dt>Error</dt><dd>{{ run.error_message or 'None' }}</dd></div>
+      </dl>
+    </article>
+  </section>
+
+  <section class="panel">
+    <h2>Matched jobs</h2>
+    {% set matched_records = match_records | selectattr('match.matched') | list %}
+    {% if matched_records %}
+      <table class="job-table">
+        <thead><tr><th>Company</th><th>Title</th><th>Score</th><th>Recommendation</th><th>Criteria</th><th></th></tr></thead>
+        <tbody>
+          {% for record in matched_records %}
+            <tr>
+              <td>{{ record.job_lead.company_name }}</td>
+              <td>{{ record.job_lead.title }}</td>
+              <td>{{ '%.1f'|format(record.match.score_at_match_time or 0) }}</td>
+              <td>{{ record.match.recommendation_at_match_time|humanize if record.match.recommendation_at_match_time else 'Not scored' }}</td>
+              <td>{{ record.match.matched_criteria.keys()|join(', ') }}</td>
+              <td><a href="/jobs/{{ record.job_lead.id }}">View job</a></td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    {% else %}
+      <p class="muted">No jobs met the saved-search criteria and threshold in this run.</p>
+    {% endif %}
+  </section>
+
+  <section class="panel">
+    <h2>Excluded jobs</h2>
+    {% set excluded_records = match_records | rejectattr('match.matched') | list %}
+    {% if excluded_records %}
+      <table class="job-table">
+        <thead><tr><th>Company</th><th>Title</th><th>Score</th><th>Reasons</th></tr></thead>
+        <tbody>
+          {% for record in excluded_records %}
+            <tr>
+              <td>{{ record.job_lead.company_name }}</td>
+              <td>{{ record.job_lead.title }}</td>
+              <td>{{ '%.1f'|format(record.match.score_at_match_time or 0) if record.match.score_at_match_time is not none else 'N/A' }}</td>
+              <td>{{ record.match.exclusion_reasons|join('; ') or 'Not retained' }}</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    {% else %}
+      <p class="muted">No exclusions were recorded for this run.</p>
+    {% endif %}
+  </section>
+{% endblock %}

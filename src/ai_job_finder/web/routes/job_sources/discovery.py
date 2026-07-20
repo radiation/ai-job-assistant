@@ -7,6 +7,7 @@ from uuid import UUID
 from fastapi import APIRouter, Request, Response, status
 from fastapi.responses import RedirectResponse
 
+from ai_job_finder.application.job_searches import list_job_search_definitions
 from ai_job_finder.application.job_sources import (
     list_job_source_configurations,
     list_ranked_discovered_leads,
@@ -51,6 +52,7 @@ def _render_filter_error(request: Request, message: str) -> Response:
 def discover_queue(
     request: Request,
     session: DbSession,
+    search_definition_id: str | None = None,
     source_id: str | None = None,
     company: str | None = None,
     source_posting_status: str | None = None,
@@ -61,6 +63,10 @@ def discover_queue(
     workplace_type: str | None = None,
     location_eligibility: str | None = None,
 ) -> Response:
+    try:
+        parsed_search_definition_id = UUID(search_definition_id) if search_definition_id else None
+    except ValueError:
+        return _render_filter_error(request, "Saved search filter must be a valid identifier.")
     try:
         parsed_source_id = UUID(source_id) if source_id else None
     except ValueError:
@@ -76,6 +82,7 @@ def discover_queue(
     except ValueError:
         return _render_filter_error(request, "Location eligibility filter is invalid.")
     selected = {
+        "search_definition_id": search_definition_id or "",
         "source_id": source_id or "",
         "company": company or "",
         "source_posting_status": source_posting_status or "",
@@ -88,6 +95,7 @@ def discover_queue(
     }
     items = list_ranked_discovered_leads(
         session,
+        search_definition_id=parsed_search_definition_id,
         source_id=parsed_source_id,
         company=optional_str(company),
         source_posting_status=optional_str(source_posting_status),
@@ -100,6 +108,7 @@ def discover_queue(
     )
     all_matching_items = list_ranked_discovered_leads(
         session,
+        search_definition_id=parsed_search_definition_id,
         source_id=parsed_source_id,
         company=optional_str(company),
         source_posting_status=optional_str(source_posting_status),
@@ -138,6 +147,7 @@ def discover_queue(
             "queue_stats": stats,
             "has_filters": has_filters,
             "return_to": return_to,
+            "saved_searches": list_job_search_definitions(session),
             "sources": list_job_source_configurations(session),
             "posting_statuses": list(PostingStatus),
             "source_posting_statuses": list(SourcePostingStatus),
