@@ -38,6 +38,7 @@ ai-job-finder-sync-source = "ai_job_finder.sync_source:main"
 ai-job-finder-greenhouse-smoke = "ai_job_finder.greenhouse_smoke:main"
 ai-job-finder-detect-source = "ai_job_finder.detect_source:main"
 ai-job-finder-source-detection-smoke = "ai_job_finder.source_detection_smoke:main"
+ai-job-finder-calibrate-scoring = "ai_job_finder.calibrate_scoring:main"
 
 [build-system]
 requires = ["setuptools>=83.0.0"]

@@ -1,0 +1,60 @@
+{
+  "version": "v1",
+  "fixture_kind": "synthetic_smoke",
+  "candidate_profile": "synthetic",
+  "purpose": "Deterministic scorer smoke and ordering regression fixture for the synthetic saved-search calibration slice.",
+  "cases": [
+    {
+      "case_id": "strong-platform-remote",
+      "title": "Senior Director, Platform Engineering",
+      "company": "Northstar",
+      "description": "Lead platform engineering, developer experience, Kubernetes, CI/CD, and cloud reliability for a self-service developer platform.",
+      "location_text": "Remote United States",
+      "workplace_type": "remote",
+      "expected_bucket": "strong_fit",
+      "expected_min_score": 80,
+      "expected_max_score": 100,
+      "expected_ordering_group": "platform-core",
+      "rationale": "Direct alignment with target function, seniority, and verified platform evidence."
+    },
+    {
+      "case_id": "plausible-infra-hybrid",
+      "title": "Director, Infrastructure Engineering",
+      "company": "Summit Cloud",
+      "description": "Own infrastructure modernization, reliability, and cloud operations for engineering teams.",
+      "location_text": "Seattle, WA",
+      "workplace_type": "hybrid",
+      "expected_bucket": "plausible_fit",
+      "expected_min_score": 60,
+      "expected_max_score": 89,
+      "expected_ordering_group": "platform-adjacent",
+      "rationale": "Strong seniority and adjacent domain fit, but less explicit developer-platform language."
+    },
+    {
+      "case_id": "weak-platform-onsite",
+      "title": "Engineering Manager, Internal Tools",
+      "company": "Harbor Systems",
+      "description": "Manage internal tools delivery with some CI/CD work and moderate cloud operations exposure.",
+      "location_text": "Austin, TX",
+      "workplace_type": "onsite",
+      "expected_bucket": "weak_fit",
+      "expected_min_score": 40,
+      "expected_max_score": 79,
+      "expected_ordering_group": "edge",
+      "rationale": "Some relevant signals but weaker seniority and location alignment."
+    },
+    {
+      "case_id": "reject-finance-ops",
+      "title": "Finance Operations Manager",
+      "company": "LedgerWorks",
+      "description": "Own finance operations reporting, procurement workflows, and vendor invoices.",
+      "location_text": "New York, NY",
+      "workplace_type": "onsite",
+      "expected_bucket": "reject",
+      "expected_min_score": 0,
+      "expected_max_score": 59,
+      "expected_ordering_group": "reject",
+      "rationale": "Outside target function and lacks platform or infrastructure evidence."
+    }
+  ]
+}

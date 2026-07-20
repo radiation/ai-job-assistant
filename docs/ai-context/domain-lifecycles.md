@@ -81,3 +81,25 @@ Every attempt is persisted. Ambiguity requires explicit token selection. Detecti
 `JobEvaluation` is immutable historical output tied to a scoring version. Current version: `candidate_evidence_v2`.
 
 Create a new evaluation only for a new job or materially changed scoring inputs.
+
+## Job Search Definition
+
+Saved searches are persisted, provider-neutral definitions. `enabled` is operational state only; it does not delete runs or matches.
+
+Definitions contain deterministic title patterns, target domains, target seniority levels, location/workplace rules, and a minimum score threshold.
+
+## Job Search Run
+
+```text
+running -> completed
+running -> partial
+running -> failed
+```
+
+Every manual run is persisted before evaluation begins. Historical runs remain. A new run creates a new historical record even when it evaluates the same imported jobs.
+
+`matched_by_criteria` counts leads that satisfied saved-search filters before score checks. `evaluated_count` counts leads for which a current evaluation was successfully used, whether reused or newly created. `above_threshold_count` counts evaluated leads at or above the saved-search minimum score threshold. Final matches are leads that remain after exclusions.
+
+## Job Search Match
+
+One persisted match record exists per job lead per run. Matches retain score-at-run-time, matched criteria, exclusion reasons, inferred domain and seniority, and threshold outcome.

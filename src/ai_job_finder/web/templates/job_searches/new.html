@@ -1,0 +1,20 @@
+{% extends 'base.html' %}
+
+{% block content %}
+  <section class="page-header">
+    <div>
+      <h1>New Saved Search</h1>
+      <p>Define deterministic search criteria for imported roles.</p>
+    </div>
+  </section>
+
+  <section class="panel">
+    <form method="post" action="/job-searches" class="stacked-form">
+      {% include 'job_searches/_form.html' %}
+      <div class="actions-row">
+        <button type="submit">Create saved search</button>
+        <a class="button-link button-secondary" href="/job-searches">Cancel</a>
+      </div>
+    </form>
+  </section>
+{% endblock %}

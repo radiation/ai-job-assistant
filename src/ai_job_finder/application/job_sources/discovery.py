@@ -7,8 +7,13 @@ from uuid import UUID
 from sqlalchemy import Select, and_, func, select
 from sqlalchemy.orm import Session
 
+from ai_job_finder.application.job_searches.definitions import get_job_search_definition
 from ai_job_finder.application.job_sources.imports import _current_candidate
 from ai_job_finder.domain.enums import JobLocationEligibilityStatus, WorkplaceType
+from ai_job_finder.domain.job_searches import (
+    JobSearchLocationContext,
+    evaluate_job_search_match,
+)
 from ai_job_finder.domain.location_eligibility import (
     JobLocationEligibilityResult,
     JobLocationSignals,
@@ -56,6 +61,7 @@ def _latest_evaluation_subquery() -> Select[tuple[UUID, Any]]:
 def list_ranked_discovered_leads(
     session: Session,
     *,
+    search_definition_id: UUID | None = None,
     source_id: UUID | None = None,
     company: str | None = None,
     source_posting_status: str | None = None,
@@ -69,6 +75,11 @@ def list_ranked_discovered_leads(
 ) -> list[RankedDiscoveredLead]:
     candidate = _current_candidate(session)
     candidate_snapshot = candidate.to_snapshot()
+    search_definition = (
+        get_job_search_definition(session, search_definition_id)
+        if search_definition_id is not None
+        else None
+    )
     latest = _latest_evaluation_subquery().subquery()
     query = (
         select(JobSourceObservationModel, JobLeadModel, JobEvaluationModel)
@@ -118,6 +129,27 @@ def list_ranked_discovered_leads(
             and eligibility.status is JobLocationEligibilityStatus.INELIGIBLE
         ):
             continue
+        if search_definition is not None:
+            payload = observation.normalized_payload or {}
+            offices = payload.get("offices")
+            metadata = payload.get("metadata")
+            search_match = evaluate_job_search_match(
+                search_definition.to_snapshot(),
+                job.to_snapshot(),
+                evaluation.to_snapshot() if evaluation is not None else None,
+                location_context=JobSearchLocationContext(
+                    location_text=job.location_text,
+                    workplace_type=(
+                        WorkplaceType(job.workplace_type) if job.workplace_type else None
+                    ),
+                    offices=[str(value) for value in offices if isinstance(value, str)]
+                    if isinstance(offices, list)
+                    else [],
+                    metadata=metadata if isinstance(metadata, dict) else {},
+                ),
+            )
+            if not search_match.matched:
+                continue
         items.append(
             RankedDiscoveredLead(
                 job=job,

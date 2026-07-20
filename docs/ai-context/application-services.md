@@ -40,6 +40,14 @@ Module: `application/source_detection.py`
 
 Owns persisted detection runs, URL/company candidate orchestration, token validation, ambiguity, approval, optional sync reuse, and terminal-state guarantees.
 
+## Job Searches
+
+Package: `application/job_searches/`
+
+Owns saved-search definition CRUD, deterministic calibration fixture loading/reporting, manual run orchestration, evaluation reuse or refresh checks, match persistence, and run terminal-state guarantees.
+
+Manual run orchestration loads the candidate's verified evidence once per run as an immutable snapshot, then reuses that snapshot for evaluation freshness checks and any newly created evaluations during the run.
+
 ## Transaction Expectations
 
 Before changing a workflow, locate:

@@ -142,6 +142,7 @@ def get_job_import_run_route(run_id: UUID, session: DbSession) -> JobImportRunRe
 @router.get("/discovered-leads", response_model=list[DiscoveredLeadResponse])
 def get_discovered_leads(
     session: DbSession,
+    search_definition_id: UUID | None = None,
     source_id: UUID | None = None,
     company: str | None = None,
     source_posting_status: str | None = None,
@@ -154,6 +155,7 @@ def get_discovered_leads(
 ) -> list[DiscoveredLeadResponse]:
     items = list_ranked_discovered_leads(
         session,
+        search_definition_id=search_definition_id,
         source_id=source_id,
         company=company,
         source_posting_status=source_posting_status,

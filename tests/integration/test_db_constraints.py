@@ -38,6 +38,9 @@ from ai_job_finder.infrastructure.database.models import (
     JobEvaluationModel,
     JobImportRunModel,
     JobLeadModel,
+    JobSearchDefinitionModel,
+    JobSearchMatchModel,
+    JobSearchRunModel,
     JobSourceConfigurationModel,
     JobSourceObservationModel,
 )
@@ -352,6 +355,175 @@ def test_job_source_uniqueness_constraint(session_factory: sessionmaker[Session]
                     enabled=True,
                     created_at=utc_now(),
                     updated_at=utc_now(),
+                ),
+            ]
+        )
+        with pytest.raises(IntegrityError):
+            session.commit()
+        session.rollback()
+
+
+def test_saved_search_constraints(session_factory: sessionmaker[Session]) -> None:
+    with session_factory() as session:
+        search = JobSearchDefinitionModel(
+            id=new_uuid(),
+            name="Platform roles",
+            enabled=True,
+            title_include_patterns=["platform engineering"],
+            title_exclude_patterns=[],
+            target_domains=["platform_engineering"],
+            target_seniority_levels=["director"],
+            allowed_locations=[],
+            allowed_remote_geographies=["United States"],
+            allowed_workplace_types=["remote"],
+            minimum_score_threshold=70,
+            created_at=utc_now(),
+            updated_at=utc_now(),
+        )
+        session.add(search)
+        session.commit()
+
+        session.add(
+            JobSearchDefinitionModel(
+                id=new_uuid(),
+                name="Platform roles",
+                enabled=True,
+                title_include_patterns=[],
+                title_exclude_patterns=[],
+                target_domains=[],
+                target_seniority_levels=[],
+                allowed_locations=[],
+                allowed_remote_geographies=[],
+                allowed_workplace_types=[],
+                minimum_score_threshold=50,
+                created_at=utc_now(),
+                updated_at=utc_now(),
+            )
+        )
+        with pytest.raises(IntegrityError):
+            session.commit()
+        session.rollback()
+
+        session.add(
+            JobSearchDefinitionModel(
+                id=new_uuid(),
+                name="Invalid threshold",
+                enabled=True,
+                title_include_patterns=[],
+                title_exclude_patterns=[],
+                target_domains=[],
+                target_seniority_levels=[],
+                allowed_locations=[],
+                allowed_remote_geographies=[],
+                allowed_workplace_types=[],
+                minimum_score_threshold=101,
+                created_at=utc_now(),
+                updated_at=utc_now(),
+            )
+        )
+        with pytest.raises(IntegrityError):
+            session.commit()
+        session.rollback()
+
+
+def test_saved_search_match_uniqueness_within_run(session_factory: sessionmaker[Session]) -> None:
+    with session_factory() as session:
+        candidate = create_candidate_profile(
+            session,
+            full_name="Jordan Lee",
+            preferred_locations=["Seattle"],
+            remote_preference=RemotePreference.FLEXIBLE.value,
+            target_levels=["director"],
+            target_functions=["platform engineering"],
+        )
+        job = create_job_lead(
+            session,
+            source=JobLeadSource.MANUAL.value,
+            source_url=None,
+            external_id="job-search-1",
+            company_name="Northstar",
+            title="Director, Platform Engineering",
+            location_text="Seattle, WA",
+            workplace_type=WorkplaceType.HYBRID.value,
+            description_raw="Own platform strategy.",
+            description_normalized="Own platform strategy.",
+            compensation_text=None,
+        )
+        evaluation = create_job_evaluation(
+            session,
+            job_lead_id=job.id,
+            candidate_profile_id=candidate.id,
+        )
+        search = JobSearchDefinitionModel(
+            id=new_uuid(),
+            name="Platform roles",
+            enabled=True,
+            title_include_patterns=["platform engineering"],
+            title_exclude_patterns=[],
+            target_domains=[],
+            target_seniority_levels=[],
+            allowed_locations=[],
+            allowed_remote_geographies=[],
+            allowed_workplace_types=[],
+            minimum_score_threshold=0,
+            created_at=utc_now(),
+            updated_at=utc_now(),
+        )
+        run = JobSearchRunModel(
+            id=new_uuid(),
+            search_definition_id=search.id,
+            status="completed",
+            started_at=utc_now(),
+            completed_at=utc_now(),
+            candidates_considered=1,
+            matched_by_criteria=1,
+            evaluated_count=1,
+            above_threshold_count=1,
+            excluded_count=0,
+            failures_count=0,
+            created_at=utc_now(),
+            updated_at=utc_now(),
+        )
+        session.add_all([search, run])
+        session.commit()
+
+        session.add_all(
+            [
+                JobSearchMatchModel(
+                    id=new_uuid(),
+                    search_definition_id=search.id,
+                    search_run_id=run.id,
+                    job_lead_id=job.id,
+                    job_evaluation_id=evaluation.id,
+                    scoring_version=evaluation.scoring_version,
+                    score_at_match_time=evaluation.overall_score,
+                    recommendation_at_match_time=evaluation.recommendation,
+                    criteria_matched=True,
+                    above_threshold=True,
+                    matched=True,
+                    matched_criteria={"title_include_patterns": ["platform engineering"]},
+                    exclusion_reasons=[],
+                    inferred_domains=["platform_engineering"],
+                    inferred_seniority_levels=["director"],
+                    created_at=utc_now(),
+                ),
+                JobSearchMatchModel(
+                    id=new_uuid(),
+                    search_definition_id=search.id,
+                    search_run_id=run.id,
+                    job_lead_id=job.id,
+                    job_evaluation_id=evaluation.id,
+                    scoring_version=evaluation.scoring_version,
+                    score_at_match_time=evaluation.overall_score,
+                    recommendation_at_match_time=evaluation.recommendation,
+                    criteria_matched=True,
+                    above_threshold=True,
+                    matched=True,
+                    matched_criteria={"title_include_patterns": ["platform engineering"]},
+                    exclusion_reasons=[],
+                    inferred_domains=["platform_engineering"],
+                    inferred_seniority_levels=["director"],
+                    created_at=utc_now(),
                 ),
             ]
         )

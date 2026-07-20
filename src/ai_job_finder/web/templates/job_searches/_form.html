@@ -1,0 +1,45 @@
+<div class="field-group">
+  <label for="name">Name</label>
+  <input id="name" name="name" value="{{ form_values.name }}" />
+  {% if form_errors.name %}<p class="field-error">{{ form_errors.name }}</p>{% endif %}
+</div>
+<div class="field-group">
+  <label for="minimum_score_threshold">Minimum score threshold</label>
+  <input id="minimum_score_threshold" name="minimum_score_threshold" value="{{ form_values.minimum_score_threshold }}" />
+  {% if form_errors.minimum_score_threshold %}<p class="field-error">{{ form_errors.minimum_score_threshold }}</p>{% endif %}
+</div>
+<div class="field-group">
+  <label for="title_include_patterns">Title include patterns</label>
+  <textarea id="title_include_patterns" name="title_include_patterns" rows="4">{{ form_values.title_include_patterns }}</textarea>
+  {% if form_errors.title_include_patterns %}<p class="field-error">{{ form_errors.title_include_patterns }}</p>{% endif %}
+</div>
+<div class="field-group">
+  <label for="title_exclude_patterns">Title exclude patterns</label>
+  <textarea id="title_exclude_patterns" name="title_exclude_patterns" rows="4">{{ form_values.title_exclude_patterns }}</textarea>
+  {% if form_errors.title_exclude_patterns %}<p class="field-error">{{ form_errors.title_exclude_patterns }}</p>{% endif %}
+</div>
+<div class="field-group">
+  <label for="target_domains">Target domains</label>
+  <textarea id="target_domains" name="target_domains" rows="4">{{ form_values.target_domains }}</textarea>
+  {% if form_errors.target_domains %}<p class="field-error">{{ form_errors.target_domains }}</p>{% endif %}
+</div>
+<div class="field-group">
+  <label for="target_seniority_levels">Target seniority levels</label>
+  <textarea id="target_seniority_levels" name="target_seniority_levels" rows="4">{{ form_values.target_seniority_levels }}</textarea>
+  {% if form_errors.target_seniority_levels %}<p class="field-error">{{ form_errors.target_seniority_levels }}</p>{% endif %}
+</div>
+<div class="field-group">
+  <label for="allowed_locations">Allowed locations</label>
+  <textarea id="allowed_locations" name="allowed_locations" rows="4">{{ form_values.allowed_locations }}</textarea>
+  {% if form_errors.allowed_locations %}<p class="field-error">{{ form_errors.allowed_locations }}</p>{% endif %}
+</div>
+<div class="field-group">
+  <label for="allowed_remote_geographies">Allowed remote geographies</label>
+  <textarea id="allowed_remote_geographies" name="allowed_remote_geographies" rows="4">{{ form_values.allowed_remote_geographies }}</textarea>
+  {% if form_errors.allowed_remote_geographies %}<p class="field-error">{{ form_errors.allowed_remote_geographies }}</p>{% endif %}
+</div>
+<div class="field-group">
+  <label for="allowed_workplace_types">Allowed workplace types</label>
+  <textarea id="allowed_workplace_types" name="allowed_workplace_types" rows="3">{{ form_values.allowed_workplace_types }}</textarea>
+  {% if form_errors.allowed_workplace_types %}<p class="field-error">{{ form_errors.allowed_workplace_types }}</p>{% endif %}
+</div>
