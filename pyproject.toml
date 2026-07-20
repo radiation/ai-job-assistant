@@ -6,7 +6,7 @@ readme = "README.md"
 requires-python = ">=3.14"
 dependencies = [
 	"alembic>=1.16.4",
-	"fastapi>=0.116.0",
+	"fastapi>=0.139.2",
 	"jinja2>=3.1.4",
 	"pydantic-settings>=2.10.1",
 	"google-cloud-aiplatform>=1.161.0",
