@@ -5,12 +5,50 @@ from pathlib import Path
 
 from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+from sqlalchemy.engine import URL
+
+
+class SettingsConfigurationError(ValueError):
+    pass
+
+
+def resolve_database_url(settings: Settings) -> str:
+    if settings.database_url:
+        return settings.database_url
+
+    db_user = settings.db_user
+    db_password = settings.db_password
+    db_name = settings.db_name
+    instance_unix_socket = settings.instance_unix_socket
+
+    production_values = (db_user, db_password, db_name, instance_unix_socket)
+    if all(production_values):
+        assert db_user is not None
+        assert db_password is not None
+        assert db_name is not None
+        assert instance_unix_socket is not None
+        return URL.create(
+            drivername="postgresql+psycopg",
+            username=db_user,
+            password=db_password,
+            database=db_name,
+            query={"host": instance_unix_socket},
+        ).render_as_string(hide_password=False)
+
+    raise SettingsConfigurationError(
+        "Configure DATABASE_URL for local development or set all of "
+        "DB_USER, DB_PASSWORD, DB_NAME, and INSTANCE_UNIX_SOCKET."
+    )
 
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
-    database_url: str
+    database_url: str | None = None
+    db_user: str | None = None
+    db_password: str | None = None
+    db_name: str | None = None
+    instance_unix_socket: str | None = None
     test_database_url: str | None = None
     api_host: str = "127.0.0.1"
     api_port: int = 8000
@@ -70,6 +108,9 @@ class Settings(BaseSettings):
         if value == "":
             return None
         return value
+
+    def resolved_database_url(self) -> str:
+        return resolve_database_url(self)
 
 
 @lru_cache(maxsize=1)

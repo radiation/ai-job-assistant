@@ -9,6 +9,6 @@ COPY src ./src
 
 RUN uv sync --frozen --no-dev
 
-EXPOSE 8000
+EXPOSE 8080
 
-CMD ["/app/.venv/bin/uvicorn", "ai_job_finder.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload", "--reload-dir", "/app/src"]
+CMD ["/bin/sh", "-c", "exec /app/.venv/bin/uvicorn ai_job_finder.main:app --host 0.0.0.0 --port ${PORT:-8080}"]
