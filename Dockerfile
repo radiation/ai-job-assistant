@@ -11,4 +11,4 @@ RUN uv sync --frozen --no-dev
 
 EXPOSE 8080
 
-CMD ["/bin/sh", "-c", "exec /app/.venv/bin/uvicorn ai_job_finder.main:app --host 0.0.0.0 --port ${PORT:-8080}"]
+CMD ["/bin/sh", "-c", "exec /app/.venv/bin/uvicorn ai_job_finder.main:app --host 0.0.0.0 --port ${PORT:-8080} --proxy-headers --forwarded-allow-ips='*'"]

@@ -1,6 +1,6 @@
-"""manual external job discovery
+"""external job discovery
 
-Revision ID: 0009_manual_external_job_discovery
+Revision ID: 0009_external_job_discovery
 Revises: 0008_saved_job_searches
 Create Date: 2026-07-20 00:00:01.000000
 
@@ -12,7 +12,7 @@ import sqlalchemy as sa
 
 from alembic import op
 
-revision = "0009_manual_external_job_discovery"
+revision = "0009_external_job_discovery"
 down_revision = "0008_saved_job_searches"
 branch_labels = None
 depends_on = None
