@@ -151,3 +151,27 @@ class MissingCandidateError(DomainError):
 
 class JobSearchDefinitionDisabledError(DomainError):
     code = "job_search_definition_disabled"
+
+
+class OverlappingJobDiscoveryRunError(DomainError):
+    code = "overlapping_job_discovery_run"
+
+
+class JobDiscoveryProviderUnavailableError(DomainError):
+    code = "job_discovery_provider_unavailable"
+
+
+class JobDiscoveryProviderError(DomainError):
+    code = "job_discovery_provider_failure"
+
+
+class JobDiscoveryTimeoutError(JobDiscoveryProviderError):
+    code = "job_discovery_timeout"
+
+
+class InvalidJobDiscoveryUrlError(DomainError):
+    code = "invalid_job_discovery_url"
+
+
+class JobDiscoveryQueryGenerationError(DomainError):
+    code = "job_discovery_query_generation_failed"

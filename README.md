@@ -341,7 +341,11 @@ Each fact carries a typed provenance source plus free-form source reference:
 
 - Saved searches are provider-neutral definitions with deterministic title include/exclude matching, explicit domain and seniority values, location and workplace constraints, an `enabled` flag, and a minimum score threshold.
 - Manual saved-search runs evaluate existing imported leads only. They do not discover new jobs, create sources automatically, or schedule recurring work.
+- Manual discovery runs are a separate bounded workflow. They generate deterministic external queries from a saved-search definition, persist discovery queries and candidate URL observations, reuse source detection, reuse only already approved source configurations for import, and then invoke the existing saved-search run flow.
+- Discovery runs do not auto-create new source configurations, bypass source approval, schedule recurring work, or crawl broadly. A supported detected URL without an approved source configuration remains visible for human follow-up.
+- The default discovery provider is a fake adapter for offline-safe development and tests. An optional Brave Search adapter can be enabled explicitly with `JOB_DISCOVERY_PROVIDER=brave` and `JOB_DISCOVERY_BRAVE_API_KEY`.
 - Each manual run records `running`, `completed`, `partial`, or `failed` status plus considered, criteria-matched, evaluations-used, above-threshold, excluded, and failure counts.
+- Each discovery run records `running`, `completed`, `partial`, or `failed` status plus generated-query, provider-result, unique-URL, duplicate, detected, unsupported, ambiguous, imported-lead, evaluated, final-match, and failure counts.
 - Match records persist the job lead, evaluation used, score at match time, matched criteria, exclusion reasons, inferred domains, inferred seniority, and threshold decision.
 - The discovered-jobs queue can be filtered live with a saved search and an additional minimum-score filter without mutating the underlying job lead or evaluation history.
 - Verified candidate evidence is loaded once at the start of a manual run as an immutable snapshot and reused for evaluation freshness checks and any newly created evaluations in that run.
@@ -389,6 +393,13 @@ Create and manually run a saved search:
 2. Configure title patterns, domains, seniority, location/workplace rules, and the minimum score threshold.
 3. Trigger a manual run from `/job-searches/{id}` or POST to `/api/v1/job-searches/{id}/runs`.
 4. Review matched and excluded jobs under `/job-search-runs/{run_id}`.
+
+Run manual external discovery for a saved search:
+
+1. Create and approve any supported source configurations you want discovery to reuse for imports.
+2. Trigger discovery from `/job-searches/{id}` in the web app or POST to `/api/v1/job-searches/{id}/discovery-runs`.
+3. Review persisted queries, observed URLs, source-detection outcomes, import reuse, and saved-search results under `/job-discovery-runs/{run_id}` or `/api/v1/job-discovery-runs/{run_id}`.
+4. If a supported detected URL has no approved source configuration yet, approve or create that source explicitly and rerun discovery later.
 
 ## Docker Compose Development Stack
 

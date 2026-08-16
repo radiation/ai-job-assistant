@@ -47,6 +47,22 @@ class Settings(BaseSettings):
     source_detection_max_linked_scripts: int = 4
     source_detection_max_script_bytes: int = 200_000
     source_detection_total_script_bytes: int = 500_000
+    job_discovery_provider: str = "fake"
+    job_discovery_fake_fixture_path: Path | None = None
+    job_discovery_result_limit: int = 5
+    job_discovery_max_queries_per_run: int = 6
+    job_discovery_max_total_candidates: int = 25
+    job_discovery_timeout_seconds: float = 10.0
+    job_discovery_transient_retry_count: int = 1
+    job_discovery_brave_api_base_url: str = "https://api.search.brave.com/res/v1/web/search"
+    job_discovery_brave_api_key: str | None = None
+
+    @field_validator("job_discovery_fake_fixture_path", mode="before")
+    @classmethod
+    def _empty_job_discovery_fixture_path_is_none(cls, value: object) -> object:
+        if value == "":
+            return None
+        return value
 
     @field_validator("greenhouse_fake_fixture_path", mode="before")
     @classmethod

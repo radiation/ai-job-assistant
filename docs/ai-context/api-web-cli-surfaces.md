@@ -15,6 +15,8 @@ Before changing an endpoint, inspect schemas, service callers, matching web/CLI 
 
 Saved-search endpoints live beside the existing source and job routes. The current surface includes CRUD, enable/disable, manual run creation, run listing, and run-match detail.
 
+Manual discovery endpoints extend the saved-search surface with run creation and history under `/api/v1/job-searches/{search_definition_id}/discovery-runs`, plus detail and observation views under `/api/v1/job-discovery-runs/{run_id}`.
+
 Run responses expose separate counts for considered leads, criteria matches before score checks, evaluations successfully used, threshold passes, exclusions, and failures.
 
 ## Server-Rendered Web
@@ -28,6 +30,8 @@ Run responses expose separate counts for considered leads, criteria matches befo
 Jinja2 plus narrow HTMX fragments; not a SPA. Web routes call application services directly, not internal HTTP.
 
 Saved-search pages live under `/job-searches` and `/job-search-runs`. The discovered-job queue at `/discover` also supports saved-search filtering.
+
+Manual discovery uses the same saved-search web area: `/job-searches/{id}` exposes the trigger and discovery history, and `/job-discovery-runs/{run_id}` renders persisted queries, observation outcomes, import reuse, and linked saved-search results.
 
 Saved-search web pages distinguish criteria matching, threshold passes, and final saved-search matches in run summaries.
 

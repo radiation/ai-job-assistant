@@ -23,6 +23,7 @@
               <th>Threshold</th>
               <th>Last run</th>
               <th>Runs</th>
+              <th>Discovery</th>
               <th></th>
             </tr>
           </thead>
@@ -34,6 +35,11 @@
                 <td>{{ '%.1f'|format(item.search.minimum_score_threshold) }}</td>
                 <td>{{ item.search.last_run_at|datetime if item.search.last_run_at else 'Never' }}</td>
                 <td>{{ item.run_count }}</td>
+                <td>
+                  <form method="post" action="/job-searches/{{ item.search.id }}/discovery-runs">
+                    <button class="button-secondary" type="submit">Run discovery</button>
+                  </form>
+                </td>
                 <td><a href="/job-searches/{{ item.search.id }}">View</a></td>
               </tr>
             {% endfor %}
