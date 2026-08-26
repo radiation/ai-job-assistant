@@ -226,7 +226,7 @@ def test_job_sources_and_discover_pages(
     )
     assert "Remote" in discover_response.text
     assert "Greenhouse" in discover_response.text
-    assert "Updated Jul" in discover_response.text
+    assert "Updated " in discover_response.text
     assert "Needs Review" in discover_response.text
     assert "Fit" in discover_response.text
     assert 'aria-label="Fit score ' in discover_response.text

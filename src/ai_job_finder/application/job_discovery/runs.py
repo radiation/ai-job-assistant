@@ -18,6 +18,7 @@ from ai_job_finder.application.job_sources import run_job_source_import
 from ai_job_finder.application.services import get_current_candidate_profile
 from ai_job_finder.application.source_detection import (
     SourceDetectionConfig,
+    approve_source_detection_run,
     create_source_detection_run,
 )
 from ai_job_finder.domain.common import new_uuid, utc_now
@@ -45,7 +46,6 @@ from ai_job_finder.infrastructure.database.models import (
     JobLeadModel,
     JobSearchMatchModel,
     JobSourceObservationModel,
-    SourceDetectionRunModel,
 )
 
 MAX_ERROR_SUMMARY_LENGTH = 1000
@@ -67,6 +67,29 @@ class JobDiscoveryObservationRecord:
     observation: JobDiscoveryObservationModel
     imported_job_lead: JobLeadModel | None
     saved_search_match: JobSearchMatchModel | None
+
+
+@dataclass(frozen=True, slots=True)
+class _ReusableResolution:
+    source_configuration_id: UUID
+    source_detection_run_id: UUID | None
+    source_detection_outcome: str | None
+
+
+@dataclass(slots=True)
+class _RunCounters:
+    generated_query_count: int
+    provider_result_count: int = 0
+    unique_url_count: int = 0
+    duplicate_count: int = 0
+    detected_count: int = 0
+    unsupported_count: int = 0
+    ambiguous_count: int = 0
+    imported_lead_count: int = 0
+    evaluated_count: int = 0
+    final_matched_count: int = 0
+    failure_count: int = 0
+    errors: str | None = None
 
 
 def run_job_discovery(
@@ -145,7 +168,7 @@ def run_job_discovery(
                         f"Candidate URL normalization failed for {candidate.discovered_url}: {exc}",
                     )
                     continue
-                observation, created = _upsert_discovery_observation(
+                _, created = _upsert_discovery_observation(
                     session,
                     discovery_run_id=discovery_run.id,
                     query_record=query_record,
@@ -159,105 +182,15 @@ def run_job_discovery(
 
         observations = list_job_discovery_observations(session, discovery_run_id=discovery_run.id)
         for record in observations:
-            observation = record.observation
-            try:
-                detection_run = create_source_detection_run(
-                    session,
-                    company_name=observation.company_hint,
-                    input_url=observation.normalized_url,
-                    brand_alias=None,
-                    fetcher=fetcher,
-                    validator=validator,
-                    config=config.source_detection,
-                )
-                observation.source_detection_run_id = detection_run.id
-                observation.source_detection_outcome = detection_run.status
-                if detection_run.status == SourceDetectionRunStatus.DETECTED.value:
-                    counters.detected_count += 1
-                    source_configuration_id = _existing_source_configuration_id(detection_run)
-                    if source_configuration_id is None:
-                        observation.processing_status = (
-                            JobDiscoveryObservationStatus.DETECTED_SUPPORTED.value
-                        )
-                        observation.exclusion_reason = (
-                            "Supported source detected, but no approved source "
-                            "configuration exists yet."
-                        )
-                    else:
-                        observation.source_configuration_id = source_configuration_id
-                        import_run = run_job_source_import(
-                            session,
-                            source_id=source_configuration_id,
-                            connector=connector,
-                            retain_raw_payload=config.retain_raw_payload,
-                            close_on_empty=config.close_on_empty,
-                            stale_after_seconds=config.stale_after_seconds,
-                        )
-                        observation.import_run_id = import_run.id
-                        if import_run.status != JobImportRunStatus.SUCCEEDED.value:
-                            counters.failure_count += 1
-                            counters.errors = _append_error(
-                                counters.errors,
-                                (
-                                    f"Import for {observation.normalized_url} "
-                                    f"finished with {import_run.status}."
-                                ),
-                            )
-                        lead = _resolve_imported_job_lead(
-                            session,
-                            source_configuration_id=source_configuration_id,
-                            normalized_url=observation.normalized_url,
-                        )
-                        if lead is not None:
-                            observation.imported_job_lead_id = lead.id
-                            observation.processing_status = (
-                                JobDiscoveryObservationStatus.IMPORTED.value
-                            )
-                            counters.imported_lead_count += 1
-                        else:
-                            observation.processing_status = (
-                                JobDiscoveryObservationStatus.FAILED.value
-                            )
-                            observation.exclusion_reason = (
-                                "Source import completed, but the discovered "
-                                "URL did not resolve to a specific imported "
-                                "lead."
-                            )
-                            counters.failure_count += 1
-                elif detection_run.status == SourceDetectionRunStatus.AMBIGUOUS.value:
-                    counters.ambiguous_count += 1
-                    observation.processing_status = JobDiscoveryObservationStatus.AMBIGUOUS.value
-                    observation.exclusion_reason = (
-                        "Source detection returned multiple supported candidates."
-                    )
-                elif detection_run.status == SourceDetectionRunStatus.NOT_DETECTED.value:
-                    counters.unsupported_count += 1
-                    observation.processing_status = JobDiscoveryObservationStatus.UNSUPPORTED.value
-                    observation.exclusion_reason = (
-                        "Source detection did not find a supported import path."
-                    )
-                else:
-                    counters.failure_count += 1
-                    observation.processing_status = JobDiscoveryObservationStatus.FAILED.value
-                    observation.exclusion_reason = (
-                        detection_run.error_message or "Source detection failed."
-                    )
-                session.add(observation)
-                session.commit()
-            except Exception as exc:
-                session.rollback()
-                observation = (
-                    session.get(JobDiscoveryObservationModel, observation.id) or observation
-                )
-                observation.processing_status = JobDiscoveryObservationStatus.FAILED.value
-                observation.exclusion_reason = _append_error(None, str(exc))
-                session.add(observation)
-                session.commit()
-                counters.failure_count += 1
-                counters.errors = _append_error(
-                    counters.errors,
-                    f"Processing failed for {observation.normalized_url}: {exc}",
-                )
+            _process_observation(
+                session,
+                observation=record.observation,
+                fetcher=fetcher,
+                validator=validator,
+                connector=connector,
+                config=config,
+                counters=counters,
+            )
 
         saved_search_run = run_job_search(session, search_definition_id=definition.id)
         matches = {
@@ -299,20 +232,97 @@ def run_job_discovery(
         )
 
 
-@dataclass(slots=True)
-class _RunCounters:
-    generated_query_count: int
-    provider_result_count: int = 0
-    unique_url_count: int = 0
-    duplicate_count: int = 0
-    detected_count: int = 0
-    unsupported_count: int = 0
-    ambiguous_count: int = 0
-    imported_lead_count: int = 0
-    evaluated_count: int = 0
-    final_matched_count: int = 0
-    failure_count: int = 0
-    errors: str | None = None
+def _process_observation(
+    session: Session,
+    *,
+    observation: JobDiscoveryObservationModel,
+    fetcher: PublicPageFetcher,
+    validator: GreenhouseBoardValidator,
+    connector: JobSourceConnector,
+    config: JobDiscoveryConfig,
+    counters: _RunCounters,
+) -> None:
+    try:
+        reused_resolution = _reusable_resolution(session, observation=observation)
+        if reused_resolution is not None:
+            observation.source_detection_run_id = reused_resolution.source_detection_run_id
+            observation.source_detection_outcome = reused_resolution.source_detection_outcome
+            observation.source_configuration_id = reused_resolution.source_configuration_id
+            counters.detected_count += 1
+            _import_detected_source(
+                session,
+                observation=observation,
+                source_configuration_id=reused_resolution.source_configuration_id,
+                connector=connector,
+                config=config,
+                counters=counters,
+            )
+            session.add(observation)
+            session.commit()
+            return
+
+        detection_run = create_source_detection_run(
+            session,
+            company_name=observation.company_hint,
+            input_url=observation.normalized_url,
+            brand_alias=None,
+            fetcher=fetcher,
+            validator=validator,
+            config=config.source_detection,
+        )
+        observation.source_detection_run_id = detection_run.id
+        observation.source_detection_outcome = detection_run.status
+        if detection_run.status == SourceDetectionRunStatus.DETECTED.value:
+            counters.detected_count += 1
+            approval = approve_source_detection_run(
+                session,
+                run_id=detection_run.id,
+                selected_token=None,
+                create_and_sync=True,
+                connector=connector,
+                retain_raw_payload=config.retain_raw_payload,
+                close_on_empty=config.close_on_empty,
+                stale_after_seconds=config.stale_after_seconds,
+            )
+            observation.source_detection_run_id = approval.run.id
+            observation.source_detection_outcome = approval.run.status
+            observation.source_configuration_id = approval.source.id
+            observation.import_run_id = approval.import_run.id if approval.import_run else None
+            _finalize_imported_observation(
+                session,
+                observation=observation,
+                source_configuration_id=approval.source.id,
+                import_status=approval.import_run.status if approval.import_run else None,
+                counters=counters,
+            )
+        elif detection_run.status == SourceDetectionRunStatus.AMBIGUOUS.value:
+            counters.ambiguous_count += 1
+            observation.processing_status = JobDiscoveryObservationStatus.AMBIGUOUS.value
+            observation.exclusion_reason = (
+                "Source detection returned multiple supported candidates."
+            )
+        elif detection_run.status == SourceDetectionRunStatus.NOT_DETECTED.value:
+            counters.unsupported_count += 1
+            observation.processing_status = JobDiscoveryObservationStatus.UNSUPPORTED.value
+            observation.exclusion_reason = "Source detection did not find a supported import path."
+        else:
+            counters.failure_count += 1
+            observation.processing_status = JobDiscoveryObservationStatus.FAILED.value
+            observation.exclusion_reason = detection_run.error_message or "Source detection failed."
+        session.add(observation)
+        session.commit()
+    except Exception as exc:
+        session.rollback()
+        observation = session.get(JobDiscoveryObservationModel, observation.id) or observation
+        observation.processing_status = JobDiscoveryObservationStatus.FAILED.value
+        observation.exclusion_reason = _append_error(None, str(exc))
+        session.add(observation)
+        session.commit()
+        counters.failure_count += 1
+        counters.errors = _append_error(
+            counters.errors,
+            f"Processing failed for {observation.normalized_url}: {exc}",
+        )
 
 
 def _create_running_run(
@@ -417,16 +427,88 @@ def _upsert_discovery_observation(
     return observation, True
 
 
-def _existing_source_configuration_id(detection_run: SourceDetectionRunModel) -> UUID | None:
-    if not detection_run.validated_token:
+def _reusable_resolution(
+    session: Session,
+    *,
+    observation: JobDiscoveryObservationModel,
+) -> _ReusableResolution | None:
+    previous = session.scalar(
+        select(JobDiscoveryObservationModel)
+        .options(joinedload(JobDiscoveryObservationModel.source_detection_run))
+        .where(
+            JobDiscoveryObservationModel.normalized_url == observation.normalized_url,
+            JobDiscoveryObservationModel.id != observation.id,
+            JobDiscoveryObservationModel.source_configuration_id.is_not(None),
+        )
+        .order_by(JobDiscoveryObservationModel.created_at.desc())
+    )
+    if previous is None or previous.source_configuration_id is None:
         return None
-    for candidate in detection_run.candidate_tokens:
-        if candidate.get("token") != detection_run.validated_token:
-            continue
-        source_id = candidate.get("existing_source_configuration_id")
-        if isinstance(source_id, str) and source_id:
-            return UUID(source_id)
-    return None
+    return _ReusableResolution(
+        source_configuration_id=previous.source_configuration_id,
+        source_detection_run_id=previous.source_detection_run_id,
+        source_detection_outcome=previous.source_detection_outcome,
+    )
+
+
+def _import_detected_source(
+    session: Session,
+    *,
+    observation: JobDiscoveryObservationModel,
+    source_configuration_id: UUID,
+    connector: JobSourceConnector,
+    config: JobDiscoveryConfig,
+    counters: _RunCounters,
+) -> None:
+    import_run = run_job_source_import(
+        session,
+        source_id=source_configuration_id,
+        connector=connector,
+        retain_raw_payload=config.retain_raw_payload,
+        close_on_empty=config.close_on_empty,
+        stale_after_seconds=config.stale_after_seconds,
+    )
+    observation.import_run_id = import_run.id
+    _finalize_imported_observation(
+        session,
+        observation=observation,
+        source_configuration_id=source_configuration_id,
+        import_status=import_run.status,
+        counters=counters,
+    )
+
+
+def _finalize_imported_observation(
+    session: Session,
+    *,
+    observation: JobDiscoveryObservationModel,
+    source_configuration_id: UUID,
+    import_status: str | None,
+    counters: _RunCounters,
+) -> None:
+    if import_status is not None and import_status != JobImportRunStatus.SUCCEEDED.value:
+        counters.failure_count += 1
+        counters.errors = _append_error(
+            counters.errors,
+            f"Import for {observation.normalized_url} finished with {import_status}.",
+        )
+    lead = _resolve_imported_job_lead(
+        session,
+        source_configuration_id=source_configuration_id,
+        normalized_url=observation.normalized_url,
+    )
+    if lead is not None:
+        observation.imported_job_lead_id = lead.id
+        observation.processing_status = JobDiscoveryObservationStatus.IMPORTED.value
+        observation.exclusion_reason = None
+        counters.imported_lead_count += 1
+        return
+    observation.processing_status = JobDiscoveryObservationStatus.FAILED.value
+    observation.exclusion_reason = (
+        "Source import completed, but the discovered URL did not resolve "
+        "to a specific imported lead."
+    )
+    counters.failure_count += 1
 
 
 def _resolve_imported_job_lead(

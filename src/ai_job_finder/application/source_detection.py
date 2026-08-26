@@ -19,6 +19,7 @@ from ai_job_finder.domain.enums import JobSourceProvider, SourceDetectionRunStat
 from ai_job_finder.domain.errors import (
     AmbiguousSourceDetectionError,
     DomainError,
+    DuplicateJobSourceError,
     GreenhouseValidationUnavailableError,
     NoProviderDetectedError,
     NotFoundError,
@@ -219,15 +220,21 @@ def approve_source_detection_run(
     source_existed = existing_source is not None
     source = existing_source
     if source is None:
-        source = create_job_source_configuration(
-            session,
-            provider=JobSourceProvider.GREENHOUSE.value,
-            display_name=_display_name(run, token),
-            company_name=run.validated_company_name or run.company_name or token,
-            board_token=token,
-            source_url=run.final_url or run.input_url,
-            enabled=True,
-        )
+        try:
+            source = create_job_source_configuration(
+                session,
+                provider=JobSourceProvider.GREENHOUSE.value,
+                display_name=_display_name(run, token),
+                company_name=run.validated_company_name or run.company_name or token,
+                board_token=token,
+                source_url=run.final_url or run.input_url,
+                enabled=True,
+            )
+        except DuplicateJobSourceError:
+            source = _source_by_token(session, token)
+            if source is None:
+                raise
+            source_existed = True
     run.created_source_configuration_id = source.id
     run.status = SourceDetectionRunStatus.SOURCE_CREATED.value
     run.completed_at = run.completed_at or utc_now()
