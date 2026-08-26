@@ -12,6 +12,11 @@ from ai_job_finder.infrastructure.database.models.documents import (
     ExtractionRunModel,
     SourceDocumentModel,
 )
+from ai_job_finder.infrastructure.database.models.job_discovery import (
+    JobDiscoveryObservationModel,
+    JobDiscoveryQueryModel,
+    JobDiscoveryRunModel,
+)
 from ai_job_finder.infrastructure.database.models.job_searches import (
     JobSearchDefinitionModel,
     JobSearchMatchModel,
@@ -33,6 +38,9 @@ __all__ = [
     "CareerFactModel",
     "CareerFactProposalModel",
     "ExtractionRunModel",
+    "JobDiscoveryObservationModel",
+    "JobDiscoveryQueryModel",
+    "JobDiscoveryRunModel",
     "JobEvaluationModel",
     "JobImportRunModel",
     "JobLeadModel",

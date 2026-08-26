@@ -8,6 +8,7 @@
     </div>
     <div class="actions-row">
       <form method="post" action="/job-searches/{{ search.id }}/runs"><button type="submit">Run now</button></form>
+      <form method="post" action="/job-searches/{{ search.id }}/discovery-runs"><button class="button-secondary" type="submit">Run discovery</button></form>
       {% if search.enabled %}
         <form method="post" action="/job-searches/{{ search.id }}/disable"><button class="button-secondary" type="submit">Disable</button></form>
       {% else %}
@@ -54,6 +55,30 @@
         </table>
       {% else %}
         <p class="muted">No runs yet.</p>
+      {% endif %}
+    </article>
+    <article class="panel">
+      <h2>Discovery history</h2>
+      <p class="muted">Discovery runs generate deterministic external queries, persist observed candidate URLs, and reuse source detection plus approved source imports.</p>
+      {% if discovery_runs %}
+        <table class="job-table">
+          <thead><tr><th>Status</th><th>Started</th><th>Queries</th><th>Unique URLs</th><th>Imported leads</th><th>Final matches</th><th></th></tr></thead>
+          <tbody>
+            {% for run in discovery_runs %}
+              <tr>
+                <td><span class="badge badge-status">{{ run.status|humanize }}</span></td>
+                <td>{{ run.started_at|datetime }}</td>
+                <td>{{ run.generated_query_count }}</td>
+                <td>{{ run.unique_url_count }}</td>
+                <td>{{ run.imported_lead_count }}</td>
+                <td>{{ run.final_matched_count }}</td>
+                <td><a href="/job-discovery-runs/{{ run.id }}">View run</a></td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      {% else %}
+        <p class="muted">No discovery runs yet.</p>
       {% endif %}
     </article>
   </section>

@@ -42,7 +42,7 @@ def create_engine_from_url(database_url: str) -> Engine:
 
 @lru_cache(maxsize=1)
 def get_engine() -> Engine:
-    return create_engine_from_url(get_settings().database_url)
+    return create_engine_from_url(get_settings().resolved_database_url())
 
 
 @lru_cache(maxsize=1)

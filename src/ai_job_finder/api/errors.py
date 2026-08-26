@@ -49,6 +49,12 @@ def install_error_handlers(app: FastAPI) -> None:
             "overlapping_job_import": 409,
             "missing_candidate": 409,
             "job_search_definition_disabled": 409,
+            "overlapping_job_discovery_run": 409,
+            "job_discovery_provider_unavailable": 503,
+            "job_discovery_provider_failure": 502,
+            "job_discovery_timeout": 504,
+            "invalid_job_discovery_url": 422,
+            "job_discovery_query_generation_failed": 422,
         }
         status_code = status_code_by_code.get(exc.code, 409)
         if not _is_api_request(request):

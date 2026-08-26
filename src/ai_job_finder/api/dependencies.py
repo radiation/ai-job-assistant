@@ -7,10 +7,19 @@ from fastapi import Depends
 from sqlalchemy.orm import Session
 
 from ai_job_finder.application.extraction import CareerFactExtractor
-from ai_job_finder.domain.errors import ExtractionProviderUnavailableError
+from ai_job_finder.application.job_discovery.ports import JobDiscoveryProvider
+from ai_job_finder.domain.errors import (
+    ExtractionProviderUnavailableError,
+    JobDiscoveryProviderUnavailableError,
+)
 from ai_job_finder.domain.job_sources import JobSourceConnector
 from ai_job_finder.domain.source_detection import GreenhouseBoardValidator, PublicPageFetcher
 from ai_job_finder.infrastructure.database.session import get_db_session
+from ai_job_finder.infrastructure.job_discovery import (
+    BraveSearchJobDiscoveryProvider,
+    FakeJobDiscoveryProvider,
+    FileBackedFakeJobDiscoveryProvider,
+)
 from ai_job_finder.infrastructure.job_sources.fake import FileBackedFakeJobSourceConnector
 from ai_job_finder.infrastructure.job_sources.greenhouse import GreenhouseJobSourceConnector
 from ai_job_finder.infrastructure.llm.fake import FakeCareerFactExtractor
@@ -75,6 +84,30 @@ def job_source_connector_dependency(
         user_agent=settings.greenhouse_user_agent,
         max_response_bytes=settings.greenhouse_max_response_bytes,
         max_jobs=settings.greenhouse_max_jobs,
+    )
+
+
+def job_discovery_provider_dependency(
+    settings: Annotated[Settings, Depends(settings_dependency)],
+) -> JobDiscoveryProvider:
+    if settings.job_discovery_provider == "fake":
+        if settings.job_discovery_fake_fixture_path is not None:
+            return FileBackedFakeJobDiscoveryProvider(settings.job_discovery_fake_fixture_path)
+        return FakeJobDiscoveryProvider()
+    if settings.job_discovery_provider == "brave":
+        if not settings.job_discovery_brave_api_key:
+            raise JobDiscoveryProviderUnavailableError(
+                "JOB_DISCOVERY_BRAVE_API_KEY is required when job_discovery_provider=brave."
+            )
+        return BraveSearchJobDiscoveryProvider(
+            api_base_url=settings.job_discovery_brave_api_base_url,
+            api_key=settings.job_discovery_brave_api_key,
+            timeout_seconds=settings.job_discovery_timeout_seconds,
+            transient_retry_count=settings.job_discovery_transient_retry_count,
+            user_agent=settings.greenhouse_user_agent,
+        )
+    raise JobDiscoveryProviderUnavailableError(
+        f"Unsupported job discovery provider: {settings.job_discovery_provider}."
     )
 
 
