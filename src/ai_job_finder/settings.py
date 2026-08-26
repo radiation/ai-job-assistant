@@ -5,12 +5,50 @@ from pathlib import Path
 
 from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+from sqlalchemy.engine import URL
+
+
+class SettingsConfigurationError(ValueError):
+    pass
+
+
+def resolve_database_url(settings: Settings) -> str:
+    if settings.database_url:
+        return settings.database_url
+
+    db_user = settings.db_user
+    db_password = settings.db_password
+    db_name = settings.db_name
+    instance_unix_socket = settings.instance_unix_socket
+
+    production_values = (db_user, db_password, db_name, instance_unix_socket)
+    if all(production_values):
+        assert db_user is not None
+        assert db_password is not None
+        assert db_name is not None
+        assert instance_unix_socket is not None
+        return URL.create(
+            drivername="postgresql+psycopg",
+            username=db_user,
+            password=db_password,
+            database=db_name,
+            query={"host": instance_unix_socket},
+        ).render_as_string(hide_password=False)
+
+    raise SettingsConfigurationError(
+        "Configure DATABASE_URL for local development or set all of "
+        "DB_USER, DB_PASSWORD, DB_NAME, and INSTANCE_UNIX_SOCKET."
+    )
 
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
-    database_url: str
+    database_url: str | None = None
+    db_user: str | None = None
+    db_password: str | None = None
+    db_name: str | None = None
+    instance_unix_socket: str | None = None
     test_database_url: str | None = None
     api_host: str = "127.0.0.1"
     api_port: int = 8000
@@ -47,6 +85,22 @@ class Settings(BaseSettings):
     source_detection_max_linked_scripts: int = 4
     source_detection_max_script_bytes: int = 200_000
     source_detection_total_script_bytes: int = 500_000
+    job_discovery_provider: str = "fake"
+    job_discovery_fake_fixture_path: Path | None = None
+    job_discovery_result_limit: int = 5
+    job_discovery_max_queries_per_run: int = 6
+    job_discovery_max_total_candidates: int = 25
+    job_discovery_timeout_seconds: float = 10.0
+    job_discovery_transient_retry_count: int = 1
+    job_discovery_brave_api_base_url: str = "https://api.search.brave.com/res/v1/web/search"
+    job_discovery_brave_api_key: str | None = None
+
+    @field_validator("job_discovery_fake_fixture_path", mode="before")
+    @classmethod
+    def _empty_job_discovery_fixture_path_is_none(cls, value: object) -> object:
+        if value == "":
+            return None
+        return value
 
     @field_validator("greenhouse_fake_fixture_path", mode="before")
     @classmethod
@@ -54,6 +108,9 @@ class Settings(BaseSettings):
         if value == "":
             return None
         return value
+
+    def resolved_database_url(self) -> str:
+        return resolve_database_url(self)
 
 
 @lru_cache(maxsize=1)

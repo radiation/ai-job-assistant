@@ -10,11 +10,13 @@ from ai_job_finder.api.dependencies import (
     db_session_dependency,
     document_storage_dependency,
     greenhouse_board_validator_dependency,
+    job_discovery_provider_dependency,
     job_source_connector_dependency,
     public_page_fetcher_dependency,
     settings_dependency,
 )
 from ai_job_finder.application.extraction import CareerFactExtractor
+from ai_job_finder.application.job_discovery.ports import JobDiscoveryProvider
 from ai_job_finder.domain.job_sources import JobSourceConnector
 from ai_job_finder.domain.source_detection import GreenhouseBoardValidator, PublicPageFetcher
 from ai_job_finder.infrastructure.storage import DocumentStorage
@@ -26,6 +28,9 @@ SettingsDependency = Annotated[Settings, Depends(settings_dependency)]
 ExtractorDependency = Annotated[CareerFactExtractor, Depends(career_fact_extractor_dependency)]
 JobSourceConnectorDependency = Annotated[
     JobSourceConnector, Depends(job_source_connector_dependency)
+]
+JobDiscoveryProviderDependency = Annotated[
+    JobDiscoveryProvider, Depends(job_discovery_provider_dependency)
 ]
 PublicPageFetcherDependency = Annotated[PublicPageFetcher, Depends(public_page_fetcher_dependency)]
 GreenhouseBoardValidatorDependency = Annotated[

@@ -7,7 +7,22 @@ from fastapi import APIRouter, Request, Response, status
 from fastapi.responses import RedirectResponse
 from pydantic import ValidationError
 
+from ai_job_finder.api.v1.routes.dependencies import (
+    GreenhouseBoardValidatorDependency,
+    JobDiscoveryProviderDependency,
+    JobSourceConnectorDependency,
+    PublicPageFetcherDependency,
+    SettingsDependency,
+)
 from ai_job_finder.api.v1.schemas import JobSearchDefinitionCreateRequest
+from ai_job_finder.application.job_discovery import (
+    JobDiscoveryConfig,
+    get_job_discovery_run,
+    list_job_discovery_observations,
+    list_job_discovery_queries,
+    list_job_discovery_runs,
+    run_job_discovery,
+)
 from ai_job_finder.application.job_searches import (
     create_job_search_definition,
     get_job_search_definition,
@@ -19,6 +34,7 @@ from ai_job_finder.application.job_searches import (
     set_job_search_definition_enabled,
     update_job_search_definition,
 )
+from ai_job_finder.application.source_detection import SourceDetectionConfig
 from ai_job_finder.domain.errors import DomainError, NotFoundError
 from ai_job_finder.infrastructure.database.models import JobSearchDefinitionModel
 from ai_job_finder.web.dependencies import DbSession, render_template, split_multivalue
@@ -182,6 +198,7 @@ def job_searches_detail(
             "page_title": search.name,
             "search": search,
             "runs": list_job_search_runs(session, search_definition_id=search.id),
+            "discovery_runs": list_job_discovery_runs(session, search_definition_id=search.id),
             "form_values": _values_from_search(search),
             "form_errors": {},
         },
@@ -207,6 +224,7 @@ async def job_searches_update(
                 "page_title": search.name,
                 "search": search,
                 "runs": list_job_search_runs(session, search_definition_id=search.id),
+                "discovery_runs": list_job_discovery_runs(session, search_definition_id=search.id),
                 "form_values": values,
                 "form_errors": _validation_errors(exc),
             },
@@ -235,6 +253,7 @@ async def job_searches_update(
                 "page_title": search.name,
                 "search": search,
                 "runs": list_job_search_runs(session, search_definition_id=search.id),
+                "discovery_runs": list_job_discovery_runs(session, search_definition_id=search.id),
                 "form_values": values,
                 "form_errors": {"name": str(exc)},
             },
@@ -278,6 +297,44 @@ def job_searches_run(search_definition_id: UUID, session: DbSession) -> Response
     return RedirectResponse(url=f"/job-search-runs/{run.id}", status_code=status.HTTP_303_SEE_OTHER)
 
 
+@router.post("/job-searches/{search_definition_id}/discovery-runs")
+def job_searches_run_discovery(
+    search_definition_id: UUID,
+    session: DbSession,
+    provider: JobDiscoveryProviderDependency,
+    fetcher: PublicPageFetcherDependency,
+    validator: GreenhouseBoardValidatorDependency,
+    connector: JobSourceConnectorDependency,
+    settings: SettingsDependency,
+) -> Response:
+    run = run_job_discovery(
+        session,
+        search_definition_id=search_definition_id,
+        provider_name=settings.job_discovery_provider,
+        provider=provider,
+        fetcher=fetcher,
+        validator=validator,
+        connector=connector,
+        config=JobDiscoveryConfig(
+            max_queries_per_run=settings.job_discovery_max_queries_per_run,
+            result_limit=settings.job_discovery_result_limit,
+            max_total_candidates=settings.job_discovery_max_total_candidates,
+            source_detection=SourceDetectionConfig(
+                max_linked_scripts=settings.source_detection_max_linked_scripts,
+                max_script_bytes=settings.source_detection_max_script_bytes,
+                total_script_bytes=settings.source_detection_total_script_bytes,
+            ),
+            retain_raw_payload=settings.greenhouse_retain_raw_payload,
+            close_on_empty=settings.greenhouse_close_on_empty_result,
+            stale_after_seconds=settings.job_source_stale_after_seconds,
+        ),
+    )
+    return RedirectResponse(
+        url=f"/job-discovery-runs/{run.id}",
+        status_code=status.HTTP_303_SEE_OTHER,
+    )
+
+
 @router.get("/job-search-runs/{run_id}")
 def job_search_runs_detail(request: Request, run_id: UUID, session: DbSession) -> Response:
     run = get_job_search_run(session, run_id)
@@ -289,5 +346,22 @@ def job_search_runs_detail(request: Request, run_id: UUID, session: DbSession) -
             "run": run,
             "search": get_job_search_definition(session, run.search_definition_id),
             "match_records": list_job_search_matches(session, search_run_id=run_id),
+        },
+    )
+
+
+@router.get("/job-discovery-runs/{run_id}")
+def job_discovery_runs_detail(request: Request, run_id: UUID, session: DbSession) -> Response:
+    run = get_job_discovery_run(session, run_id)
+    search = get_job_search_definition(session, run.search_definition_id)
+    return render_template(
+        request,
+        "job_searches/discovery_run_detail.html",
+        {
+            "page_title": f"Discovery Run {run.id}",
+            "run": run,
+            "search": search,
+            "queries": list_job_discovery_queries(session, discovery_run_id=run_id),
+            "observations": list_job_discovery_observations(session, discovery_run_id=run_id),
         },
     )

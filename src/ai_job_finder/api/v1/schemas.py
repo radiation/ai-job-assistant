@@ -27,6 +27,10 @@ from ai_job_finder.domain.enums import (
     SourcePostingStatus,
     WorkplaceType,
 )
+from ai_job_finder.domain.job_discovery import (
+    JobDiscoveryObservationStatus,
+    JobDiscoveryRunStatus,
+)
 from ai_job_finder.domain.job_searches import (
     JobSearchDomain,
     JobSearchRunStatus,
@@ -391,6 +395,164 @@ class JobSearchMatchResponse(BaseModel):
 class JobSearchRunDetailResponse(BaseModel):
     run: JobSearchRunResponse
     matches: list[JobSearchMatchResponse]
+
+
+class JobDiscoveryQueryResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    discovery_run_id: UUID
+    stable_query_id: str
+    ordinal: int
+    provider: str
+    status: str
+    query_text: str
+    title_phrase: str
+    target_domain: str | None
+    location_or_workplace_term: str | None
+    requested_result_limit: int
+    returned_result_count: int
+    error_message: str | None
+    created_at: datetime
+    updated_at: datetime
+
+
+class JobDiscoveryRunResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    search_definition_id: UUID
+    provider: str
+    status: JobDiscoveryRunStatus
+    started_at: datetime
+    completed_at: datetime | None
+    generated_query_count: Annotated[
+        int,
+        Field(description="Number of deterministic discovery queries persisted for the run."),
+    ]
+    provider_result_count: Annotated[
+        int,
+        Field(
+            description=(
+                "Total provider results returned across all completed queries "
+                "before URL deduplication."
+            )
+        ),
+    ]
+    unique_url_count: Annotated[
+        int,
+        Field(description="Number of unique normalized discovered URLs persisted for this run."),
+    ]
+    duplicate_count: Annotated[
+        int,
+        Field(
+            description=(
+                "Number of duplicate provider results collapsed into existing "
+                "observations within this run."
+            )
+        ),
+    ]
+    detected_count: Annotated[
+        int,
+        Field(
+            description=(
+                "Number of unique observations whose URLs resolved to a supported detected source."
+            )
+        ),
+    ]
+    unsupported_count: Annotated[
+        int,
+        Field(
+            description=(
+                "Number of unique observations whose URLs did not resolve to a "
+                "supported import path."
+            )
+        ),
+    ]
+    ambiguous_count: Annotated[
+        int,
+        Field(
+            description=(
+                "Number of unique observations whose URLs produced multiple "
+                "supported source candidates."
+            )
+        ),
+    ]
+    imported_lead_count: Annotated[
+        int,
+        Field(
+            description=(
+                "Number of unique observations that resolved to a specific "
+                "imported job lead after source import reuse."
+            )
+        ),
+    ]
+    evaluated_count: Annotated[
+        int,
+        Field(
+            description=(
+                "Number of imported observations whose linked saved-search run "
+                "used a current evaluation for the linked lead."
+            )
+        ),
+    ]
+    final_matched_count: Annotated[
+        int,
+        Field(
+            description=(
+                "Number of imported observations whose linked saved-search run "
+                "persisted a final saved-search match."
+            )
+        ),
+    ]
+    failure_count: Annotated[
+        int,
+        Field(
+            description=(
+                "Number of query-level or observation-level processing failures "
+                "recorded during the run."
+            )
+        ),
+    ]
+    error_summary: str | None
+    saved_search_run_id: UUID | None
+    created_at: datetime
+    updated_at: datetime
+
+
+class JobDiscoveryObservationResponse(BaseModel):
+    id: UUID
+    discovery_run_id: UUID
+    primary_query_id: UUID
+    query_ordinals: list[int]
+    provider: str
+    provider_result_id: str | None
+    discovered_url: str
+    normalized_url: str
+    title_hint: str | None
+    company_hint: str | None
+    location_hint: str | None
+    evidence_snippet: str | None
+    rank: int
+    source_detection_outcome: SourceDetectionRunStatus | None
+    source_detection_run_id: UUID | None
+    source_configuration_id: UUID | None
+    import_run_id: UUID | None
+    imported_job_lead_id: UUID | None
+    processing_status: JobDiscoveryObservationStatus
+    exclusion_reason: str | None
+    discovered_at: datetime | None
+    created_at: datetime
+    updated_at: datetime
+    saved_search_match_id: UUID | None
+    matched: bool | None
+    score_at_match_time: float | None
+    job_evaluation_id: UUID | None
+
+
+class JobDiscoveryRunDetailResponse(BaseModel):
+    run: JobDiscoveryRunResponse
+    queries: list[JobDiscoveryQueryResponse]
 
 
 class DiscoveredLeadResponse(BaseModel):

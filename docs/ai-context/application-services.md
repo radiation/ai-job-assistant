@@ -48,6 +48,14 @@ Owns saved-search definition CRUD, deterministic calibration fixture loading/rep
 
 Manual run orchestration loads the candidate's verified evidence once per run as an immutable snapshot, then reuses that snapshot for evaluation freshness checks and any newly created evaluations during the run.
 
+## Job Discovery
+
+Package: `application/job_discovery/`
+
+Owns deterministic discovery-query generation from saved-search definitions, discovery-run persistence, provider invocation, URL normalization and per-run deduplication, source-detection reuse, approved-source import reuse, saved-search run linkage, and truthful terminal counters.
+
+Discovery orchestration must not auto-create source configurations or bypass explicit source approval. It may only import through an already approved source configuration identified by the existing source-detection workflow.
+
 ## Transaction Expectations
 
 Before changing a workflow, locate:

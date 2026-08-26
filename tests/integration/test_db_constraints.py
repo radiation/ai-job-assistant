@@ -35,6 +35,9 @@ from ai_job_finder.domain.job_sources import NormalizedJobPosting
 from ai_job_finder.infrastructure.database.models import (
     CandidateProfileModel,
     CareerFactModel,
+    JobDiscoveryObservationModel,
+    JobDiscoveryQueryModel,
+    JobDiscoveryRunModel,
     JobEvaluationModel,
     JobImportRunModel,
     JobLeadModel,
@@ -358,6 +361,123 @@ def test_job_source_uniqueness_constraint(session_factory: sessionmaker[Session]
                 ),
             ]
         )
+        with pytest.raises(IntegrityError):
+            session.commit()
+        session.rollback()
+
+
+def test_job_discovery_constraints(session_factory: sessionmaker[Session]) -> None:
+    with session_factory() as session:
+        search = JobSearchDefinitionModel(
+            id=new_uuid(),
+            name="Platform roles",
+            enabled=True,
+            title_include_patterns=["platform engineering"],
+            title_exclude_patterns=[],
+            target_domains=[],
+            target_seniority_levels=[],
+            allowed_locations=[],
+            allowed_remote_geographies=[],
+            allowed_workplace_types=[],
+            minimum_score_threshold=70,
+            created_at=utc_now(),
+            updated_at=utc_now(),
+        )
+        session.add(search)
+        session.commit()
+
+        first_run = JobDiscoveryRunModel(
+            id=new_uuid(),
+            search_definition_id=search.id,
+            provider="fake",
+            status="running",
+            started_at=utc_now(),
+        )
+        second_run = JobDiscoveryRunModel(
+            id=new_uuid(),
+            search_definition_id=search.id,
+            provider="fake",
+            status="running",
+            started_at=utc_now(),
+        )
+        session.add(first_run)
+        session.commit()
+        session.add(second_run)
+        with pytest.raises(IntegrityError):
+            session.commit()
+        session.rollback()
+
+        completed_run = JobDiscoveryRunModel(
+            id=new_uuid(),
+            search_definition_id=search.id,
+            provider="fake",
+            status="completed",
+            started_at=utc_now(),
+            completed_at=utc_now(),
+        )
+        session.add(completed_run)
+        session.commit()
+
+        query = JobDiscoveryQueryModel(
+            id=new_uuid(),
+            discovery_run_id=completed_run.id,
+            stable_query_id="query-1",
+            ordinal=1,
+            provider="fake",
+            status="completed",
+            query_text='"Director Platform Engineering"',
+            title_phrase="Director Platform Engineering",
+            target_domain=None,
+            location_or_workplace_term=None,
+            requested_result_limit=5,
+            returned_result_count=1,
+            created_at=utc_now(),
+            updated_at=utc_now(),
+        )
+        session.add(query)
+        session.commit()
+
+        first_observation = JobDiscoveryObservationModel(
+            id=new_uuid(),
+            discovery_run_id=completed_run.id,
+            primary_query_id=query.id,
+            query_ordinals=[1],
+            provider="fake",
+            provider_result_id="result-1",
+            discovered_url="https://boards.greenhouse.io/acme/jobs/1",
+            normalized_url="https://boards.greenhouse.io/acme/jobs/1",
+            title_hint="Director, Platform Engineering",
+            company_hint="Acme",
+            location_hint="Remote",
+            evidence_snippet=None,
+            rank=1,
+            processing_status="pending",
+            raw_evidence={},
+            created_at=utc_now(),
+            updated_at=utc_now(),
+        )
+        second_observation = JobDiscoveryObservationModel(
+            id=new_uuid(),
+            discovery_run_id=completed_run.id,
+            primary_query_id=query.id,
+            query_ordinals=[1],
+            provider="fake",
+            provider_result_id="result-2",
+            discovered_url="https://boards.greenhouse.io/acme/jobs/1?dup=1",
+            normalized_url="https://boards.greenhouse.io/acme/jobs/1",
+            title_hint="Director, Platform Engineering",
+            company_hint="Acme",
+            location_hint="Remote",
+            evidence_snippet=None,
+            rank=2,
+            processing_status="pending",
+            raw_evidence={},
+            created_at=utc_now(),
+            updated_at=utc_now(),
+        )
+        session.add(first_observation)
+        session.commit()
+        session.add(second_observation)
         with pytest.raises(IntegrityError):
             session.commit()
         session.rollback()
