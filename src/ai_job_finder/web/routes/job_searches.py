@@ -17,9 +17,7 @@ from ai_job_finder.api.v1.routes.dependencies import (
 from ai_job_finder.api.v1.schemas import JobSearchDefinitionCreateRequest
 from ai_job_finder.application.job_discovery import (
     JobDiscoveryConfig,
-    get_job_discovery_run,
-    list_job_discovery_observations,
-    list_job_discovery_queries,
+    get_job_discovery_run_detail,
     list_job_discovery_runs,
     run_job_discovery,
 )
@@ -352,16 +350,15 @@ def job_search_runs_detail(request: Request, run_id: UUID, session: DbSession) -
 
 @router.get("/job-discovery-runs/{run_id}")
 def job_discovery_runs_detail(request: Request, run_id: UUID, session: DbSession) -> Response:
-    run = get_job_discovery_run(session, run_id)
-    search = get_job_search_definition(session, run.search_definition_id)
+    detail = get_job_discovery_run_detail(session, run_id)
+    search = get_job_search_definition(session, detail.run.search_definition_id)
     return render_template(
         request,
         "job_searches/discovery_run_detail.html",
         {
-            "page_title": f"Discovery Run {run.id}",
-            "run": run,
+            "page_title": f"Discovery Run {detail.run.id}",
+            "run": detail.run,
             "search": search,
-            "queries": list_job_discovery_queries(session, discovery_run_id=run_id),
-            "observations": list_job_discovery_observations(session, discovery_run_id=run_id),
+            "detail": detail,
         },
     )

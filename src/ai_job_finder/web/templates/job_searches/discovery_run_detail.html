@@ -33,14 +33,29 @@
       </dl>
     </article>
     <article class="panel">
-      <h2>Generated queries</h2>
-      {% if queries %}
+      <h2>Matching outcomes</h2>
+      <dl class="detail-list">
+        <div><dt>Canonical jobs evaluated</dt><dd>{{ detail.matching_summary.canonical_jobs_evaluated }}</dd></div>
+        <div><dt>Location eligible</dt><dd>{{ detail.matching_summary.location_eligible_count }}</dd></div>
+        <div><dt>Needs review</dt><dd>{{ detail.matching_summary.location_needs_review_count }}</dd></div>
+        <div><dt>Location ineligible</dt><dd>{{ detail.matching_summary.location_ineligible_count }}</dd></div>
+        <div><dt>Saved-search matches</dt><dd>{{ detail.matching_summary.saved_search_match_count }}</dd></div>
+        <div><dt>High-scoring actionable</dt><dd>{{ detail.matching_summary.actionable_match_count }}</dd></div>
+        <div><dt>Surfaced in /discover</dt><dd>{{ detail.matching_summary.surfaced_in_discover_count }}</dd></div>
+      </dl>
+    </article>
+  </section>
+
+  <section class="panel">
+    <h2>Search phase</h2>
+    {% if detail.queries %}
         <table class="job-table">
-          <thead><tr><th>#</th><th>Status</th><th>Query</th><th>Limit</th><th>Results</th></tr></thead>
+          <thead><tr><th>#</th><th>Provider</th><th>Status</th><th>Query</th><th>Limit</th><th>Results</th></tr></thead>
           <tbody>
-            {% for query in queries %}
+            {% for query in detail.queries %}
               <tr>
                 <td>{{ query.ordinal }}</td>
+                <td>{{ query.provider }}</td>
                 <td><span class="badge badge-status">{{ query.status|humanize }}</span></td>
                 <td>{{ query.query_text }}</td>
                 <td>{{ query.requested_result_limit }}</td>
@@ -63,16 +78,18 @@
   {% endif %}
 
   <section class="panel">
-    <h2>Observed candidates</h2>
-    {% if observations %}
+    <h2>Discovery phase</h2>
+    {% if detail.observations %}
       <table class="job-table">
-        <thead><tr><th>URL</th><th>Hints</th><th>Detection</th><th>Import</th><th>Saved-search result</th></tr></thead>
+        <thead><tr><th>URL</th><th>Hints</th><th>Detection</th><th>Source</th><th>Import / match</th></tr></thead>
         <tbody>
-          {% for record in observations %}
+          {% for record in detail.observations %}
             <tr>
               <td>
                 <a href="{{ record.observation.discovered_url }}" target="_blank" rel="noopener noreferrer">{{ record.observation.title_hint or record.observation.discovered_url }}</a>
+                <div class="muted">{{ record.observation.normalized_url }}</div>
                 <div class="muted">Queries {{ record.observation.query_ordinals|join(', ') }}</div>
+                <div class="muted">{{ 'Previously seen' if record.previously_seen else 'New URL' }}</div>
               </td>
               <td>
                 <div>{{ record.observation.company_hint or 'Unknown company' }}</div>
@@ -81,19 +98,28 @@
               <td>
                 <div><span class="badge badge-status">{{ record.observation.processing_status|humanize }}</span></div>
                 <div class="muted">{{ record.observation.source_detection_outcome|humanize if record.observation.source_detection_outcome else 'Not attempted' }}</div>
+                <div class="muted">{{ record.source_detection_run.detected_provider|humanize if record.source_detection_run and record.source_detection_run.detected_provider else 'No ATS resolved' }}</div>
+                <div class="muted">{{ 'Reused prior resolution' if record.reused_prior_resolution else 'Fresh resolution' }}</div>
                 {% if record.observation.source_detection_run_id %}<div><a href="/job-source-detections/{{ record.observation.source_detection_run_id }}">View detection</a></div>{% endif %}
               </td>
               <td>
-                {% if record.observation.import_run_id and record.imported_job_lead %}
-                  <div><a href="/job-import-runs/{{ record.observation.import_run_id }}">Import run</a></div>
-                  <div><a href="/jobs/{{ record.imported_job_lead.id }}">{{ record.imported_job_lead.title }}</a></div>
-                {% elif record.observation.source_configuration_id %}
-                  <div><a href="/job-sources/{{ record.observation.source_configuration_id }}">Approved source</a></div>
+                {% if record.source_configuration %}
+                  <div><a href="/job-sources/{{ record.source_configuration.id }}">{{ record.source_configuration.display_name }}</a></div>
+                  <div class="muted">{{ record.source_configuration.company_name }} · {{ record.source_configuration.board_token }}</div>
+                  <div class="muted">{{ 'Created during this run' if record.source_created_in_run else 'Known source' }}</div>
+                  <div class="muted">{{ 'Reused same-run source import' if record.source_reused_in_run else 'Primary source import' }}</div>
                 {% else %}
                   <div class="muted">{{ record.observation.exclusion_reason or 'No import linkage yet.' }}</div>
                 {% endif %}
               </td>
               <td>
+                {% if record.import_run %}
+                  <div><a href="/job-import-runs/{{ record.import_run.id }}">Import run</a></div>
+                  <div class="muted">{{ record.import_run.status|humanize }}</div>
+                {% endif %}
+                {% if record.imported_job_lead %}
+                  <div><a href="/jobs/{{ record.imported_job_lead.id }}">{{ record.imported_job_lead.title }}</a></div>
+                {% endif %}
                 {% if record.saved_search_match %}
                   <div><span class="badge badge-status">{{ 'Matched' if record.saved_search_match.matched else 'Excluded' }}</span></div>
                   <div class="muted">Score {{ '%.1f'|format(record.saved_search_match.score_at_match_time or 0) }}</div>
@@ -107,6 +133,91 @@
       </table>
     {% else %}
       <p class="muted">No observations were persisted for this run.</p>
+    {% endif %}
+  </section>
+
+  <section class="panel">
+    <h2>Import phase</h2>
+    {% if detail.imports %}
+      <table class="job-table">
+        <thead><tr><th>Source</th><th>Imported</th><th>Status</th><th>Jobs</th><th>Failures</th></tr></thead>
+        <tbody>
+          {% for record in detail.imports %}
+            <tr>
+              <td>
+                <div><a href="/job-sources/{{ record.source_configuration.id }}">{{ record.source_configuration.display_name }}</a></div>
+                <div class="muted">{{ record.source_configuration.company_name }} · {{ record.source_configuration.board_token }}</div>
+              </td>
+              <td>
+                <div>{{ 'Imported during run' if record.imported_during_run else 'Not imported' }}</div>
+                <div class="muted">{{ 'Created during run' if record.source_created_in_run else 'Reused source' }}</div>
+                <div class="muted">{{ 'Reused same-run import' if record.source_reused_in_run else 'First import for source' }}</div>
+              </td>
+              <td>
+                <div><span class="badge badge-status">{{ record.import_status|humanize if record.import_status else 'Unknown' }}</span></div>
+                {% if record.import_run %}<div><a href="/job-import-runs/{{ record.import_run.id }}">View import</a></div>{% endif %}
+              </td>
+              <td>
+                <div>Created {{ record.import_run.jobs_created if record.import_run else 0 }}</div>
+                <div class="muted">Updated {{ record.import_run.jobs_updated if record.import_run else 0 }}</div>
+                <div class="muted">Unchanged {{ record.import_run.jobs_unchanged if record.import_run else 0 }}</div>
+                <div class="muted">Observed URLs {{ record.observation_count }}</div>
+              </td>
+              <td>
+                {% if record.failure_message %}
+                  <div class="preformatted">{{ record.failure_message }}</div>
+                {% else %}
+                  <div class="muted">No failures recorded.</div>
+                {% endif %}
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    {% else %}
+      <p class="muted">No ATS sources were resolved for this run.</p>
+    {% endif %}
+  </section>
+
+  <section class="panel">
+    <h2>Top matched jobs</h2>
+    {% if detail.top_matches %}
+      <table class="job-table">
+        <thead><tr><th>Job</th><th>Location</th><th>Score</th><th>Recommendation</th><th>Why</th><th>/discover</th></tr></thead>
+        <tbody>
+          {% for record in detail.top_matches %}
+            <tr>
+              <td>
+                <div><a href="/jobs/{{ record.job_lead.id }}">{{ record.job_lead.title }}</a></div>
+                <div class="muted">{{ record.job_lead.company_name }}</div>
+              </td>
+              <td>
+                <div>{{ record.job_lead.location_text or 'Unknown' }}</div>
+                <div class="muted">{{ record.location_eligibility_status|humanize }}</div>
+              </td>
+              <td>{{ '%.1f'|format(record.saved_search_match.score_at_match_time or 0) }}</td>
+              <td>{{ record.saved_search_match.recommendation_at_match_time|humanize if record.saved_search_match.recommendation_at_match_time else 'Not scored' }}</td>
+              <td>{{ record.evaluation.explanation if record.evaluation else 'No explanation available.' }}</td>
+              <td>{{ 'Shown' if record.surfaced_in_discover else 'Filtered out' }}</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    {% else %}
+      <p class="muted">No saved-search matches were linked to this run.</p>
+    {% endif %}
+  </section>
+
+  <section class="panel">
+    <h2>Surfaced in /discover</h2>
+    {% if detail.discover_jobs %}
+      <ul>
+        {% for record in detail.discover_jobs %}
+          <li><a href="/jobs/{{ record.job_lead.id }}">{{ record.job_lead.company_name }} · {{ record.job_lead.title }}</a> ({{ '%.1f'|format(record.saved_search_match.score_at_match_time or 0) }})</li>
+        {% endfor %}
+      </ul>
+    {% else %}
+      <p class="muted">No matched jobs from this run surfaced in the default discovery queue.</p>
     {% endif %}
   </section>
 {% endblock %}

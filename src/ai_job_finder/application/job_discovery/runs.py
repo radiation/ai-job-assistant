@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import cast
 from uuid import UUID
 
 from sqlalchemy import select
@@ -15,6 +16,7 @@ from ai_job_finder.application.job_searches import (
     run_job_search,
 )
 from ai_job_finder.application.job_sources import run_job_source_import
+from ai_job_finder.application.job_sources.discovery import list_ranked_discovered_leads
 from ai_job_finder.application.services import get_current_candidate_profile
 from ai_job_finder.application.source_detection import (
     SourceDetectionConfig,
@@ -22,7 +24,13 @@ from ai_job_finder.application.source_detection import (
     create_source_detection_run,
 )
 from ai_job_finder.domain.common import new_uuid, utc_now
-from ai_job_finder.domain.enums import JobImportRunStatus, SourceDetectionRunStatus
+from ai_job_finder.domain.enums import (
+    JobImportRunStatus,
+    JobLocationEligibilityStatus,
+    Recommendation,
+    SourceDetectionRunStatus,
+    WorkplaceType,
+)
 from ai_job_finder.domain.errors import (
     JobSearchDefinitionDisabledError,
     MissingCandidateError,
@@ -38,17 +46,31 @@ from ai_job_finder.domain.job_discovery import (
     normalize_job_discovery_url,
 )
 from ai_job_finder.domain.job_sources import JobSourceConnector
+from ai_job_finder.domain.location_eligibility import (
+    JobLocationSignals,
+    classify_job_location_eligibility,
+)
 from ai_job_finder.domain.source_detection import GreenhouseBoardValidator, PublicPageFetcher
 from ai_job_finder.infrastructure.database.models import (
+    CandidateProfileModel,
     JobDiscoveryObservationModel,
     JobDiscoveryQueryModel,
     JobDiscoveryRunModel,
+    JobEvaluationModel,
+    JobImportRunModel,
     JobLeadModel,
     JobSearchMatchModel,
+    JobSourceConfigurationModel,
     JobSourceObservationModel,
+    SourceDetectionRunModel,
 )
 
 MAX_ERROR_SUMMARY_LENGTH = 1000
+MAX_TOP_MATCHES = 10
+ACTIONABLE_RECOMMENDATIONS = {
+    Recommendation.STRONG_RECOMMEND.value,
+    Recommendation.RECOMMEND.value,
+}
 
 
 @dataclass(frozen=True, slots=True)
@@ -67,6 +89,68 @@ class JobDiscoveryObservationRecord:
     observation: JobDiscoveryObservationModel
     imported_job_lead: JobLeadModel | None
     saved_search_match: JobSearchMatchModel | None
+    source_detection_run: SourceDetectionRunModel | None = None
+    source_configuration: JobSourceConfigurationModel | None = None
+    import_run: JobImportRunModel | None = None
+    previously_seen: bool = False
+    reused_prior_resolution: bool = False
+    source_created_in_run: bool = False
+    source_reused_in_run: bool = False
+
+
+@dataclass(frozen=True, slots=True)
+class JobDiscoveryImportRecord:
+    source_configuration: JobSourceConfigurationModel
+    import_run: JobImportRunModel | None
+    imported_during_run: bool
+    source_created_in_run: bool
+    source_reused_in_run: bool
+    observation_count: int
+    import_status: str | None
+    failure_message: str | None
+
+
+@dataclass(frozen=True, slots=True)
+class JobDiscoveryMatchingSummary:
+    canonical_jobs_evaluated: int
+    location_eligible_count: int
+    location_needs_review_count: int
+    location_ineligible_count: int
+    saved_search_match_count: int
+    actionable_match_count: int
+    surfaced_in_discover_count: int
+
+
+@dataclass(frozen=True, slots=True)
+class JobDiscoveryMatchedJobRecord:
+    observation: JobDiscoveryObservationModel
+    job_lead: JobLeadModel
+    saved_search_match: JobSearchMatchModel
+    evaluation: JobEvaluationModel | None
+    location_eligibility_status: JobLocationEligibilityStatus
+    location_eligibility_summary: str
+    surfaced_in_discover: bool
+
+
+@dataclass(frozen=True, slots=True)
+class JobDiscoveryRunDetail:
+    run: JobDiscoveryRunModel
+    queries: list[JobDiscoveryQueryModel]
+    observations: list[JobDiscoveryObservationRecord]
+    imports: list[JobDiscoveryImportRecord]
+    matching_summary: JobDiscoveryMatchingSummary
+    top_matches: list[JobDiscoveryMatchedJobRecord]
+    discover_jobs: list[JobDiscoveryMatchedJobRecord]
+
+
+@dataclass(slots=True)
+class _ImportAggregation:
+    source: JobSourceConfigurationModel
+    import_run: JobImportRunModel | None
+    source_created_in_run: bool
+    source_reused_in_run: bool
+    observation_count: int
+    failure_messages: set[str]
 
 
 @dataclass(frozen=True, slots=True)
@@ -668,10 +752,17 @@ def list_job_discovery_observations(
     rows = list(
         session.scalars(
             select(JobDiscoveryObservationModel)
-            .options(joinedload(JobDiscoveryObservationModel.imported_job_lead))
+            .options(
+                joinedload(JobDiscoveryObservationModel.imported_job_lead),
+                joinedload(JobDiscoveryObservationModel.source_detection_run),
+                joinedload(JobDiscoveryObservationModel.source_configuration),
+                joinedload(JobDiscoveryObservationModel.import_run),
+            )
             .where(JobDiscoveryObservationModel.discovery_run_id == discovery_run_id)
         )
     )
+    previously_seen_urls = _previously_seen_urls(session, run_id=run.id, rows=rows)
+    first_observation_ids_by_source = _first_observation_ids_by_source(rows)
     matches_by_job_lead_id: dict[UUID, JobSearchMatchModel] = {}
     if run.saved_search_run_id is not None:
         matches_by_job_lead_id = {
@@ -681,11 +772,52 @@ def list_job_discovery_observations(
     records = [
         JobDiscoveryObservationRecord(
             observation=row,
-            imported_job_lead=row.imported_job_lead,
+            imported_job_lead=(
+                row.imported_job_lead
+                or (
+                    session.get(JobLeadModel, row.imported_job_lead_id)
+                    if row.imported_job_lead_id is not None
+                    else None
+                )
+            ),
             saved_search_match=(
                 matches_by_job_lead_id.get(row.imported_job_lead_id)
                 if row.imported_job_lead_id is not None
                 else None
+            ),
+            source_detection_run=(
+                row.source_detection_run
+                or (
+                    session.get(SourceDetectionRunModel, row.source_detection_run_id)
+                    if row.source_detection_run_id is not None
+                    else None
+                )
+            ),
+            source_configuration=(
+                row.source_configuration
+                or (
+                    session.get(JobSourceConfigurationModel, row.source_configuration_id)
+                    if row.source_configuration_id is not None
+                    else None
+                )
+            ),
+            import_run=(
+                row.import_run
+                or (
+                    session.get(JobImportRunModel, row.import_run_id)
+                    if row.import_run_id is not None
+                    else None
+                )
+            ),
+            previously_seen=row.normalized_url in previously_seen_urls,
+            reused_prior_resolution=(
+                row.source_detection_run is not None
+                and row.source_detection_run.created_at < row.created_at
+            ),
+            source_created_in_run=_source_created_in_run(run=run, source=row.source_configuration),
+            source_reused_in_run=(
+                row.source_configuration_id is not None
+                and first_observation_ids_by_source.get(row.source_configuration_id) != row.id
             ),
         )
         for row in rows
@@ -699,6 +831,355 @@ def list_job_discovery_observations(
         ),
         reverse=True,
     )
+
+
+def get_job_discovery_run_detail(session: Session, run_id: UUID) -> JobDiscoveryRunDetail:
+    run = get_job_discovery_run(session, run_id)
+    queries = list_job_discovery_queries(session, discovery_run_id=run_id)
+    observations = list_job_discovery_observations(session, discovery_run_id=run_id)
+    imports = _summarize_imports(run=run, observations=observations)
+    matching_summary, top_matches, discover_jobs = _build_matching_detail(
+        session,
+        run=run,
+        observations=observations,
+    )
+    return JobDiscoveryRunDetail(
+        run=run,
+        queries=queries,
+        observations=observations,
+        imports=imports,
+        matching_summary=matching_summary,
+        top_matches=top_matches,
+        discover_jobs=discover_jobs,
+    )
+
+
+def _previously_seen_urls(
+    session: Session,
+    *,
+    run_id: UUID,
+    rows: list[JobDiscoveryObservationModel],
+) -> set[str]:
+    urls = sorted({row.normalized_url for row in rows})
+    if not urls:
+        return set()
+    return set(
+        session.scalars(
+            select(JobDiscoveryObservationModel.normalized_url)
+            .where(
+                JobDiscoveryObservationModel.discovery_run_id != run_id,
+                JobDiscoveryObservationModel.normalized_url.in_(urls),
+            )
+            .distinct()
+        )
+    )
+
+
+def _first_observation_ids_by_source(
+    rows: list[JobDiscoveryObservationModel],
+) -> dict[UUID, UUID]:
+    first_ids: dict[UUID, UUID] = {}
+    ordered_rows = sorted(rows, key=lambda row: (row.created_at, str(row.id)))
+    for row in ordered_rows:
+        if row.source_configuration_id is None:
+            continue
+        first_ids.setdefault(row.source_configuration_id, row.id)
+    return first_ids
+
+
+def _source_created_in_run(
+    *,
+    run: JobDiscoveryRunModel,
+    source: JobSourceConfigurationModel | None,
+) -> bool:
+    if source is None:
+        return False
+    completed_at = run.completed_at or utc_now()
+    return run.started_at <= source.created_at <= completed_at
+
+
+def _summarize_imports(
+    *,
+    run: JobDiscoveryRunModel,
+    observations: list[JobDiscoveryObservationRecord],
+) -> list[JobDiscoveryImportRecord]:
+    grouped: dict[UUID, _ImportAggregation] = {}
+    for record in observations:
+        source = record.source_configuration
+        if source is None:
+            continue
+        grouped_record = grouped.setdefault(
+            source.id,
+            _ImportAggregation(
+                source=source,
+                import_run=record.import_run,
+                source_created_in_run=record.source_created_in_run,
+                source_reused_in_run=record.source_reused_in_run,
+                observation_count=0,
+                failure_messages=set(),
+            ),
+        )
+        grouped_record.observation_count += 1
+        grouped_record.source_created_in_run = (
+            grouped_record.source_created_in_run or record.source_created_in_run
+        )
+        grouped_record.source_reused_in_run = (
+            grouped_record.source_reused_in_run or record.source_reused_in_run
+        )
+        if grouped_record.import_run is None and record.import_run is not None:
+            grouped_record.import_run = record.import_run
+        if record.observation.exclusion_reason:
+            grouped_record.failure_messages.add(record.observation.exclusion_reason)
+
+    summaries = [
+        _build_import_record(
+            run=run,
+            source=grouped_record.source,
+            import_run=grouped_record.import_run,
+            source_created_in_run=grouped_record.source_created_in_run,
+            source_reused_in_run=grouped_record.source_reused_in_run,
+            observation_count=grouped_record.observation_count,
+            failure_messages=grouped_record.failure_messages,
+        )
+        for grouped_record in grouped.values()
+    ]
+    return sorted(
+        summaries,
+        key=lambda record: (
+            record.source_configuration.company_name.casefold(),
+            record.source_configuration.board_token.casefold(),
+        ),
+    )
+
+
+def _build_import_record(
+    *,
+    run: JobDiscoveryRunModel,
+    source: JobSourceConfigurationModel,
+    import_run: JobImportRunModel | None,
+    source_created_in_run: bool,
+    source_reused_in_run: bool,
+    observation_count: int,
+    failure_messages: set[str],
+) -> JobDiscoveryImportRecord:
+    failure_message = import_run.error_message if import_run else None
+    if failure_message is None and failure_messages:
+        failure_message = "\n".join(sorted(failure_messages))
+    import_status = import_run.status if import_run is not None else None
+    if import_status is None and failure_message is not None:
+        import_status = JobImportRunStatus.FAILED.value
+    imported_during_run = import_run is not None or import_status == JobImportRunStatus.FAILED.value
+    return JobDiscoveryImportRecord(
+        source_configuration=source,
+        import_run=import_run,
+        imported_during_run=imported_during_run,
+        source_created_in_run=source_created_in_run,
+        source_reused_in_run=source_reused_in_run,
+        observation_count=observation_count,
+        import_status=import_status,
+        failure_message=failure_message,
+    )
+
+
+def _build_matching_detail(
+    session: Session,
+    *,
+    run: JobDiscoveryRunModel,
+    observations: list[JobDiscoveryObservationRecord],
+) -> tuple[
+    JobDiscoveryMatchingSummary,
+    list[JobDiscoveryMatchedJobRecord],
+    list[JobDiscoveryMatchedJobRecord],
+]:
+    imported_records = [record for record in observations if record.imported_job_lead is not None]
+    if not imported_records:
+        empty_summary = JobDiscoveryMatchingSummary(
+            canonical_jobs_evaluated=0,
+            location_eligible_count=0,
+            location_needs_review_count=0,
+            location_ineligible_count=0,
+            saved_search_match_count=0,
+            actionable_match_count=0,
+            surfaced_in_discover_count=0,
+        )
+        return empty_summary, [], []
+
+    candidate = get_current_candidate_profile(session)
+    source_observations_by_job_id = _source_observations_by_job_id(
+        session,
+        job_lead_ids=[
+            record.imported_job_lead.id
+            for record in imported_records
+            if record.imported_job_lead is not None
+        ],
+    )
+    location_summary_by_job_id: dict[UUID, tuple[JobLocationEligibilityStatus, str]] = {}
+    eligible_count = 0
+    needs_review_count = 0
+    ineligible_count = 0
+    for record in imported_records:
+        job_lead = record.imported_job_lead
+        if job_lead is None or job_lead.id in location_summary_by_job_id:
+            continue
+        status, summary = _location_summary_for_observation(
+            candidate=candidate,
+            source_observation=source_observations_by_job_id.get(job_lead.id),
+            job_lead=job_lead,
+        )
+        location_summary_by_job_id[job_lead.id] = (status, summary)
+        if status is JobLocationEligibilityStatus.ELIGIBLE:
+            eligible_count += 1
+        elif status is JobLocationEligibilityStatus.NEEDS_REVIEW:
+            needs_review_count += 1
+        else:
+            ineligible_count += 1
+
+    matches_by_job_id: dict[UUID, JobSearchMatchModel] = {}
+    evaluations_by_job_id: dict[UUID, JobEvaluationModel | None] = {}
+    if run.saved_search_run_id is not None:
+        for match_record in list_job_search_matches(session, search_run_id=run.saved_search_run_id):
+            matches_by_job_id[match_record.job_lead.id] = match_record.match
+            evaluations_by_job_id[match_record.job_lead.id] = match_record.evaluation
+
+    surfaced_job_ids: set[UUID] = set()
+    surfaced_rows: dict[UUID, JobDiscoveryMatchedJobRecord] = {}
+    if run.saved_search_run_id is not None and candidate is not None:
+        for item in list_ranked_discovered_leads(
+            session,
+            search_definition_id=run.search_definition_id,
+        ):
+            if item.job.id not in location_summary_by_job_id:
+                continue
+            match = matches_by_job_id.get(item.job.id)
+            if match is None or not match.matched:
+                continue
+            surfaced_job_ids.add(item.job.id)
+            status, summary = location_summary_by_job_id[item.job.id]
+            surfaced_rows[item.job.id] = JobDiscoveryMatchedJobRecord(
+                observation=next(
+                    record.observation
+                    for record in imported_records
+                    if record.imported_job_lead is not None
+                    and record.imported_job_lead.id == item.job.id
+                ),
+                job_lead=item.job,
+                saved_search_match=match,
+                evaluation=evaluations_by_job_id.get(item.job.id),
+                location_eligibility_status=status,
+                location_eligibility_summary=summary,
+                surfaced_in_discover=True,
+            )
+
+    matched_records: list[JobDiscoveryMatchedJobRecord] = []
+    evaluated_job_ids = {
+        record.saved_search_match.job_lead_id
+        for record in imported_records
+        if record.saved_search_match is not None
+        and record.saved_search_match.job_evaluation_id is not None
+    }
+    for record in imported_records:
+        job_lead = record.imported_job_lead
+        match = record.saved_search_match
+        if job_lead is None or match is None or not match.matched:
+            continue
+        status, summary = location_summary_by_job_id[job_lead.id]
+        matched_records.append(
+            JobDiscoveryMatchedJobRecord(
+                observation=record.observation,
+                job_lead=job_lead,
+                saved_search_match=match,
+                evaluation=evaluations_by_job_id.get(job_lead.id),
+                location_eligibility_status=status,
+                location_eligibility_summary=summary,
+                surfaced_in_discover=job_lead.id in surfaced_job_ids,
+            )
+        )
+
+    matched_records.sort(
+        key=lambda record: (
+            record.saved_search_match.score_at_match_time or -1.0,
+            record.job_lead.created_at,
+        ),
+        reverse=True,
+    )
+    discover_jobs = [
+        surfaced_rows[job_id]
+        for job_id in sorted(
+            surfaced_rows,
+            key=lambda job_id: (
+                surfaced_rows[job_id].saved_search_match.score_at_match_time or -1.0,
+                surfaced_rows[job_id].job_lead.created_at,
+            ),
+            reverse=True,
+        )
+    ]
+    actionable_match_count = sum(
+        1
+        for record in matched_records
+        if record.location_eligibility_status is not JobLocationEligibilityStatus.INELIGIBLE
+        and record.saved_search_match.recommendation_at_match_time in ACTIONABLE_RECOMMENDATIONS
+    )
+    matching_summary = JobDiscoveryMatchingSummary(
+        canonical_jobs_evaluated=len(evaluated_job_ids),
+        location_eligible_count=eligible_count,
+        location_needs_review_count=needs_review_count,
+        location_ineligible_count=ineligible_count,
+        saved_search_match_count=len(matched_records),
+        actionable_match_count=actionable_match_count,
+        surfaced_in_discover_count=len(discover_jobs),
+    )
+    return matching_summary, matched_records[:MAX_TOP_MATCHES], discover_jobs
+
+
+def _source_observations_by_job_id(
+    session: Session,
+    *,
+    job_lead_ids: list[UUID],
+) -> dict[UUID, JobSourceObservationModel]:
+    if not job_lead_ids:
+        return {}
+    rows = list(
+        session.scalars(
+            select(JobSourceObservationModel)
+            .where(JobSourceObservationModel.job_lead_id.in_(job_lead_ids))
+            .order_by(
+                JobSourceObservationModel.active.desc(),
+                JobSourceObservationModel.last_seen_at.desc(),
+                JobSourceObservationModel.created_at.desc(),
+            )
+        )
+    )
+    by_job_id: dict[UUID, JobSourceObservationModel] = {}
+    for row in rows:
+        by_job_id.setdefault(row.job_lead_id, row)
+    return by_job_id
+
+
+def _location_summary_for_observation(
+    *,
+    candidate: CandidateProfileModel | None,
+    source_observation: JobSourceObservationModel | None,
+    job_lead: JobLeadModel,
+) -> tuple[JobLocationEligibilityStatus, str]:
+    if candidate is None:
+        return JobLocationEligibilityStatus.NEEDS_REVIEW, "Candidate profile is unavailable."
+    payload = source_observation.normalized_payload if source_observation is not None else {}
+    offices = payload.get("offices") if isinstance(payload, dict) else None
+    metadata = payload.get("metadata") if isinstance(payload, dict) else None
+    result = classify_job_location_eligibility(
+        candidate.to_snapshot(),
+        JobLocationSignals(
+            location_text=job_lead.location_text,
+            workplace_type=(
+                WorkplaceType(job_lead.workplace_type) if job_lead.workplace_type else None
+            ),
+            offices=[str(value) for value in offices if isinstance(value, str)]
+            if isinstance(offices, list)
+            else [],
+            metadata=cast(dict[str, object], metadata) if isinstance(metadata, dict) else {},
+        ),
+    )
+    return result.status, result.summary
 
 
 def _bounded_required(value: str, limit: int) -> str:
