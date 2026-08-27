@@ -22,7 +22,7 @@ from ai_job_finder.domain.job_sources import (
     JobSourceItemFailure,
     NormalizedJobPosting,
 )
-from ai_job_finder.domain.source_detection import AshbyBoardValidation
+from ai_job_finder.domain.source_detection import JobSourceBoardValidation
 from ai_job_finder.infrastructure.job_sources.greenhouse import html_to_plain_text
 
 CONNECTOR_VERSION = "ashby-posting-api-v1"
@@ -71,10 +71,10 @@ class AshbyJobSourceConnector:
             job_failures=failures,
         )
 
-    def validate_board_token(self, board_token: str) -> AshbyBoardValidation:
+    def validate_board_token(self, board_token: str) -> JobSourceBoardValidation:
         token = board_token.strip()
         if not token:
-            return AshbyBoardValidation(
+            return JobSourceBoardValidation(
                 token=token,
                 status="invalid",
                 valid=False,
@@ -83,20 +83,20 @@ class AshbyJobSourceConnector:
         try:
             payload = self._fetch_json(token)
         except InvalidJobSourceError as exc:
-            return AshbyBoardValidation(
+            return JobSourceBoardValidation(
                 token=token, status="invalid", valid=False, error_message=str(exc)
             )
         except MalformedJobSourcePayloadError as exc:
-            return AshbyBoardValidation(
+            return JobSourceBoardValidation(
                 token=token, status="malformed", valid=False, error_message=str(exc)
             )
         except JobSourceProviderError as exc:
-            return AshbyBoardValidation(
+            return JobSourceBoardValidation(
                 token=token, status="unavailable", valid=False, error_message=str(exc)
             )
         jobs = payload.get("jobs")
         if not isinstance(jobs, list):
-            return AshbyBoardValidation(
+            return JobSourceBoardValidation(
                 token=token,
                 status="malformed",
                 valid=False,
@@ -109,7 +109,7 @@ class AshbyJobSourceConnector:
             and isinstance(item.get("title"), str)
             and item["title"].strip()
         ][:5]
-        return AshbyBoardValidation(
+        return JobSourceBoardValidation(
             token=token,
             status="valid_empty" if not jobs else "valid",
             valid=True,

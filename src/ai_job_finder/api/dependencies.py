@@ -15,8 +15,7 @@ from ai_job_finder.domain.errors import (
 )
 from ai_job_finder.domain.job_sources import JobSourceConnector
 from ai_job_finder.domain.source_detection import (
-    AshbyBoardValidator,
-    GreenhouseBoardValidator,
+    JobSourceBoardValidator,
     PublicPageFetcher,
 )
 from ai_job_finder.infrastructure.database.session import get_db_session
@@ -28,7 +27,10 @@ from ai_job_finder.infrastructure.job_discovery import (
 from ai_job_finder.infrastructure.job_sources.ashby import AshbyJobSourceConnector
 from ai_job_finder.infrastructure.job_sources.fake import FileBackedFakeJobSourceConnector
 from ai_job_finder.infrastructure.job_sources.greenhouse import GreenhouseJobSourceConnector
-from ai_job_finder.infrastructure.job_sources.router import ProviderJobSourceConnector
+from ai_job_finder.infrastructure.job_sources.router import (
+    ProviderJobSourceBoardValidator,
+    ProviderJobSourceConnector,
+)
 from ai_job_finder.infrastructure.llm.fake import FakeCareerFactExtractor
 from ai_job_finder.infrastructure.llm.vertex import VertexGeminiCareerFactExtractor
 from ai_job_finder.infrastructure.public_fetcher import (
@@ -82,16 +84,7 @@ def career_fact_extractor_dependency(
 def job_source_connector_dependency(
     settings: Annotated[Settings, Depends(settings_dependency)],
 ) -> JobSourceConnector:
-    if settings.greenhouse_fake_fixture_path is not None:
-        return FileBackedFakeJobSourceConnector(settings.greenhouse_fake_fixture_path)
-    greenhouse = GreenhouseJobSourceConnector(
-        api_base_url=settings.greenhouse_api_base_url,
-        timeout_seconds=settings.greenhouse_timeout_seconds,
-        transient_retry_count=settings.greenhouse_transient_retry_count,
-        user_agent=settings.greenhouse_user_agent,
-        max_response_bytes=settings.greenhouse_max_response_bytes,
-        max_jobs=settings.greenhouse_max_jobs,
-    )
+    greenhouse = _greenhouse_connector(settings)
     ashby = AshbyJobSourceConnector(
         api_base_url=settings.ashby_api_base_url,
         timeout_seconds=settings.ashby_timeout_seconds,
@@ -129,9 +122,31 @@ def job_discovery_provider_dependency(
     )
 
 
-def greenhouse_board_validator_dependency(
+def job_source_board_validator_dependency(
     settings: Annotated[Settings, Depends(settings_dependency)],
-) -> GreenhouseBoardValidator:
+) -> JobSourceBoardValidator:
+    return ProviderJobSourceBoardValidator(
+        {
+            JobSourceProvider.GREENHOUSE: _greenhouse_connector(settings),
+            JobSourceProvider.ASHBY: _ashby_connector(settings),
+        }
+    )
+
+
+def _ashby_connector(settings: Settings) -> AshbyJobSourceConnector:
+    return AshbyJobSourceConnector(
+        api_base_url=settings.ashby_api_base_url,
+        timeout_seconds=settings.ashby_timeout_seconds,
+        transient_retry_count=settings.ashby_transient_retry_count,
+        user_agent=settings.greenhouse_user_agent,
+        max_response_bytes=settings.ashby_max_response_bytes,
+        max_jobs=settings.ashby_max_jobs,
+    )
+
+
+def _greenhouse_connector(
+    settings: Settings,
+) -> GreenhouseJobSourceConnector | FileBackedFakeJobSourceConnector:
     if settings.greenhouse_fake_fixture_path is not None:
         return FileBackedFakeJobSourceConnector(settings.greenhouse_fake_fixture_path)
     return GreenhouseJobSourceConnector(
@@ -141,19 +156,6 @@ def greenhouse_board_validator_dependency(
         user_agent=settings.greenhouse_user_agent,
         max_response_bytes=settings.greenhouse_max_response_bytes,
         max_jobs=settings.greenhouse_max_jobs,
-    )
-
-
-def ashby_board_validator_dependency(
-    settings: Annotated[Settings, Depends(settings_dependency)],
-) -> AshbyBoardValidator:
-    return AshbyJobSourceConnector(
-        api_base_url=settings.ashby_api_base_url,
-        timeout_seconds=settings.ashby_timeout_seconds,
-        transient_retry_count=settings.ashby_transient_retry_count,
-        user_agent=settings.greenhouse_user_agent,
-        max_response_bytes=settings.ashby_max_response_bytes,
-        max_jobs=settings.ashby_max_jobs,
     )
 
 

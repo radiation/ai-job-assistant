@@ -8,8 +8,8 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
 from ai_job_finder.api.dependencies import (
-    greenhouse_board_validator_dependency,
     job_discovery_provider_dependency,
+    job_source_board_validator_dependency,
     job_source_connector_dependency,
     public_page_fetcher_dependency,
 )
@@ -222,7 +222,7 @@ def test_job_discovery_api_run_list_detail_and_observations(
     app = cast(Any, client.app)
     app.dependency_overrides[job_discovery_provider_dependency] = lambda: provider
     app.dependency_overrides[job_source_connector_dependency] = lambda: connector
-    app.dependency_overrides[greenhouse_board_validator_dependency] = lambda: connector
+    app.dependency_overrides[job_source_board_validator_dependency] = lambda: connector
     app.dependency_overrides[public_page_fetcher_dependency] = lambda: FakeFetcher(
         {url_one: _page(url_one), url_two: _page(url_two)}
     )
@@ -263,7 +263,7 @@ def test_job_discovery_api_run_list_detail_and_observations(
 
     app.dependency_overrides.pop(job_discovery_provider_dependency, None)
     app.dependency_overrides.pop(job_source_connector_dependency, None)
-    app.dependency_overrides.pop(greenhouse_board_validator_dependency, None)
+    app.dependency_overrides.pop(job_source_board_validator_dependency, None)
     app.dependency_overrides.pop(public_page_fetcher_dependency, None)
 
 
@@ -332,7 +332,7 @@ def test_job_discovery_api_auto_creates_unknown_greenhouse_source_and_reuses_it(
     app = cast(Any, client.app)
     app.dependency_overrides[job_discovery_provider_dependency] = lambda: provider
     app.dependency_overrides[job_source_connector_dependency] = lambda: connector
-    app.dependency_overrides[greenhouse_board_validator_dependency] = lambda: connector
+    app.dependency_overrides[job_source_board_validator_dependency] = lambda: connector
     app.dependency_overrides[public_page_fetcher_dependency] = lambda: FakeFetcher(
         {
             strong_url: _page_for_token(strong_url, "beta"),
@@ -362,7 +362,7 @@ def test_job_discovery_api_auto_creates_unknown_greenhouse_source_and_reuses_it(
 
     app.dependency_overrides.pop(job_discovery_provider_dependency, None)
     app.dependency_overrides.pop(job_source_connector_dependency, None)
-    app.dependency_overrides.pop(greenhouse_board_validator_dependency, None)
+    app.dependency_overrides.pop(job_source_board_validator_dependency, None)
     app.dependency_overrides.pop(public_page_fetcher_dependency, None)
 
 
@@ -415,7 +415,7 @@ def test_job_discovery_api_reports_aggregator_exclusions_without_fetching(
     app = cast(Any, client.app)
     app.dependency_overrides[job_discovery_provider_dependency] = lambda: provider
     app.dependency_overrides[job_source_connector_dependency] = lambda: FakeJobSourceConnector()
-    app.dependency_overrides[greenhouse_board_validator_dependency] = lambda: (
+    app.dependency_overrides[job_source_board_validator_dependency] = lambda: (
         FakeJobSourceConnector()
     )
     app.dependency_overrides[public_page_fetcher_dependency] = lambda: fetcher
@@ -434,5 +434,5 @@ def test_job_discovery_api_reports_aggregator_exclusions_without_fetching(
 
     app.dependency_overrides.pop(job_discovery_provider_dependency, None)
     app.dependency_overrides.pop(job_source_connector_dependency, None)
-    app.dependency_overrides.pop(greenhouse_board_validator_dependency, None)
+    app.dependency_overrides.pop(job_source_board_validator_dependency, None)
     app.dependency_overrides.pop(public_page_fetcher_dependency, None)

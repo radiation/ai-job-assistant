@@ -14,7 +14,7 @@ from ai_job_finder.domain.job_sources import (
     JobSourceItemFailure,
     NormalizedJobPosting,
 )
-from ai_job_finder.domain.source_detection import GreenhouseBoardValidation
+from ai_job_finder.domain.source_detection import JobSourceBoardValidation
 
 
 @dataclass(slots=True)
@@ -37,13 +37,13 @@ class FakeJobSourceConnector:
             job_failures=list(self.job_failures),
         )
 
-    def validate_board_token(self, board_token: str) -> GreenhouseBoardValidation:
+    def validate_board_token(self, board_token: str) -> JobSourceBoardValidation:
         token = board_token.strip().lower()
         valid_tokens = self.valid_tokens or {"acme"}
         if token not in valid_tokens:
-            return GreenhouseBoardValidation(token=token, status="invalid", valid=False)
+            return JobSourceBoardValidation(token=token, status="invalid", valid=False)
         titles = [job.title for job in self.jobs[:5]]
-        return GreenhouseBoardValidation(
+        return JobSourceBoardValidation(
             token=token,
             status="valid_empty" if not self.jobs else "valid",
             valid=True,
@@ -51,6 +51,19 @@ class FakeJobSourceConnector:
             sample_titles=titles,
             company_name=self.jobs[0].company_name if self.jobs else None,
         )
+
+    def validate(
+        self,
+        provider: JobSourceProvider,
+        board_token: str,
+    ) -> JobSourceBoardValidation:
+        if provider is not JobSourceProvider.GREENHOUSE:
+            return JobSourceBoardValidation(
+                token=board_token,
+                status="invalid",
+                valid=False,
+            )
+        return self.validate_board_token(board_token)
 
 
 @dataclass(slots=True)
@@ -79,7 +92,7 @@ class FileBackedFakeJobSourceConnector:
             job_failures=[_job_failure_from_fixture(item) for item in job_failures_payload],
         )
 
-    def validate_board_token(self, board_token: str) -> GreenhouseBoardValidation:
+    def validate_board_token(self, board_token: str) -> JobSourceBoardValidation:
         payload = json.loads(self.fixture_path.read_text(encoding="utf-8"))
         if not isinstance(payload, dict):
             raise JobSourceProviderError("Fake Greenhouse fixture must be a JSON object.")
@@ -88,13 +101,13 @@ class FileBackedFakeJobSourceConnector:
         if isinstance(valid_tokens_payload, dict):
             token_payload = valid_tokens_payload.get(token)
             if not isinstance(token_payload, dict):
-                return GreenhouseBoardValidation(token=token, status="invalid", valid=False)
+                return JobSourceBoardValidation(token=token, status="invalid", valid=False)
             jobs_payload = token_payload.get("jobs", [])
             if not isinstance(jobs_payload, list):
                 raise JobSourceProviderError("Fake Greenhouse fixture jobs must be a list.")
             titles = [str(item["title"]) for item in jobs_payload[:5] if isinstance(item, dict)]
             company_name = token_payload.get("company_name")
-            return GreenhouseBoardValidation(
+            return JobSourceBoardValidation(
                 token=token,
                 status="valid_empty" if not jobs_payload else "valid",
                 valid=True,
@@ -104,13 +117,13 @@ class FileBackedFakeJobSourceConnector:
             )
         source_token = str(payload.get("board_token") or "acme").lower()
         if token != source_token:
-            return GreenhouseBoardValidation(token=token, status="invalid", valid=False)
+            return JobSourceBoardValidation(token=token, status="invalid", valid=False)
         jobs_payload = payload.get("jobs", [])
         if not isinstance(jobs_payload, list):
             raise JobSourceProviderError("Fake Greenhouse fixture jobs must be a list.")
         titles = [str(item["title"]) for item in jobs_payload[:5] if isinstance(item, dict)]
         company_name = payload.get("company_name")
-        return GreenhouseBoardValidation(
+        return JobSourceBoardValidation(
             token=token,
             status="valid_empty" if not jobs_payload else "valid",
             valid=True,
@@ -118,6 +131,19 @@ class FileBackedFakeJobSourceConnector:
             sample_titles=titles,
             company_name=company_name if isinstance(company_name, str) else None,
         )
+
+    def validate(
+        self,
+        provider: JobSourceProvider,
+        board_token: str,
+    ) -> JobSourceBoardValidation:
+        if provider is not JobSourceProvider.GREENHOUSE:
+            return JobSourceBoardValidation(
+                token=board_token,
+                status="invalid",
+                valid=False,
+            )
+        return self.validate_board_token(board_token)
 
 
 def _posting_from_fixture(

@@ -8,7 +8,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session, sessionmaker
 
 from ai_job_finder.api.dependencies import (
-    greenhouse_board_validator_dependency,
+    job_source_board_validator_dependency,
     job_source_connector_dependency,
     public_page_fetcher_dependency,
 )
@@ -29,8 +29,7 @@ from ai_job_finder.domain.enums import (
 )
 from ai_job_finder.domain.errors import AmbiguousSourceDetectionError, UnsafeUrlError
 from ai_job_finder.domain.source_detection import (
-    AshbyBoardValidation,
-    GreenhouseBoardValidation,
+    JobSourceBoardValidation,
     PublicPage,
 )
 from ai_job_finder.infrastructure.job_sources.fake import FakeJobSourceConnector
@@ -48,12 +47,14 @@ class FakeFetcher:
 
 
 class FakeValidator:
-    def __init__(self, valid: dict[str, GreenhouseBoardValidation]):
+    def __init__(self, valid: dict[str, JobSourceBoardValidation]):
         self.valid = valid
 
-    def validate_board_token(self, board_token: str) -> GreenhouseBoardValidation:
+    def validate(self, provider: JobSourceProvider, board_token: str) -> JobSourceBoardValidation:
         token = board_token.strip().lower()
-        return self.valid.get(token) or GreenhouseBoardValidation(
+        if provider is not JobSourceProvider.GREENHOUSE:
+            return JobSourceBoardValidation(token=token, status="invalid", valid=False)
+        return self.valid.get(token) or JobSourceBoardValidation(
             token=token,
             status="invalid",
             valid=False,
@@ -61,8 +62,9 @@ class FakeValidator:
 
 
 class FakeAshbyValidator:
-    def validate_board_token(self, board_token: str) -> AshbyBoardValidation:
-        return AshbyBoardValidation(
+    def validate(self, provider: JobSourceProvider, board_token: str) -> JobSourceBoardValidation:
+        assert provider is JobSourceProvider.ASHBY
+        return JobSourceBoardValidation(
             token=board_token,
             status="valid",
             valid=True,
@@ -73,14 +75,14 @@ class FakeAshbyValidator:
 
 
 class DetectionConnector(FakeJobSourceConnector):
-    def __init__(self, validation: GreenhouseBoardValidation) -> None:
+    def __init__(self, validation: JobSourceBoardValidation) -> None:
         super().__init__(jobs=[])
         self.validation = validation
 
-    def validate_board_token(self, board_token: str) -> GreenhouseBoardValidation:
+    def validate_board_token(self, board_token: str) -> JobSourceBoardValidation:
         if board_token == self.validation.token:
             return self.validation
-        return GreenhouseBoardValidation(token=board_token, status="invalid", valid=False)
+        return JobSourceBoardValidation(token=board_token, status="invalid", valid=False)
 
 
 def _config() -> SourceDetectionConfig:
@@ -95,8 +97,8 @@ def _page(html: str, *, url: str = "https://example.com/careers") -> PublicPage:
     return PublicPage(requested_url=url, final_url=url, content_type="text/html", text=html)
 
 
-def _valid(token: str, *, jobs: int = 2) -> GreenhouseBoardValidation:
-    return GreenhouseBoardValidation(
+def _valid(token: str, *, jobs: int = 2) -> JobSourceBoardValidation:
+    return JobSourceBoardValidation(
         token=token,
         status="valid_empty" if jobs == 0 else "valid",
         valid=True,
@@ -148,7 +150,7 @@ def test_direct_html_detection_persists_terminal_preview(
                     )
                 }
             ),
-            validator=FakeValidator({"acme": _valid("acme", jobs=3)}),
+            board_validator=FakeValidator({"acme": _valid("acme", jobs=3)}),
             config=_config(),
         )
 
@@ -170,8 +172,7 @@ def test_canonical_ashby_posting_detection_bypasses_public_page_fetch(
             input_url="https://jobs.ashbyhq.com/Acme/posting-123",
             brand_alias=None,
             fetcher=FakeFetcher(error=AssertionError("Ashby URL must not be fetched as HTML.")),
-            validator=FakeValidator({}),
-            ashby_validator=FakeAshbyValidator(),
+            board_validator=FakeAshbyValidator(),
             config=_config(),
         )
 
@@ -210,7 +211,7 @@ def test_ambiguous_detection_requires_explicit_token_selection(
                     )
                 }
             ),
-            validator=FakeValidator({"acme": _valid("acme"), "beta": _valid("beta")}),
+            board_validator=FakeValidator({"acme": _valid("acme"), "beta": _valid("beta")}),
             config=_config(),
         )
 
@@ -250,7 +251,7 @@ def test_generated_candidate_is_presented_only_after_validation(
             input_url=None,
             brand_alias=None,
             fetcher=FakeFetcher(),
-            validator=FakeValidator({"acme": _valid("acme", jobs=0)}),
+            board_validator=FakeValidator({"acme": _valid("acme", jobs=0)}),
             config=_config(),
         )
 
@@ -281,7 +282,7 @@ def test_unsafe_url_records_failed_terminal_run(session_factory: sessionmaker[Se
             input_url="http://127.0.0.1/careers",
             brand_alias=None,
             fetcher=FakeFetcher(error=UnsafeUrlError("URL host resolved to a non-public address.")),
-            validator=FakeValidator({}),
+            board_validator=FakeValidator({}),
             config=_config(),
         )
 
@@ -308,7 +309,7 @@ def test_approval_links_existing_source_without_duplicate(
             input_url=None,
             brand_alias=None,
             fetcher=FakeFetcher(),
-            validator=FakeValidator({"acme": _valid("acme")}),
+            board_validator=FakeValidator({"acme": _valid("acme")}),
             config=_config(),
         )
         result = approve_source_detection_run(
@@ -336,7 +337,7 @@ def test_create_and_sync_invokes_import(session_factory: sessionmaker[Session]) 
             input_url=None,
             brand_alias=None,
             fetcher=FakeFetcher(),
-            validator=FakeValidator({"acme": _valid("acme")}),
+            board_validator=FakeValidator({"acme": _valid("acme")}),
             config=_config(),
         )
         connector = DetectionConnector(_valid("acme"))
@@ -371,7 +372,7 @@ def test_api_detection_and_approval(client: TestClient) -> None:
             )
         }
     )
-    app.dependency_overrides[greenhouse_board_validator_dependency] = lambda: FakeValidator(
+    app.dependency_overrides[job_source_board_validator_dependency] = lambda: FakeValidator(
         {"acme": _valid("acme")}
     )
     app.dependency_overrides[job_source_connector_dependency] = lambda: DetectionConnector(
@@ -399,7 +400,7 @@ def test_web_detection_pages_render(client: TestClient) -> None:
             )
         }
     )
-    app.dependency_overrides[greenhouse_board_validator_dependency] = lambda: FakeValidator(
+    app.dependency_overrides[job_source_board_validator_dependency] = lambda: FakeValidator(
         {"acme": _valid("acme")}
     )
 

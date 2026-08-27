@@ -8,8 +8,7 @@ from fastapi.responses import RedirectResponse
 from pydantic import ValidationError
 
 from ai_job_finder.api.dependencies import (
-    ashby_board_validator_dependency,
-    greenhouse_board_validator_dependency,
+    job_source_board_validator_dependency,
     job_source_connector_dependency,
     public_page_fetcher_dependency,
     settings_dependency,
@@ -25,8 +24,7 @@ from ai_job_finder.application.source_detection import (
 from ai_job_finder.domain.errors import DomainError
 from ai_job_finder.domain.job_sources import JobSourceConnector
 from ai_job_finder.domain.source_detection import (
-    AshbyBoardValidator,
-    GreenhouseBoardValidator,
+    JobSourceBoardValidator,
     PublicPageFetcher,
 )
 from ai_job_finder.settings import Settings
@@ -38,11 +36,8 @@ JobSourceConnectorDependency = Annotated[
     JobSourceConnector, Depends(job_source_connector_dependency)
 ]
 PublicPageFetcherDependency = Annotated[PublicPageFetcher, Depends(public_page_fetcher_dependency)]
-GreenhouseBoardValidatorDependency = Annotated[
-    GreenhouseBoardValidator, Depends(greenhouse_board_validator_dependency)
-]
-AshbyBoardValidatorDependency = Annotated[
-    AshbyBoardValidator, Depends(ashby_board_validator_dependency)
+JobSourceBoardValidatorDependency = Annotated[
+    JobSourceBoardValidator, Depends(job_source_board_validator_dependency)
 ]
 
 
@@ -81,8 +76,7 @@ async def job_sources_detect_create(
     request: Request,
     session: DbSession,
     fetcher: PublicPageFetcherDependency,
-    validator: GreenhouseBoardValidatorDependency,
-    ashby_validator: AshbyBoardValidatorDependency,
+    board_validator: JobSourceBoardValidatorDependency,
     settings: SettingsDependency,
 ) -> Response:
     form = await request.form()
@@ -104,8 +98,7 @@ async def job_sources_detect_create(
         input_url=optional_str(values["input_url"]),
         brand_alias=optional_str(values["brand_alias"]),
         fetcher=fetcher,
-        validator=validator,
-        ashby_validator=ashby_validator,
+        board_validator=board_validator,
         config=SourceDetectionConfig(
             max_linked_scripts=settings.source_detection_max_linked_scripts,
             max_script_bytes=settings.source_detection_max_script_bytes,
@@ -161,7 +154,7 @@ async def job_source_detection_manual_token(
     request: Request,
     run_id: UUID,
     session: DbSession,
-    validator: GreenhouseBoardValidatorDependency,
+    board_validator: JobSourceBoardValidatorDependency,
 ) -> Response:
     form = await request.form()
     run = get_source_detection_run(session, run_id)
@@ -172,7 +165,7 @@ async def job_source_detection_manual_token(
         manual_candidate = validate_greenhouse_token(
             session,
             board_token=token,
-            validator=validator,
+            board_validator=board_validator,
         )
     except DomainError as exc:
         manual_error = str(exc)

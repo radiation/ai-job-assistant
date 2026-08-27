@@ -49,8 +49,7 @@ from ai_job_finder.domain.job_discovery import (
 )
 from ai_job_finder.domain.job_sources import JobSourceFetchResult, NormalizedJobPosting
 from ai_job_finder.domain.source_detection import (
-    AshbyBoardValidation,
-    GreenhouseBoardValidation,
+    JobSourceBoardValidation,
     PublicPage,
 )
 from ai_job_finder.infrastructure.database.base import Base
@@ -85,18 +84,21 @@ class CountingFetcher(FakeFetcher):
 
 
 class FakeValidator:
-    def __init__(self, validation_by_token: dict[str, GreenhouseBoardValidation]) -> None:
+    def __init__(self, validation_by_token: dict[str, JobSourceBoardValidation]) -> None:
         self.validation_by_token = validation_by_token
 
-    def validate_board_token(self, board_token: str) -> GreenhouseBoardValidation:
+    def validate(self, provider: JobSourceProvider, board_token: str) -> JobSourceBoardValidation:
+        if provider is not JobSourceProvider.GREENHOUSE:
+            return JobSourceBoardValidation(token=board_token, status="invalid", valid=False)
         return self.validation_by_token.get(
-            board_token, GreenhouseBoardValidation(token=board_token, status="invalid", valid=False)
+            board_token, JobSourceBoardValidation(token=board_token, status="invalid", valid=False)
         )
 
 
 class FakeAshbyValidator:
-    def validate_board_token(self, board_token: str) -> AshbyBoardValidation:
-        return AshbyBoardValidation(
+    def validate(self, provider: JobSourceProvider, board_token: str) -> JobSourceBoardValidation:
+        assert provider is JobSourceProvider.ASHBY
+        return JobSourceBoardValidation(
             token=board_token,
             status="valid",
             valid=True,
@@ -129,14 +131,15 @@ class BoardAwareConnector:
             connector_version="board-aware-fake",
         )
 
-    def validate_board_token(self, board_token: str) -> GreenhouseBoardValidation:
+    def validate(self, provider: JobSourceProvider, board_token: str) -> JobSourceBoardValidation:
+        assert provider is JobSourceProvider.GREENHOUSE
         token = board_token.strip().lower()
         jobs = self.jobs_by_token.get(token)
         if jobs is None and token not in self.errors_by_token:
-            return GreenhouseBoardValidation(token=token, status="invalid", valid=False)
+            return JobSourceBoardValidation(token=token, status="invalid", valid=False)
         company_name = jobs[0].company_name if jobs else token
         sample_titles = [job.title for job in (jobs or [])[:5]]
-        return GreenhouseBoardValidation(
+        return JobSourceBoardValidation(
             token=token,
             status="valid_empty" if not jobs else "valid",
             valid=True,
@@ -335,7 +338,7 @@ def test_run_job_discovery_forwards_configured_query_cap_to_generator(
             provider_name="fake",
             provider=FakeJobDiscoveryProvider(),
             fetcher=FakeFetcher({}),
-            validator=FakeJobSourceConnector(),
+            board_validator=FakeValidator({}),
             connector=FakeJobSourceConnector(),
             config=replace(_config(), max_queries_per_run=12),
         )
@@ -412,7 +415,7 @@ def test_run_job_discovery_completes_and_links_saved_search_matches(
             provider_name="fake",
             provider=provider,
             fetcher=FakeFetcher({url_one: _page(url_one), url_two: _page(url_two)}),
-            validator=connector,
+            board_validator=connector,
             connector=connector,
             config=_config(),
         )
@@ -484,7 +487,7 @@ def test_run_job_discovery_marks_partial_on_query_failure(
             provider_name="fake",
             provider=provider,
             fetcher=FakeFetcher({url_one: _page(url_one)}),
-            validator=connector,
+            board_validator=connector,
             connector=connector,
             config=_config(),
         )
@@ -520,7 +523,7 @@ def test_run_job_discovery_rejects_disabled_saved_search(
                 provider_name="fake",
                 provider=FakeJobDiscoveryProvider(),
                 fetcher=FakeFetcher({}),
-                validator=FakeValidator({}),
+                board_validator=FakeValidator({}),
                 connector=FakeJobSourceConnector(),
                 config=_config(),
             )
@@ -550,7 +553,7 @@ def test_run_job_discovery_rejects_conflicting_active_run(
                 provider_name="fake",
                 provider=FakeJobDiscoveryProvider(),
                 fetcher=FakeFetcher({}),
-                validator=FakeValidator({}),
+                board_validator=FakeValidator({}),
                 connector=FakeJobSourceConnector(),
                 config=_config(),
             )
@@ -610,7 +613,7 @@ def test_run_job_discovery_auto_creates_unknown_greenhouse_source_and_retains_we
                     weak_url: _page_for_token(weak_url, "beta"),
                 }
             ),
-            validator=connector,
+            board_validator=connector,
             connector=connector,
             config=_config(),
         )
@@ -707,7 +710,7 @@ def test_run_job_discovery_imports_same_board_once_per_run(
                     third_url: _page_for_token(third_url, "beta"),
                 }
             ),
-            validator=connector,
+            board_validator=connector,
             connector=connector,
             config=_config(),
         )
@@ -780,8 +783,7 @@ def test_run_job_discovery_imports_and_links_ashby_board_once(
             provider_name="fake",
             provider=provider,
             fetcher=FakeFetcher({}),
-            validator=FakeValidator({}),
-            ashby_validator=FakeAshbyValidator(),
+            board_validator=FakeAshbyValidator(),
             connector=connector,
             config=_config(),
         )
@@ -837,7 +839,7 @@ def test_run_job_discovery_reuses_prior_resolution_and_avoids_duplicate_sources_
             provider_name="fake",
             provider=provider,
             fetcher=first_fetcher,
-            validator=connector,
+            board_validator=connector,
             connector=connector,
             config=_config(),
         )
@@ -848,7 +850,7 @@ def test_run_job_discovery_reuses_prior_resolution_and_avoids_duplicate_sources_
             provider_name="fake",
             provider=provider,
             fetcher=second_fetcher,
-            validator=connector,
+            board_validator=connector,
             connector=connector,
             config=_config(),
         )
@@ -905,7 +907,7 @@ def test_get_job_discovery_run_detail_marks_previously_seen_urls_and_reused_sour
             provider_name="fake",
             provider=provider,
             fetcher=CountingFetcher({job_url: _page_for_token(job_url, "beta")}),
-            validator=connector,
+            board_validator=connector,
             connector=connector,
             config=_config(),
         )
@@ -915,7 +917,7 @@ def test_get_job_discovery_run_detail_marks_previously_seen_urls_and_reused_sour
             provider_name="fake",
             provider=provider,
             fetcher=CountingFetcher({}),
-            validator=connector,
+            board_validator=connector,
             connector=connector,
             config=_config(),
         )
@@ -1005,9 +1007,9 @@ def test_get_job_discovery_run_detail_distinguishes_ambiguous_unsupported_and_fa
         )
         validator = FakeValidator(
             {
-                "acme": GreenhouseBoardValidation(token="acme", status="valid", valid=True),
-                "beta": GreenhouseBoardValidation(token="beta", status="valid", valid=True),
-                "gamma": GreenhouseBoardValidation(token="gamma", status="valid", valid=True),
+                "acme": JobSourceBoardValidation(token="acme", status="valid", valid=True),
+                "beta": JobSourceBoardValidation(token="beta", status="valid", valid=True),
+                "gamma": JobSourceBoardValidation(token="gamma", status="valid", valid=True),
             }
         )
 
@@ -1038,7 +1040,7 @@ def test_get_job_discovery_run_detail_distinguishes_ambiguous_unsupported_and_fa
                     failed_url: _page_for_token(failed_url, "gamma"),
                 }
             ),
-            validator=validator,
+            board_validator=validator,
             connector=connector,
             config=_config(),
         )
@@ -1130,8 +1132,8 @@ def test_run_job_discovery_does_not_auto_promote_ambiguous_or_unsupported_source
         )
         validator = FakeValidator(
             {
-                "acme": GreenhouseBoardValidation(token="acme", status="valid", valid=True),
-                "beta": GreenhouseBoardValidation(token="beta", status="valid", valid=True),
+                "acme": JobSourceBoardValidation(token="acme", status="valid", valid=True),
+                "beta": JobSourceBoardValidation(token="beta", status="valid", valid=True),
             }
         )
 
@@ -1141,7 +1143,7 @@ def test_run_job_discovery_does_not_auto_promote_ambiguous_or_unsupported_source
             provider_name="fake",
             provider=provider,
             fetcher=fetcher,
-            validator=validator,
+            board_validator=validator,
             connector=FakeJobSourceConnector(),
             config=_config(),
         )
@@ -1195,7 +1197,7 @@ def test_run_job_discovery_filters_known_aggregators_before_source_detection(
                 }
             ),
             fetcher=fetcher,
-            validator=FakeValidator({}),
+            board_validator=FakeValidator({}),
             connector=FakeJobSourceConnector(),
             config=_config(),
         )
@@ -1259,14 +1261,15 @@ def test_run_job_discovery_keeps_supported_and_unknown_hosts_eligible_for_source
                 }
             ),
             fetcher=fetcher,
-            validator=FakeValidator({}),
+            board_validator=FakeValidator({}),
             connector=FakeJobSourceConnector(),
             config=_config(),
         )
         observations = list_job_discovery_observations(session, discovery_run_id=run.id)
 
         assert run.status == "completed"
-        assert fetcher.calls == [url]
+        expected_fetches = [] if "jobs.ashbyhq.com" in url else [url]
+        assert fetcher.calls == expected_fetches
         assert len(observations) == 1
         assert observations[0].observation.exclusion_reason != (
             "Excluded known aggregator domain before source detection: indeed.com."
@@ -1324,7 +1327,7 @@ def test_run_job_discovery_import_failure_isolated_to_one_supported_source(
                     bad_url: _page_for_token(bad_url, "beta"),
                 }
             ),
-            validator=connector,
+            board_validator=connector,
             connector=connector,
             config=_config(),
         )

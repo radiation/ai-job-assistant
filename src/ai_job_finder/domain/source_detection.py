@@ -3,6 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Protocol
 
+from ai_job_finder.domain.enums import JobSourceProvider
+
 
 @dataclass(frozen=True, slots=True)
 class PublicPage:
@@ -17,7 +19,7 @@ class PublicPageFetcher(Protocol):
 
 
 @dataclass(frozen=True, slots=True)
-class GreenhouseBoardValidation:
+class JobSourceBoardValidation:
     token: str
     status: str
     valid: bool
@@ -27,20 +29,13 @@ class GreenhouseBoardValidation:
     error_message: str | None = None
 
 
-class GreenhouseBoardValidator(Protocol):
-    def validate_board_token(self, board_token: str) -> GreenhouseBoardValidation: ...
+class JobSourceBoardTokenValidator(Protocol):
+    def validate_board_token(self, board_token: str) -> JobSourceBoardValidation: ...
 
 
-@dataclass(frozen=True, slots=True)
-class AshbyBoardValidation:
-    token: str
-    status: str
-    valid: bool
-    job_count: int | None = None
-    sample_titles: list[str] = field(default_factory=list)
-    company_name: str | None = None
-    error_message: str | None = None
-
-
-class AshbyBoardValidator(Protocol):
-    def validate_board_token(self, board_token: str) -> AshbyBoardValidation: ...
+class JobSourceBoardValidator(Protocol):
+    def validate(
+        self,
+        provider: JobSourceProvider,
+        board_token: str,
+    ) -> JobSourceBoardValidation: ...

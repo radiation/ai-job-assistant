@@ -13,7 +13,10 @@ from ai_job_finder.infrastructure.database.session import get_session_factory
 from ai_job_finder.infrastructure.job_sources.ashby import AshbyJobSourceConnector
 from ai_job_finder.infrastructure.job_sources.fake import FileBackedFakeJobSourceConnector
 from ai_job_finder.infrastructure.job_sources.greenhouse import GreenhouseJobSourceConnector
-from ai_job_finder.infrastructure.job_sources.router import ProviderJobSourceConnector
+from ai_job_finder.infrastructure.job_sources.router import (
+    ProviderJobSourceBoardValidator,
+    ProviderJobSourceConnector,
+)
 from ai_job_finder.infrastructure.public_fetcher import (
     PublicPageFetcherConfig,
     SafePublicPageFetcher,
@@ -41,6 +44,9 @@ def main() -> int:
     connector = ProviderJobSourceConnector(
         {JobSourceProvider.GREENHOUSE: greenhouse, JobSourceProvider.ASHBY: ashby}
     )
+    board_validator = ProviderJobSourceBoardValidator(
+        {JobSourceProvider.GREENHOUSE: greenhouse, JobSourceProvider.ASHBY: ashby}
+    )
     fetcher = SafePublicPageFetcher(
         PublicPageFetcherConfig(
             timeout_seconds=settings.source_detection_timeout_seconds,
@@ -58,8 +64,7 @@ def main() -> int:
             input_url=args.input_url,
             brand_alias=args.brand_alias,
             fetcher=fetcher,
-            validator=greenhouse,
-            ashby_validator=ashby,
+            board_validator=board_validator,
             config=SourceDetectionConfig(
                 max_linked_scripts=settings.source_detection_max_linked_scripts,
                 max_script_bytes=settings.source_detection_max_script_bytes,
