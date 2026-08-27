@@ -7,7 +7,6 @@ from ai_job_finder.domain.enums import WorkplaceType
 from ai_job_finder.domain.errors import JobDiscoveryQueryGenerationError
 from ai_job_finder.domain.job_discovery import JobDiscoveryQuery
 from ai_job_finder.domain.job_discovery.targeting import (
-    DISCOVERY_ATS_QUERY_HOSTS,
     DISCOVERY_EXCLUDED_AGGREGATOR_DOMAINS,
 )
 from ai_job_finder.domain.job_searches import (
@@ -16,10 +15,14 @@ from ai_job_finder.domain.job_searches import (
     JobSearchSeniority,
 )
 
-MAX_TITLE_PHRASES = 4
-MAX_LOCATION_TERMS = 2
-MAX_LOGICAL_TARGETS = 2
-SECONDARY_TARGETED_HOST_COUNT = 1
+_QUERY_VARIANT_CYCLE: tuple[str | None, ...] = (
+    "boards.greenhouse.io",
+    None,
+    "jobs.ashbyhq.com",
+    None,
+    "jobs.lever.co",
+    None,
+)
 
 DOMAIN_LABELS: dict[JobSearchDomain, str] = {
     JobSearchDomain.PLATFORM_ENGINEERING: "Platform Engineering",
@@ -62,35 +65,10 @@ def generate_job_discovery_queries(
     title_phrases = _title_phrases(definition)
     location_terms = _location_terms(definition)
 
-    rendered_queries: list[tuple[str, str, str | None, str | None]] = []
-    for index, target in enumerate(_logical_targets(title_phrases, location_terms)):
-        targeted_hosts: tuple[str, ...] = DISCOVERY_ATS_QUERY_HOSTS
-        if index > 0:
-            targeted_hosts = DISCOVERY_ATS_QUERY_HOSTS[:SECONDARY_TARGETED_HOST_COUNT]
-        for targeted_host in targeted_hosts:
-            rendered_queries.append(
-                (
-                    _render_targeted_query(
-                        title_phrase=target.title_phrase,
-                        location_term=target.location_term,
-                        target_host=targeted_host,
-                    ),
-                    target.title_phrase,
-                    targeted_host,
-                    target.location_term,
-                )
-            )
-        rendered_queries.append(
-            (
-                _render_broad_query(
-                    title_phrase=target.title_phrase,
-                    location_term=target.location_term,
-                ),
-                target.title_phrase,
-                None,
-                target.location_term,
-            )
-        )
+    rendered_queries = _render_queries(
+        _logical_targets(title_phrases, location_terms),
+        max_queries=max_queries,
+    )
 
     deduped: list[tuple[str, str, str | None, str | None]] = []
     seen: set[str] = set()
@@ -131,15 +109,25 @@ def generate_job_discovery_queries(
 
 
 def _title_phrases(definition: JobSearchDefinitionSnapshot) -> list[str]:
-    phrases = _unique_preserving_order(definition.title_include_patterns)[:MAX_TITLE_PHRASES]
+    explicit_phrases = _unique_preserving_order(definition.title_include_patterns)
+    phrases = explicit_phrases[:1]
     generated: list[str] = []
-    seniorities = definition.target_seniority_levels[:2]
-    domains = definition.target_domains[:2]
+    seniorities = definition.target_seniority_levels
+    domains = definition.target_domains
 
     if seniorities and domains:
-        for seniority in seniorities:
-            for domain in domains:
-                generated.append(f"{SENIORITY_LABELS[seniority]} {DOMAIN_LABELS[domain]}")
+        generated.extend(
+            f"{SENIORITY_LABELS[seniorities[0]]} {DOMAIN_LABELS[domain]}" for domain in domains
+        )
+        generated.extend(
+            f"{SENIORITY_LABELS[seniority]} {DOMAIN_LABELS[domains[0]]}"
+            for seniority in seniorities[1:]
+        )
+        generated.extend(
+            f"{SENIORITY_LABELS[seniority]} {DOMAIN_LABELS[domain]}"
+            for seniority in seniorities[1:]
+            for domain in domains[1:]
+        )
     elif seniorities:
         generated.extend(SENIORITY_LABELS[item] for item in seniorities)
     elif domains:
@@ -147,53 +135,75 @@ def _title_phrases(definition: JobSearchDefinitionSnapshot) -> list[str]:
 
     existing = {item.casefold() for item in phrases}
     for phrase in generated:
-        if len(phrases) >= MAX_TITLE_PHRASES:
-            break
         normalized = _normalize_phrase(phrase)
         if normalized and normalized.casefold() not in existing:
             phrases.append(normalized)
             existing.add(normalized.casefold())
+
+    for phrase in explicit_phrases[1:]:
+        if phrase.casefold() not in existing:
+            phrases.append(phrase)
+            existing.add(phrase.casefold())
 
     return phrases
 
 
 def _location_terms(definition: JobSearchDefinitionSnapshot) -> list[str]:
     terms: list[str] = []
-    for location in definition.allowed_locations[:1]:
+    local_keys: set[str] = set()
+    for location in definition.allowed_locations:
+        key = _location_key(location)
+        if key in local_keys:
+            continue
+        local_keys.add(key)
         terms.append(location)
-    for geography in definition.allowed_remote_geographies[:1]:
+    for geography in definition.allowed_remote_geographies:
         terms.append(f"remote {geography}")
-    if WorkplaceType.REMOTE in definition.allowed_workplace_types:
+    if (
+        WorkplaceType.REMOTE in definition.allowed_workplace_types
+        and not definition.allowed_remote_geographies
+    ):
         terms.append("remote")
-    return _unique_preserving_order(terms)[:MAX_LOCATION_TERMS]
+    return _unique_preserving_order(terms)
 
 
 def _logical_targets(title_phrases: list[str], location_terms: list[str]) -> list[_LogicalTarget]:
-    if not title_phrases:
-        return []
-    targets = [
+    return [
         _LogicalTarget(
-            title_phrase=title_phrases[0],
-            location_term=location_terms[0] if location_terms else None,
+            title_phrase=title_phrase,
+            location_term=location_terms[index % len(location_terms)] if location_terms else None,
         )
+        for index, title_phrase in enumerate(title_phrases)
     ]
-    if len(targets) >= MAX_LOGICAL_TARGETS:
-        return targets
-    secondary = _secondary_target(title_phrases, location_terms)
-    if secondary is not None:
-        targets.append(secondary)
-    return targets
 
 
-def _secondary_target(
-    title_phrases: list[str],
-    location_terms: list[str],
-) -> _LogicalTarget | None:
-    if location_terms:
-        return _LogicalTarget(title_phrase=title_phrases[0], location_term=None)
-    if len(title_phrases) > 1:
-        return _LogicalTarget(title_phrase=title_phrases[1], location_term=None)
-    return None
+def _render_queries(
+    targets: list[_LogicalTarget],
+    *,
+    max_queries: int,
+) -> list[tuple[str, str, str | None, str | None]]:
+    """Give each target one balanced variant before allocating another to any target."""
+    rendered_queries: list[tuple[str, str, str | None, str | None]] = []
+    seen: set[str] = set()
+    for variant_offset in range(len(_QUERY_VARIANT_CYCLE)):
+        for target_index, target in enumerate(targets):
+            target_host = _QUERY_VARIANT_CYCLE[
+                (target_index + variant_offset) % len(_QUERY_VARIANT_CYCLE)
+            ]
+            rendered_query = (
+                _render_broad_query(target.title_phrase, target.location_term)
+                if target_host is None
+                else _render_targeted_query(target.title_phrase, target.location_term, target_host)
+            )
+            if rendered_query.casefold() in seen:
+                continue
+            seen.add(rendered_query.casefold())
+            rendered_queries.append(
+                (rendered_query, target.title_phrase, target_host, target.location_term)
+            )
+            if len(rendered_queries) >= max_queries:
+                return rendered_queries
+    return rendered_queries
 
 
 def _render_base_query(title_phrase: str, location_term: str | None) -> str:
@@ -218,6 +228,13 @@ def _render_broad_query(title_phrase: str, location_term: str | None) -> str:
 
 def _normalize_phrase(value: str) -> str:
     return " ".join(value.strip().split())
+
+
+def _location_key(value: str) -> str:
+    normalized = _normalize_phrase(value).casefold()
+    if normalized in {"new york", "nyc", "new york city"}:
+        return "new york city"
+    return normalized
 
 
 def _unique_preserving_order(values: list[str]) -> list[str]:
