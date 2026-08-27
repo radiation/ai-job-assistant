@@ -76,6 +76,13 @@ class _ReusableResolution:
     source_detection_outcome: str | None
 
 
+@dataclass(frozen=True, slots=True)
+class _CachedImportOutcome:
+    import_run_id: UUID | None
+    import_status: str | None
+    error_message: str | None = None
+
+
 @dataclass(slots=True)
 class _RunCounters:
     generated_query_count: int
@@ -117,6 +124,7 @@ def run_job_discovery(
         provider_name=provider_name,
     )
     counters = _RunCounters(generated_query_count=0)
+    source_imports: dict[UUID, _CachedImportOutcome] = {}
 
     try:
         generated_queries = generate_job_discovery_queries(
@@ -190,6 +198,7 @@ def run_job_discovery(
                 connector=connector,
                 config=config,
                 counters=counters,
+                source_imports=source_imports,
             )
 
         saved_search_run = run_job_search(session, search_definition_id=definition.id)
@@ -241,6 +250,7 @@ def _process_observation(
     connector: JobSourceConnector,
     config: JobDiscoveryConfig,
     counters: _RunCounters,
+    source_imports: dict[UUID, _CachedImportOutcome],
 ) -> None:
     try:
         reused_resolution = _reusable_resolution(session, observation=observation)
@@ -256,6 +266,7 @@ def _process_observation(
                 connector=connector,
                 config=config,
                 counters=counters,
+                source_imports=source_imports,
             )
             session.add(observation)
             session.commit()
@@ -278,7 +289,7 @@ def _process_observation(
                 session,
                 run_id=detection_run.id,
                 selected_token=None,
-                create_and_sync=True,
+                create_and_sync=False,
                 connector=connector,
                 retain_raw_payload=config.retain_raw_payload,
                 close_on_empty=config.close_on_empty,
@@ -287,13 +298,14 @@ def _process_observation(
             observation.source_detection_run_id = approval.run.id
             observation.source_detection_outcome = approval.run.status
             observation.source_configuration_id = approval.source.id
-            observation.import_run_id = approval.import_run.id if approval.import_run else None
-            _finalize_imported_observation(
+            _import_detected_source(
                 session,
                 observation=observation,
                 source_configuration_id=approval.source.id,
-                import_status=approval.import_run.status if approval.import_run else None,
+                connector=connector,
+                config=config,
                 counters=counters,
+                source_imports=source_imports,
             )
         elif detection_run.status == SourceDetectionRunStatus.AMBIGUOUS.value:
             counters.ambiguous_count += 1
@@ -459,21 +471,44 @@ def _import_detected_source(
     connector: JobSourceConnector,
     config: JobDiscoveryConfig,
     counters: _RunCounters,
+    source_imports: dict[UUID, _CachedImportOutcome],
 ) -> None:
-    import_run = run_job_source_import(
-        session,
-        source_id=source_configuration_id,
-        connector=connector,
-        retain_raw_payload=config.retain_raw_payload,
-        close_on_empty=config.close_on_empty,
-        stale_after_seconds=config.stale_after_seconds,
-    )
-    observation.import_run_id = import_run.id
+    import_outcome = source_imports.get(source_configuration_id)
+    if import_outcome is None:
+        try:
+            import_run = run_job_source_import(
+                session,
+                source_id=source_configuration_id,
+                connector=connector,
+                retain_raw_payload=config.retain_raw_payload,
+                close_on_empty=config.close_on_empty,
+                stale_after_seconds=config.stale_after_seconds,
+            )
+        except Exception as exc:
+            import_outcome = _CachedImportOutcome(
+                import_run_id=None,
+                import_status=None,
+                error_message=str(exc),
+            )
+        else:
+            import_outcome = _CachedImportOutcome(
+                import_run_id=import_run.id,
+                import_status=import_run.status,
+            )
+        source_imports[source_configuration_id] = import_outcome
+
+    observation.import_run_id = import_outcome.import_run_id
+    if import_outcome.error_message is not None:
+        observation.processing_status = JobDiscoveryObservationStatus.FAILED.value
+        observation.exclusion_reason = _append_error(None, import_outcome.error_message)
+        counters.failure_count += 1
+        return
+
     _finalize_imported_observation(
         session,
         observation=observation,
         source_configuration_id=source_configuration_id,
-        import_status=import_run.status,
+        import_status=import_outcome.import_status,
         counters=counters,
     )
 

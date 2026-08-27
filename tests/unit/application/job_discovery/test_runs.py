@@ -97,9 +97,11 @@ class BoardAwareConnector:
     ) -> None:
         self.jobs_by_token = jobs_by_token
         self.errors_by_token = errors_by_token or {}
+        self.fetch_calls: list[str] = []
 
     def fetch_jobs(self, source: object) -> JobSourceFetchResult:
         board_token = str(cast(Any, source).board_token)
+        self.fetch_calls.append(board_token)
         error = self.errors_by_token.get(board_token)
         if error is not None:
             raise error
@@ -561,6 +563,100 @@ def test_run_job_discovery_auto_creates_unknown_greenhouse_source_and_retains_we
         assert len(matches) == 2
         assert sum(1 for match in matches if match.matched) == 1
         assert any(job.title == "Finance Operations Manager" for job in jobs)
+
+
+def test_run_job_discovery_imports_same_board_once_per_run(
+    session_factory: sessionmaker[Session],
+) -> None:
+    with session_factory() as session:
+        _seed_candidate(session)
+        search_id = _search(session)
+        search = get_job_search_definition(session, search_id)
+        queries = generate_job_discovery_queries(
+            search.to_snapshot(), max_queries=4, result_limit=5
+        )
+        first_url = "https://boards.greenhouse.io/beta/jobs/111"
+        second_url = "https://boards.greenhouse.io/beta/jobs/222"
+        third_url = "https://boards.greenhouse.io/beta/jobs/333"
+        provider = FakeJobDiscoveryProvider(
+            results_by_query={
+                queries[0].rendered_query: [
+                    DiscoveredJobCandidate(
+                        discovered_url=first_url,
+                        provider_name="fake",
+                        query_identifier=queries[0].stable_query_id,
+                        rank=1,
+                        title_hint="Director, Platform Engineering",
+                        company_hint="Beta",
+                    ),
+                    DiscoveredJobCandidate(
+                        discovered_url=second_url,
+                        provider_name="fake",
+                        query_identifier=queries[0].stable_query_id,
+                        rank=2,
+                        title_hint="Principal Platform Architect",
+                        company_hint="Beta",
+                    ),
+                    DiscoveredJobCandidate(
+                        discovered_url=third_url,
+                        provider_name="fake",
+                        query_identifier=queries[0].stable_query_id,
+                        rank=3,
+                        title_hint="Staff Platform Engineering Manager",
+                        company_hint="Beta",
+                    ),
+                ]
+            }
+        )
+        connector = BoardAwareConnector(
+            jobs_by_token={
+                "beta": [
+                    _posting_for_board("beta", "Beta", "111", "Director, Platform Engineering"),
+                    _posting_for_board("beta", "Beta", "222", "Principal Platform Architect"),
+                    _posting_for_board(
+                        "beta",
+                        "Beta",
+                        "333",
+                        "Staff Platform Engineering Manager",
+                    ),
+                ]
+            }
+        )
+
+        run = run_job_discovery(
+            session,
+            search_definition_id=search_id,
+            provider_name="fake",
+            provider=provider,
+            fetcher=FakeFetcher(
+                {
+                    first_url: _page_for_token(first_url, "beta"),
+                    second_url: _page_for_token(second_url, "beta"),
+                    third_url: _page_for_token(third_url, "beta"),
+                }
+            ),
+            validator=connector,
+            connector=connector,
+            config=_config(),
+        )
+        observations = list_job_discovery_observations(session, discovery_run_id=run.id)
+
+        assert run.status == "completed"
+        assert connector.fetch_calls == ["beta"]
+        assert len(list(session.scalars(select(JobSourceConfigurationModel)))) == 1
+        leads = list(session.scalars(select(JobLeadModel).order_by(JobLeadModel.external_id.asc())))
+        assert len(leads) == 3
+        external_ids = [lead.external_id for lead in leads]
+        assert all(external_id is not None for external_id in external_ids)
+        assert sorted(
+            external_id.split(":")[-1] for external_id in external_ids if external_id is not None
+        ) == ["111", "222", "333"]
+        assert len(observations) == 3
+        assert {record.observation.processing_status for record in observations} == {
+            JobDiscoveryObservationStatus.IMPORTED.value
+        }
+        assert all(record.observation.imported_job_lead_id is not None for record in observations)
+        assert len({record.observation.imported_job_lead_id for record in observations}) == 3
 
 
 def test_run_job_discovery_reuses_prior_resolution_and_avoids_duplicate_sources_and_jobs(
