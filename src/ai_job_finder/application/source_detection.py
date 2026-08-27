@@ -26,6 +26,7 @@ from ai_job_finder.domain.errors import (
     SourceDetectionApprovalError,
     SourceSyncAfterCreationError,
 )
+from ai_job_finder.domain.job_discovery.targeting import GREENHOUSE_HOSTS
 from ai_job_finder.domain.job_sources import JobSourceConnector
 from ai_job_finder.domain.source_detection import (
     GreenhouseBoardValidation,
@@ -40,11 +41,6 @@ from ai_job_finder.infrastructure.database.models import (
 )
 
 TOKEN_PATTERN = r"[A-Za-z0-9][A-Za-z0-9_-]{1,199}"
-GREENHOUSE_HOSTS = {
-    "boards.greenhouse.io",
-    "job-boards.greenhouse.io",
-    "boards-api.greenhouse.io",
-}
 EXCLUDED_TOKENS = {
     "api",
     "boards",

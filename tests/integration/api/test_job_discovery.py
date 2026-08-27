@@ -32,6 +32,16 @@ class FakeFetcher:
         return self.pages[url]
 
 
+class CountingFetcher(FakeFetcher):
+    def __init__(self, pages: dict[str, PublicPage]) -> None:
+        super().__init__(pages)
+        self.calls: list[str] = []
+
+    def fetch(self, url: str) -> PublicPage:
+        self.calls.append(url)
+        return super().fetch(url)
+
+
 def _create_candidate(client: TestClient) -> None:
     response = client.post(
         "/api/v1/candidate-profile",
@@ -349,6 +359,78 @@ def test_job_discovery_api_auto_creates_unknown_greenhouse_source_and_reuses_it(
         assert len(sources) == 1
         assert sources[0].board_token == "beta"
         assert len(leads) == 2
+
+    app.dependency_overrides.pop(job_discovery_provider_dependency, None)
+    app.dependency_overrides.pop(job_source_connector_dependency, None)
+    app.dependency_overrides.pop(greenhouse_board_validator_dependency, None)
+    app.dependency_overrides.pop(public_page_fetcher_dependency, None)
+
+
+def test_job_discovery_api_reports_aggregator_exclusions_without_fetching(
+    client: TestClient,
+    session_factory: sessionmaker[Session],
+) -> None:
+    _create_candidate(client)
+
+    search_response = client.post(
+        "/api/v1/job-searches",
+        json={
+            "name": "Platform roles aggregators",
+            "enabled": True,
+            "title_include_patterns": ["Director Platform Engineering"],
+            "title_exclude_patterns": ["finance"],
+            "target_domains": ["platform_engineering"],
+            "target_seniority_levels": ["director"],
+            "allowed_locations": [],
+            "allowed_remote_geographies": ["United States"],
+            "allowed_workplace_types": ["remote"],
+            "minimum_score_threshold": 70,
+        },
+    )
+    assert search_response.status_code == 201
+    search_id = search_response.json()["id"]
+
+    with session_factory() as session:
+        search = get_job_search_definition(session, UUID(search_id))
+        queries = generate_job_discovery_queries(
+            search.to_snapshot(), max_queries=6, result_limit=5
+        )
+
+    aggregator_url = "https://www.indeed.com/viewjob?jk=123"
+    provider = FakeJobDiscoveryProvider(
+        results_by_query={
+            queries[0].rendered_query: [
+                DiscoveredJobCandidate(
+                    discovered_url=aggregator_url,
+                    provider_name="fake",
+                    query_identifier=queries[0].stable_query_id,
+                    rank=1,
+                    title_hint="Director, Platform Engineering",
+                )
+            ]
+        }
+    )
+    fetcher = CountingFetcher({})
+
+    app = cast(Any, client.app)
+    app.dependency_overrides[job_discovery_provider_dependency] = lambda: provider
+    app.dependency_overrides[job_source_connector_dependency] = lambda: FakeJobSourceConnector()
+    app.dependency_overrides[greenhouse_board_validator_dependency] = lambda: (
+        FakeJobSourceConnector()
+    )
+    app.dependency_overrides[public_page_fetcher_dependency] = lambda: fetcher
+
+    run_response = client.post(f"/api/v1/job-searches/{search_id}/discovery-runs")
+    assert run_response.status_code == 201
+    run_id = run_response.json()["id"]
+
+    observations_response = client.get(f"/api/v1/job-discovery-runs/{run_id}/observations")
+    assert observations_response.status_code == 200
+    observations = observations_response.json()
+    assert len(observations) == 1
+    assert observations[0]["processing_status"] == "unsupported"
+    assert "indeed.com" in (observations[0]["exclusion_reason"] or "")
+    assert fetcher.calls == []
 
     app.dependency_overrides.pop(job_discovery_provider_dependency, None)
     app.dependency_overrides.pop(job_source_connector_dependency, None)
