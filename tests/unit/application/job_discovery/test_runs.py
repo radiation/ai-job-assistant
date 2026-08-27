@@ -2,9 +2,11 @@ from __future__ import annotations
 
 from collections.abc import Iterator
 from datetime import UTC, datetime
+from typing import Any, cast
 from uuid import UUID
 
 import pytest
+from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
 from ai_job_finder.application.job_discovery import (
@@ -36,13 +38,23 @@ from ai_job_finder.domain.enums import (
 )
 from ai_job_finder.domain.errors import (
     JobSearchDefinitionDisabledError,
+    JobSourceProviderError,
     OverlappingJobDiscoveryRunError,
 )
-from ai_job_finder.domain.job_discovery import DiscoveredJobCandidate
-from ai_job_finder.domain.job_sources import NormalizedJobPosting
+from ai_job_finder.domain.job_discovery import (
+    DiscoveredJobCandidate,
+    JobDiscoveryObservationStatus,
+)
+from ai_job_finder.domain.job_sources import JobSourceFetchResult, NormalizedJobPosting
 from ai_job_finder.domain.source_detection import GreenhouseBoardValidation, PublicPage
 from ai_job_finder.infrastructure.database.base import Base
-from ai_job_finder.infrastructure.database.models import JobDiscoveryRunModel
+from ai_job_finder.infrastructure.database.models import (
+    JobDiscoveryRunModel,
+    JobEvaluationModel,
+    JobLeadModel,
+    JobSearchMatchModel,
+    JobSourceConfigurationModel,
+)
 from ai_job_finder.infrastructure.database.session import create_engine_from_url
 from ai_job_finder.infrastructure.job_discovery.fake import FakeJobDiscoveryProvider
 from ai_job_finder.infrastructure.job_sources.fake import FakeJobSourceConnector
@@ -56,6 +68,16 @@ class FakeFetcher:
         return self.pages[url]
 
 
+class CountingFetcher(FakeFetcher):
+    def __init__(self, pages: dict[str, PublicPage]) -> None:
+        super().__init__(pages)
+        self.calls: list[str] = []
+
+    def fetch(self, url: str) -> PublicPage:
+        self.calls.append(url)
+        return super().fetch(url)
+
+
 class FakeValidator:
     def __init__(self, validation_by_token: dict[str, GreenhouseBoardValidation]) -> None:
         self.validation_by_token = validation_by_token
@@ -63,6 +85,46 @@ class FakeValidator:
     def validate_board_token(self, board_token: str) -> GreenhouseBoardValidation:
         return self.validation_by_token.get(
             board_token, GreenhouseBoardValidation(token=board_token, status="invalid", valid=False)
+        )
+
+
+class BoardAwareConnector:
+    def __init__(
+        self,
+        *,
+        jobs_by_token: dict[str, list[NormalizedJobPosting]],
+        errors_by_token: dict[str, Exception] | None = None,
+    ) -> None:
+        self.jobs_by_token = jobs_by_token
+        self.errors_by_token = errors_by_token or {}
+        self.fetch_calls: list[str] = []
+
+    def fetch_jobs(self, source: object) -> JobSourceFetchResult:
+        board_token = str(cast(Any, source).board_token)
+        self.fetch_calls.append(board_token)
+        error = self.errors_by_token.get(board_token)
+        if error is not None:
+            raise error
+        return JobSourceFetchResult(
+            jobs=list(self.jobs_by_token.get(board_token, [])),
+            fetched_at=utc_now(),
+            connector_version="board-aware-fake",
+        )
+
+    def validate_board_token(self, board_token: str) -> GreenhouseBoardValidation:
+        token = board_token.strip().lower()
+        jobs = self.jobs_by_token.get(token)
+        if jobs is None and token not in self.errors_by_token:
+            return GreenhouseBoardValidation(token=token, status="invalid", valid=False)
+        company_name = jobs[0].company_name if jobs else token
+        sample_titles = [job.title for job in (jobs or [])[:5]]
+        return GreenhouseBoardValidation(
+            token=token,
+            status="valid_empty" if not jobs else "valid",
+            valid=True,
+            job_count=len(jobs or []),
+            sample_titles=sample_titles,
+            company_name=company_name,
         )
 
 
@@ -137,6 +199,15 @@ def _page(url: str) -> PublicPage:
     )
 
 
+def _page_for_token(url: str, token: str) -> PublicPage:
+    return PublicPage(
+        requested_url=url,
+        final_url=url,
+        content_type="text/html",
+        text=f"https://boards-api.greenhouse.io/v1/boards/{token}/jobs",
+    )
+
+
 def _posting(external_id: str, title: str) -> NormalizedJobPosting:
     return NormalizedJobPosting(
         provider=JobSourceProvider.GREENHOUSE,
@@ -148,6 +219,32 @@ def _posting(external_id: str, title: str) -> NormalizedJobPosting:
         description_normalized="Lead platform engineering with Kubernetes and cloud reliability.",
         compensation_text="$200k",
         source_url=f"https://boards.greenhouse.io/acme/jobs/{external_id}",
+        external_id=external_id,
+        internal_job_id=f"req-{external_id}",
+        source_updated_at=datetime(2026, 1, 2, tzinfo=UTC),
+        departments=["Engineering"],
+        offices=["Remote"],
+        metadata={},
+        raw_payload={"id": external_id},
+    )
+
+
+def _posting_for_board(
+    board_token: str,
+    company_name: str,
+    external_id: str,
+    title: str,
+) -> NormalizedJobPosting:
+    return NormalizedJobPosting(
+        provider=JobSourceProvider.GREENHOUSE,
+        company_name=company_name,
+        title=title,
+        location_text="Remote United States",
+        workplace_type=WorkplaceType.REMOTE,
+        description_raw="Lead platform engineering with Kubernetes and cloud reliability.",
+        description_normalized="Lead platform engineering with Kubernetes and cloud reliability.",
+        compensation_text="$200k",
+        source_url=f"https://boards.greenhouse.io/{board_token}/jobs/{external_id}",
         external_id=external_id,
         internal_job_id=f"req-{external_id}",
         source_updated_at=datetime(2026, 1, 2, tzinfo=UTC),
@@ -267,6 +364,7 @@ def test_run_job_discovery_completes_and_links_saved_search_matches(
             )
             == 1
         )
+        assert len(list(session.scalars(select(JobSourceConfigurationModel)))) == 1
 
 
 def test_run_job_discovery_marks_partial_on_query_failure(
@@ -384,3 +482,388 @@ def test_run_job_discovery_rejects_conflicting_active_run(
                 connector=FakeJobSourceConnector(),
                 config=_config(),
             )
+
+
+def test_run_job_discovery_auto_creates_unknown_greenhouse_source_and_retains_weak_jobs(
+    session_factory: sessionmaker[Session],
+) -> None:
+    with session_factory() as session:
+        _seed_candidate(session)
+        search_id = _search(session)
+        search = get_job_search_definition(session, search_id)
+        queries = generate_job_discovery_queries(
+            search.to_snapshot(), max_queries=4, result_limit=5
+        )
+        strong_url = "https://boards.greenhouse.io/beta/jobs/strong"
+        weak_url = "https://boards.greenhouse.io/beta/jobs/weak"
+        provider = FakeJobDiscoveryProvider(
+            results_by_query={
+                queries[0].rendered_query: [
+                    DiscoveredJobCandidate(
+                        discovered_url=strong_url,
+                        provider_name="fake",
+                        query_identifier=queries[0].stable_query_id,
+                        rank=1,
+                        title_hint="Director, Platform Engineering",
+                        company_hint="Beta",
+                    ),
+                    DiscoveredJobCandidate(
+                        discovered_url=weak_url,
+                        provider_name="fake",
+                        query_identifier=queries[0].stable_query_id,
+                        rank=2,
+                        title_hint="Finance Operations Manager",
+                        company_hint="Beta",
+                    ),
+                ]
+            }
+        )
+        connector = BoardAwareConnector(
+            jobs_by_token={
+                "beta": [
+                    _posting_for_board("beta", "Beta", "strong", "Director, Platform Engineering"),
+                    _posting_for_board("beta", "Beta", "weak", "Finance Operations Manager"),
+                ]
+            }
+        )
+
+        run = run_job_discovery(
+            session,
+            search_definition_id=search_id,
+            provider_name="fake",
+            provider=provider,
+            fetcher=FakeFetcher(
+                {
+                    strong_url: _page_for_token(strong_url, "beta"),
+                    weak_url: _page_for_token(weak_url, "beta"),
+                }
+            ),
+            validator=connector,
+            connector=connector,
+            config=_config(),
+        )
+
+        sources = list(session.scalars(select(JobSourceConfigurationModel)))
+        jobs = list(session.scalars(select(JobLeadModel).order_by(JobLeadModel.external_id.asc())))
+        evaluations = list(session.scalars(select(JobEvaluationModel)))
+        matches = list(
+            session.scalars(
+                select(JobSearchMatchModel).where(
+                    JobSearchMatchModel.search_run_id == run.saved_search_run_id
+                )
+            )
+        )
+
+        assert run.status == "completed"
+        assert len(sources) == 1
+        assert sources[0].board_token == "beta"
+        assert sources[0].enabled is True
+        assert len(jobs) == 2
+        assert len(evaluations) == 2
+        assert len(matches) == 2
+        assert sum(1 for match in matches if match.matched) == 1
+        assert any(job.title == "Finance Operations Manager" for job in jobs)
+
+
+def test_run_job_discovery_imports_same_board_once_per_run(
+    session_factory: sessionmaker[Session],
+) -> None:
+    with session_factory() as session:
+        _seed_candidate(session)
+        search_id = _search(session)
+        search = get_job_search_definition(session, search_id)
+        queries = generate_job_discovery_queries(
+            search.to_snapshot(), max_queries=4, result_limit=5
+        )
+        first_url = "https://boards.greenhouse.io/beta/jobs/111"
+        second_url = "https://boards.greenhouse.io/beta/jobs/222"
+        third_url = "https://boards.greenhouse.io/beta/jobs/333"
+        provider = FakeJobDiscoveryProvider(
+            results_by_query={
+                queries[0].rendered_query: [
+                    DiscoveredJobCandidate(
+                        discovered_url=first_url,
+                        provider_name="fake",
+                        query_identifier=queries[0].stable_query_id,
+                        rank=1,
+                        title_hint="Director, Platform Engineering",
+                        company_hint="Beta",
+                    ),
+                    DiscoveredJobCandidate(
+                        discovered_url=second_url,
+                        provider_name="fake",
+                        query_identifier=queries[0].stable_query_id,
+                        rank=2,
+                        title_hint="Principal Platform Architect",
+                        company_hint="Beta",
+                    ),
+                    DiscoveredJobCandidate(
+                        discovered_url=third_url,
+                        provider_name="fake",
+                        query_identifier=queries[0].stable_query_id,
+                        rank=3,
+                        title_hint="Staff Platform Engineering Manager",
+                        company_hint="Beta",
+                    ),
+                ]
+            }
+        )
+        connector = BoardAwareConnector(
+            jobs_by_token={
+                "beta": [
+                    _posting_for_board("beta", "Beta", "111", "Director, Platform Engineering"),
+                    _posting_for_board("beta", "Beta", "222", "Principal Platform Architect"),
+                    _posting_for_board(
+                        "beta",
+                        "Beta",
+                        "333",
+                        "Staff Platform Engineering Manager",
+                    ),
+                ]
+            }
+        )
+
+        run = run_job_discovery(
+            session,
+            search_definition_id=search_id,
+            provider_name="fake",
+            provider=provider,
+            fetcher=FakeFetcher(
+                {
+                    first_url: _page_for_token(first_url, "beta"),
+                    second_url: _page_for_token(second_url, "beta"),
+                    third_url: _page_for_token(third_url, "beta"),
+                }
+            ),
+            validator=connector,
+            connector=connector,
+            config=_config(),
+        )
+        observations = list_job_discovery_observations(session, discovery_run_id=run.id)
+
+        assert run.status == "completed"
+        assert connector.fetch_calls == ["beta"]
+        assert len(list(session.scalars(select(JobSourceConfigurationModel)))) == 1
+        leads = list(session.scalars(select(JobLeadModel).order_by(JobLeadModel.external_id.asc())))
+        assert len(leads) == 3
+        external_ids = [lead.external_id for lead in leads]
+        assert all(external_id is not None for external_id in external_ids)
+        assert sorted(
+            external_id.split(":")[-1] for external_id in external_ids if external_id is not None
+        ) == ["111", "222", "333"]
+        assert len(observations) == 3
+        assert {record.observation.processing_status for record in observations} == {
+            JobDiscoveryObservationStatus.IMPORTED.value
+        }
+        assert all(record.observation.imported_job_lead_id is not None for record in observations)
+        assert len({record.observation.imported_job_lead_id for record in observations}) == 3
+
+
+def test_run_job_discovery_reuses_prior_resolution_and_avoids_duplicate_sources_and_jobs(
+    session_factory: sessionmaker[Session],
+) -> None:
+    with session_factory() as session:
+        _seed_candidate(session)
+        search_id = _search(session)
+        search = get_job_search_definition(session, search_id)
+        queries = generate_job_discovery_queries(
+            search.to_snapshot(), max_queries=4, result_limit=5
+        )
+        job_url = "https://boards.greenhouse.io/beta/jobs/strong"
+        provider = FakeJobDiscoveryProvider(
+            results_by_query={
+                queries[0].rendered_query: [
+                    DiscoveredJobCandidate(
+                        discovered_url=job_url,
+                        provider_name="fake",
+                        query_identifier=queries[0].stable_query_id,
+                        rank=1,
+                        title_hint="Director, Platform Engineering",
+                        company_hint="Beta",
+                    )
+                ]
+            }
+        )
+        connector = BoardAwareConnector(
+            jobs_by_token={
+                "beta": [
+                    _posting_for_board("beta", "Beta", "strong", "Director, Platform Engineering")
+                ]
+            }
+        )
+
+        first_fetcher = CountingFetcher({job_url: _page_for_token(job_url, "beta")})
+        first_run = run_job_discovery(
+            session,
+            search_definition_id=search_id,
+            provider_name="fake",
+            provider=provider,
+            fetcher=first_fetcher,
+            validator=connector,
+            connector=connector,
+            config=_config(),
+        )
+        second_fetcher = CountingFetcher({})
+        second_run = run_job_discovery(
+            session,
+            search_definition_id=search_id,
+            provider_name="fake",
+            provider=provider,
+            fetcher=second_fetcher,
+            validator=connector,
+            connector=connector,
+            config=_config(),
+        )
+
+        assert first_run.status == "completed"
+        assert second_run.status == "completed"
+        assert first_fetcher.calls == [job_url]
+        assert second_fetcher.calls == []
+        assert len(list(session.scalars(select(JobSourceConfigurationModel)))) == 1
+        assert len(list(session.scalars(select(JobLeadModel)))) == 1
+
+
+def test_run_job_discovery_does_not_auto_promote_ambiguous_or_unsupported_sources(
+    session_factory: sessionmaker[Session],
+) -> None:
+    with session_factory() as session:
+        _seed_candidate(session)
+        search_id = _search(session)
+        search = get_job_search_definition(session, search_id)
+        queries = generate_job_discovery_queries(
+            search.to_snapshot(), max_queries=4, result_limit=5
+        )
+        ambiguous_url = "https://example.com/ambiguous"
+        unsupported_url = "https://example.com/unsupported"
+        provider = FakeJobDiscoveryProvider(
+            results_by_query={
+                queries[0].rendered_query: [
+                    DiscoveredJobCandidate(
+                        discovered_url=ambiguous_url,
+                        provider_name="fake",
+                        query_identifier=queries[0].stable_query_id,
+                        rank=1,
+                    ),
+                    DiscoveredJobCandidate(
+                        discovered_url=unsupported_url,
+                        provider_name="fake",
+                        query_identifier=queries[0].stable_query_id,
+                        rank=2,
+                    ),
+                ]
+            }
+        )
+        fetcher = FakeFetcher(
+            {
+                ambiguous_url: PublicPage(
+                    requested_url=ambiguous_url,
+                    final_url=ambiguous_url,
+                    content_type="text/html",
+                    text=(
+                        '<a href="https://boards.greenhouse.io/acme">A</a>'
+                        '<a href="https://job-boards.greenhouse.io/beta">B</a>'
+                    ),
+                ),
+                unsupported_url: PublicPage(
+                    requested_url=unsupported_url,
+                    final_url=unsupported_url,
+                    content_type="text/html",
+                    text="https://example.com/jobs/1",
+                ),
+            }
+        )
+        validator = FakeValidator(
+            {
+                "acme": GreenhouseBoardValidation(token="acme", status="valid", valid=True),
+                "beta": GreenhouseBoardValidation(token="beta", status="valid", valid=True),
+            }
+        )
+
+        run = run_job_discovery(
+            session,
+            search_definition_id=search_id,
+            provider_name="fake",
+            provider=provider,
+            fetcher=fetcher,
+            validator=validator,
+            connector=FakeJobSourceConnector(),
+            config=_config(),
+        )
+        observations = list_job_discovery_observations(session, discovery_run_id=run.id)
+
+        assert run.status == "completed"
+        assert len(list(session.scalars(select(JobSourceConfigurationModel)))) == 0
+        assert {record.observation.processing_status for record in observations} == {
+            JobDiscoveryObservationStatus.AMBIGUOUS.value,
+            JobDiscoveryObservationStatus.UNSUPPORTED.value,
+        }
+
+
+def test_run_job_discovery_import_failure_isolated_to_one_supported_source(
+    session_factory: sessionmaker[Session],
+) -> None:
+    with session_factory() as session:
+        _seed_candidate(session)
+        search_id = _search(session)
+        search = get_job_search_definition(session, search_id)
+        queries = generate_job_discovery_queries(
+            search.to_snapshot(), max_queries=4, result_limit=5
+        )
+        good_url = "https://boards.greenhouse.io/acme/jobs/strong"
+        bad_url = "https://boards.greenhouse.io/beta/jobs/fail"
+        provider = FakeJobDiscoveryProvider(
+            results_by_query={
+                queries[0].rendered_query: [
+                    DiscoveredJobCandidate(
+                        discovered_url=good_url,
+                        provider_name="fake",
+                        query_identifier=queries[0].stable_query_id,
+                        rank=1,
+                        company_hint="Acme",
+                    ),
+                    DiscoveredJobCandidate(
+                        discovered_url=bad_url,
+                        provider_name="fake",
+                        query_identifier=queries[0].stable_query_id,
+                        rank=2,
+                        company_hint="Beta",
+                    ),
+                ]
+            }
+        )
+        connector = BoardAwareConnector(
+            jobs_by_token={
+                "acme": [_posting("strong", "Director, Platform Engineering")],
+                "beta": [],
+            },
+            errors_by_token={"beta": JobSourceProviderError("provider unavailable")},
+        )
+
+        run = run_job_discovery(
+            session,
+            search_definition_id=search_id,
+            provider_name="fake",
+            provider=provider,
+            fetcher=FakeFetcher(
+                {
+                    good_url: _page_for_token(good_url, "acme"),
+                    bad_url: _page_for_token(bad_url, "beta"),
+                }
+            ),
+            validator=connector,
+            connector=connector,
+            config=_config(),
+        )
+        observations = list_job_discovery_observations(session, discovery_run_id=run.id)
+
+        assert run.status == "partial"
+        assert len(list(session.scalars(select(JobSourceConfigurationModel)))) == 2
+        assert len(list(session.scalars(select(JobLeadModel)))) == 1
+        assert any(
+            record.observation.processing_status == JobDiscoveryObservationStatus.IMPORTED.value
+            for record in observations
+        )
+        assert any(
+            record.observation.processing_status == JobDiscoveryObservationStatus.FAILED.value
+            for record in observations
+        )
