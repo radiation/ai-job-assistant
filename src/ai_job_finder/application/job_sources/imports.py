@@ -353,7 +353,7 @@ def run_job_source_import_with_result(
                 status=terminal_status,
                 error_message=run.error_message,
             ),
-            surfaced_job_lead_ids=tuple(surfaced_job_lead_ids),
+            surfaced_job_lead_ids=tuple(dict.fromkeys(surfaced_job_lead_ids)),
         )
     except (JobSourceProviderError, SuspiciousEmptyJobSourceResultError) as exc:
         session.rollback()

@@ -291,7 +291,12 @@ def test_import_result_exposes_canonical_leads_for_all_supported_providers(
         result = run_job_source_import_with_result(
             session,
             source_id=source.id,
-            connector=FakeJobSourceConnector(jobs=[replace(_posting("1"), provider=provider)]),
+            connector=FakeJobSourceConnector(
+                jobs=[
+                    replace(_posting("1"), provider=provider),
+                    replace(_posting("1"), provider=provider),
+                ]
+            ),
         )
 
         assert result.run.jobs_created == 1
