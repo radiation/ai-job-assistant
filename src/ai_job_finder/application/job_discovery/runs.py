@@ -116,7 +116,9 @@ class JobDiscoveryImportRecord:
 
 @dataclass(frozen=True, slots=True)
 class JobDiscoveryMatchingSummary:
-    canonical_jobs_evaluated: int
+    seed_linked_canonical_jobs_evaluated: int
+    additional_board_import_jobs_evaluated: int
+    total_canonical_jobs_evaluated: int
     location_eligible_count: int
     location_needs_review_count: int
     location_ineligible_count: int
@@ -1023,9 +1025,43 @@ def _build_matching_detail(
     list[JobDiscoveryMatchedJobRecord],
 ]:
     imported_records = [record for record in observations if record.imported_job_lead is not None]
+    matches_by_job_id: dict[UUID, JobSearchMatchModel] = {}
+    evaluations_by_job_id: dict[UUID, JobEvaluationModel | None] = {}
+    if run.saved_search_run_id is not None:
+        for match_record in list_job_search_matches(session, search_run_id=run.saved_search_run_id):
+            matches_by_job_id[match_record.job_lead.id] = match_record.match
+            evaluations_by_job_id[match_record.job_lead.id] = match_record.evaluation
+
+    evaluated_job_ids = {
+        match.job_lead_id
+        for match in matches_by_job_id.values()
+        if match.job_evaluation_id is not None
+    }
+    seed_linked_job_ids = {
+        record.imported_job_lead.id
+        for record in imported_records
+        if record.imported_job_lead is not None and record.imported_job_lead.id in evaluated_job_ids
+    }
+    new_board_source_ids = {
+        record.source_configuration.id
+        for record in observations
+        if record.source_created_in_run and record.source_configuration is not None
+    }
+    new_board_job_ids = set(
+        session.scalars(
+            select(JobSourceObservationModel.job_lead_id).where(
+                JobSourceObservationModel.source_configuration_id.in_(new_board_source_ids),
+                JobSourceObservationModel.job_lead_id.in_(evaluated_job_ids),
+            )
+        )
+    )
+    additional_board_import_job_ids = new_board_job_ids - seed_linked_job_ids
+
     if not imported_records:
         empty_summary = JobDiscoveryMatchingSummary(
-            canonical_jobs_evaluated=0,
+            seed_linked_canonical_jobs_evaluated=len(seed_linked_job_ids),
+            additional_board_import_jobs_evaluated=len(additional_board_import_job_ids),
+            total_canonical_jobs_evaluated=len(evaluated_job_ids),
             location_eligible_count=0,
             location_needs_review_count=0,
             location_ineligible_count=0,
@@ -1065,13 +1101,6 @@ def _build_matching_detail(
         else:
             ineligible_count += 1
 
-    matches_by_job_id: dict[UUID, JobSearchMatchModel] = {}
-    evaluations_by_job_id: dict[UUID, JobEvaluationModel | None] = {}
-    if run.saved_search_run_id is not None:
-        for match_record in list_job_search_matches(session, search_run_id=run.saved_search_run_id):
-            matches_by_job_id[match_record.job_lead.id] = match_record.match
-            evaluations_by_job_id[match_record.job_lead.id] = match_record.evaluation
-
     surfaced_job_ids: set[UUID] = set()
     surfaced_rows: dict[UUID, JobDiscoveryMatchedJobRecord] = {}
     if run.saved_search_run_id is not None and candidate is not None:
@@ -1102,12 +1131,6 @@ def _build_matching_detail(
             )
 
     matched_records: list[JobDiscoveryMatchedJobRecord] = []
-    evaluated_job_ids = {
-        record.saved_search_match.job_lead_id
-        for record in imported_records
-        if record.saved_search_match is not None
-        and record.saved_search_match.job_evaluation_id is not None
-    }
     for record in imported_records:
         job_lead = record.imported_job_lead
         match = record.saved_search_match
@@ -1151,7 +1174,9 @@ def _build_matching_detail(
         and record.saved_search_match.recommendation_at_match_time in ACTIONABLE_RECOMMENDATIONS
     )
     matching_summary = JobDiscoveryMatchingSummary(
-        canonical_jobs_evaluated=len(evaluated_job_ids),
+        seed_linked_canonical_jobs_evaluated=len(seed_linked_job_ids),
+        additional_board_import_jobs_evaluated=len(additional_board_import_job_ids),
+        total_canonical_jobs_evaluated=len(evaluated_job_ids),
         location_eligible_count=eligible_count,
         location_needs_review_count=needs_review_count,
         location_ineligible_count=ineligible_count,

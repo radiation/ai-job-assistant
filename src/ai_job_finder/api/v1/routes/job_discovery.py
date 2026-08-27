@@ -173,7 +173,13 @@ def get_job_discovery_run_route(
             for record in detail.imports
         ],
         matching_summary=JobDiscoveryMatchingSummaryResponse(
-            canonical_jobs_evaluated=detail.matching_summary.canonical_jobs_evaluated,
+            seed_linked_canonical_jobs_evaluated=(
+                detail.matching_summary.seed_linked_canonical_jobs_evaluated
+            ),
+            additional_board_import_jobs_evaluated=(
+                detail.matching_summary.additional_board_import_jobs_evaluated
+            ),
+            total_canonical_jobs_evaluated=(detail.matching_summary.total_canonical_jobs_evaluated),
             location_eligible_count=detail.matching_summary.location_eligible_count,
             location_needs_review_count=detail.matching_summary.location_needs_review_count,
             location_ineligible_count=detail.matching_summary.location_ineligible_count,

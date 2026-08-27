@@ -242,6 +242,9 @@ def test_job_discovery_api_run_list_detail_and_observations(
     assert len(detail_payload["queries"]) >= 1
     assert len(detail_payload["observations"]) == 2
     assert len(detail_payload["imports"]) == 1
+    assert detail_payload["matching_summary"]["seed_linked_canonical_jobs_evaluated"] == 2
+    assert detail_payload["matching_summary"]["additional_board_import_jobs_evaluated"] == 0
+    assert detail_payload["matching_summary"]["total_canonical_jobs_evaluated"] == 2
     assert detail_payload["matching_summary"]["saved_search_match_count"] == 1
     assert detail_payload["top_matches"][0]["title"] == "Director, Platform Engineering"
     assert detail_payload["discover_jobs"][0]["title"] == "Director, Platform Engineering"
