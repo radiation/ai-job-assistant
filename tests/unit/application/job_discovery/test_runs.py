@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterator
+from dataclasses import replace
 from datetime import UTC, datetime
 from typing import Any, cast
 from uuid import UUID
@@ -270,6 +271,39 @@ def _config() -> JobDiscoveryConfig:
         close_on_empty=False,
         stale_after_seconds=3600,
     )
+
+
+def test_run_job_discovery_forwards_configured_query_cap_to_generator(
+    session_factory: sessionmaker[Session],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured_max_queries: list[int] = []
+    original_generate = generate_job_discovery_queries
+
+    def capture_generate(*args: Any, **kwargs: Any) -> list[Any]:
+        captured_max_queries.append(cast(int, kwargs["max_queries"]))
+        return original_generate(*args, **kwargs)
+
+    monkeypatch.setattr(
+        "ai_job_finder.application.job_discovery.runs.generate_job_discovery_queries",
+        capture_generate,
+    )
+
+    with session_factory() as session:
+        _seed_candidate(session)
+        search_id = _search(session)
+        run_job_discovery(
+            session,
+            search_definition_id=search_id,
+            provider_name="fake",
+            provider=FakeJobDiscoveryProvider(),
+            fetcher=FakeFetcher({}),
+            validator=FakeJobSourceConnector(),
+            connector=FakeJobSourceConnector(),
+            config=replace(_config(), max_queries_per_run=12),
+        )
+
+    assert captured_max_queries == [12]
 
 
 def test_run_job_discovery_completes_and_links_saved_search_matches(
