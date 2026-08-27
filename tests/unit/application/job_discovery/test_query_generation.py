@@ -37,14 +37,23 @@ def test_query_generation_is_deterministic_deduplicated_and_capped() -> None:
     second = generate_job_discovery_queries(definition, max_queries=4, result_limit=5)
 
     assert [query.rendered_query for query in first] == [
-        '"Director Platform Engineering"',
-        '"Director Platform Engineering" remote',
-        '"Director Platform Engineering" "remote United States"',
-        '"Director Developer Experience"',
+        '"Director Platform Engineering" "New York" site:boards.greenhouse.io',
+        '"Director Platform Engineering" "New York" site:jobs.ashbyhq.com',
+        '"Director Platform Engineering" "New York" site:jobs.lever.co',
+        (
+            '"Director Platform Engineering" "New York" '
+            "-site:indeed.com -site:linkedin.com -site:glassdoor.com -site:ziprecruiter.com"
+        ),
     ]
     assert [query.stable_query_id for query in first] == [query.stable_query_id for query in second]
     assert len({query.rendered_query for query in first}) == len(first)
     assert all(query.result_limit == 5 for query in first)
+    assert [query.target_domain for query in first] == [
+        "boards.greenhouse.io",
+        "jobs.ashbyhq.com",
+        "jobs.lever.co",
+        None,
+    ]
 
 
 def test_query_generation_uses_seniority_and_domain_fallbacks() -> None:
@@ -64,6 +73,36 @@ def test_query_generation_uses_seniority_and_domain_fallbacks() -> None:
         updated_at=datetime(2026, 7, 20, tzinfo=UTC),
     )
 
-    queries = generate_job_discovery_queries(definition, max_queries=3, result_limit=3)
+    queries = generate_job_discovery_queries(definition, max_queries=4, result_limit=3)
 
-    assert [query.rendered_query for query in queries] == ['"Senior Director Developer Experience"']
+    assert [query.rendered_query for query in queries] == [
+        '"Senior Director Developer Experience" site:boards.greenhouse.io',
+        '"Senior Director Developer Experience" site:jobs.ashbyhq.com',
+        '"Senior Director Developer Experience" site:jobs.lever.co',
+        (
+            '"Senior Director Developer Experience" '
+            "-site:indeed.com -site:linkedin.com -site:glassdoor.com -site:ziprecruiter.com"
+        ),
+    ]
+
+
+def test_query_generation_bounds_requests_with_primary_and_secondary_targets() -> None:
+    definition = _definition()
+
+    queries = generate_job_discovery_queries(definition, max_queries=10, result_limit=5)
+
+    assert [query.rendered_query for query in queries] == [
+        '"Director Platform Engineering" "New York" site:boards.greenhouse.io',
+        '"Director Platform Engineering" "New York" site:jobs.ashbyhq.com',
+        '"Director Platform Engineering" "New York" site:jobs.lever.co',
+        (
+            '"Director Platform Engineering" "New York" '
+            "-site:indeed.com -site:linkedin.com -site:glassdoor.com -site:ziprecruiter.com"
+        ),
+        '"Director Platform Engineering" site:boards.greenhouse.io',
+        (
+            '"Director Platform Engineering" '
+            "-site:indeed.com -site:linkedin.com -site:glassdoor.com -site:ziprecruiter.com"
+        ),
+    ]
+    assert len(queries) == 6

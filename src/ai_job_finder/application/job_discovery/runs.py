@@ -45,6 +45,7 @@ from ai_job_finder.domain.job_discovery import (
     JobDiscoveryRunStatus,
     normalize_job_discovery_url,
 )
+from ai_job_finder.domain.job_discovery.targeting import discovery_excluded_aggregator_domain
 from ai_job_finder.domain.job_sources import JobSourceConnector
 from ai_job_finder.domain.location_eligibility import (
     JobLocationSignals,
@@ -337,6 +338,17 @@ def _process_observation(
     source_imports: dict[UUID, _CachedImportOutcome],
 ) -> None:
     try:
+        excluded_domain = discovery_excluded_aggregator_domain(observation.normalized_url)
+        if excluded_domain is not None:
+            counters.unsupported_count += 1
+            observation.processing_status = JobDiscoveryObservationStatus.UNSUPPORTED.value
+            observation.exclusion_reason = (
+                f"Excluded known aggregator domain before source detection: {excluded_domain}."
+            )
+            session.add(observation)
+            session.commit()
+            return
+
         reused_resolution = _reusable_resolution(session, observation=observation)
         if reused_resolution is not None:
             observation.source_detection_run_id = reused_resolution.source_detection_run_id

@@ -1018,6 +1018,124 @@ def test_run_job_discovery_does_not_auto_promote_ambiguous_or_unsupported_source
         }
 
 
+@pytest.mark.parametrize(
+    ("url", "expected_domain"),
+    [
+        ("https://www.indeed.com/viewjob?jk=123", "indeed.com"),
+        ("https://www.linkedin.com/jobs/view/123", "linkedin.com"),
+        ("https://www.glassdoor.com/Job/example-job.htm", "glassdoor.com"),
+        ("https://www.ziprecruiter.com/jobs/example-123", "ziprecruiter.com"),
+    ],
+)
+def test_run_job_discovery_filters_known_aggregators_before_source_detection(
+    session_factory: sessionmaker[Session],
+    url: str,
+    expected_domain: str,
+) -> None:
+    with session_factory() as session:
+        _seed_candidate(session)
+        search_id = _search(session)
+        search = get_job_search_definition(session, search_id)
+        queries = generate_job_discovery_queries(
+            search.to_snapshot(), max_queries=4, result_limit=5
+        )
+        fetcher = CountingFetcher({})
+
+        run = run_job_discovery(
+            session,
+            search_definition_id=search_id,
+            provider_name="fake",
+            provider=FakeJobDiscoveryProvider(
+                results_by_query={
+                    queries[0].rendered_query: [
+                        DiscoveredJobCandidate(
+                            discovered_url=url,
+                            provider_name="fake",
+                            query_identifier=queries[0].stable_query_id,
+                            rank=1,
+                        )
+                    ]
+                }
+            ),
+            fetcher=fetcher,
+            validator=FakeValidator({}),
+            connector=FakeJobSourceConnector(),
+            config=_config(),
+        )
+        observations = list_job_discovery_observations(session, discovery_run_id=run.id)
+
+        assert run.status == "completed"
+        assert fetcher.calls == []
+        assert len(observations) == 1
+        assert (
+            observations[0].observation.processing_status
+            == JobDiscoveryObservationStatus.UNSUPPORTED.value
+        )
+        assert expected_domain in (observations[0].observation.exclusion_reason or "")
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "https://boards.greenhouse.io/acme/jobs/123",
+        "https://jobs.ashbyhq.com/acme/123",
+        "https://jobs.lever.co/acme/123",
+        "https://careers.example.com/jobs/platform-director",
+    ],
+)
+def test_run_job_discovery_keeps_supported_and_unknown_hosts_eligible_for_source_detection(
+    session_factory: sessionmaker[Session],
+    url: str,
+) -> None:
+    with session_factory() as session:
+        _seed_candidate(session)
+        search_id = _search(session)
+        search = get_job_search_definition(session, search_id)
+        queries = generate_job_discovery_queries(
+            search.to_snapshot(), max_queries=4, result_limit=5
+        )
+        fetcher = CountingFetcher(
+            {
+                url: PublicPage(
+                    requested_url=url,
+                    final_url=url,
+                    content_type="text/html",
+                    text="https://example.com/jobs/123",
+                )
+            }
+        )
+
+        run = run_job_discovery(
+            session,
+            search_definition_id=search_id,
+            provider_name="fake",
+            provider=FakeJobDiscoveryProvider(
+                results_by_query={
+                    queries[0].rendered_query: [
+                        DiscoveredJobCandidate(
+                            discovered_url=url,
+                            provider_name="fake",
+                            query_identifier=queries[0].stable_query_id,
+                            rank=1,
+                        )
+                    ]
+                }
+            ),
+            fetcher=fetcher,
+            validator=FakeValidator({}),
+            connector=FakeJobSourceConnector(),
+            config=_config(),
+        )
+        observations = list_job_discovery_observations(session, discovery_run_id=run.id)
+
+        assert run.status == "completed"
+        assert fetcher.calls == [url]
+        assert len(observations) == 1
+        assert observations[0].observation.exclusion_reason != (
+            "Excluded known aggregator domain before source detection: indeed.com."
+        )
+
+
 def test_run_job_discovery_import_failure_isolated_to_one_supported_source(
     session_factory: sessionmaker[Session],
 ) -> None:

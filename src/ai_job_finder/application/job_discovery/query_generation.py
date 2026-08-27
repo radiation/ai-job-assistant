@@ -1,10 +1,15 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from hashlib import sha256
 
 from ai_job_finder.domain.enums import WorkplaceType
 from ai_job_finder.domain.errors import JobDiscoveryQueryGenerationError
 from ai_job_finder.domain.job_discovery import JobDiscoveryQuery
+from ai_job_finder.domain.job_discovery.targeting import (
+    DISCOVERY_ATS_QUERY_HOSTS,
+    DISCOVERY_EXCLUDED_AGGREGATOR_DOMAINS,
+)
 from ai_job_finder.domain.job_searches import (
     JobSearchDefinitionSnapshot,
     JobSearchDomain,
@@ -13,6 +18,8 @@ from ai_job_finder.domain.job_searches import (
 
 MAX_TITLE_PHRASES = 4
 MAX_LOCATION_TERMS = 2
+MAX_LOGICAL_TARGETS = 2
+SECONDARY_TARGETED_HOST_COUNT = 1
 
 DOMAIN_LABELS: dict[JobSearchDomain, str] = {
     JobSearchDomain.PLATFORM_ENGINEERING: "Platform Engineering",
@@ -37,6 +44,12 @@ SENIORITY_LABELS: dict[JobSearchSeniority, str] = {
 }
 
 
+@dataclass(frozen=True, slots=True)
+class _LogicalTarget:
+    title_phrase: str
+    location_term: str | None
+
+
 def generate_job_discovery_queries(
     definition: JobSearchDefinitionSnapshot,
     *,
@@ -46,40 +59,47 @@ def generate_job_discovery_queries(
     if max_queries <= 0 or result_limit <= 0:
         raise JobDiscoveryQueryGenerationError("Discovery query generation requires positive caps.")
 
-    explicit_title_phrases = _unique_preserving_order(definition.title_include_patterns)[
-        :MAX_TITLE_PHRASES
-    ]
     title_phrases = _title_phrases(definition)
     location_terms = _location_terms(definition)
 
-    rendered_queries: list[tuple[str, str, str | None]] = []
-    for title_phrase in explicit_title_phrases:
-        rendered_queries.append((_render_query(title_phrase, None), title_phrase, None))
-    location_seed_titles = (
-        explicit_title_phrases[:2] if explicit_title_phrases else title_phrases[:2]
-    )
-    for title_phrase in location_seed_titles:
-        for rendered_location_term in location_terms:
+    rendered_queries: list[tuple[str, str, str | None, str | None]] = []
+    for index, target in enumerate(_logical_targets(title_phrases, location_terms)):
+        targeted_hosts: tuple[str, ...] = DISCOVERY_ATS_QUERY_HOSTS
+        if index > 0:
+            targeted_hosts = DISCOVERY_ATS_QUERY_HOSTS[:SECONDARY_TARGETED_HOST_COUNT]
+        for targeted_host in targeted_hosts:
             rendered_queries.append(
                 (
-                    _render_query(title_phrase, rendered_location_term),
-                    title_phrase,
-                    rendered_location_term,
+                    _render_targeted_query(
+                        title_phrase=target.title_phrase,
+                        location_term=target.location_term,
+                        target_host=targeted_host,
+                    ),
+                    target.title_phrase,
+                    targeted_host,
+                    target.location_term,
                 )
             )
-    for title_phrase in title_phrases:
-        if title_phrase.casefold() in {item.casefold() for item in explicit_title_phrases}:
-            continue
-        rendered_queries.append((_render_query(title_phrase, None), title_phrase, None))
+        rendered_queries.append(
+            (
+                _render_broad_query(
+                    title_phrase=target.title_phrase,
+                    location_term=target.location_term,
+                ),
+                target.title_phrase,
+                None,
+                target.location_term,
+            )
+        )
 
-    deduped: list[tuple[str, str, str | None]] = []
+    deduped: list[tuple[str, str, str | None, str | None]] = []
     seen: set[str] = set()
-    for rendered_query, title_phrase, deduped_location_term in rendered_queries:
+    for rendered_query, title_phrase, target_domain, deduped_location_term in rendered_queries:
         key = rendered_query.casefold()
         if not key or key in seen:
             continue
         seen.add(key)
-        deduped.append((rendered_query, title_phrase, deduped_location_term))
+        deduped.append((rendered_query, title_phrase, target_domain, deduped_location_term))
         if len(deduped) >= max_queries:
             break
 
@@ -99,11 +119,14 @@ def generate_job_discovery_queries(
             ordinal=ordinal,
             rendered_query=rendered_query,
             title_phrase=title_phrase,
-            target_domain=None,
+            target_domain=target_domain,
             location_or_workplace_term=location_term,
             result_limit=result_limit,
         )
-        for ordinal, (rendered_query, title_phrase, location_term) in enumerate(deduped, start=1)
+        for ordinal, (rendered_query, title_phrase, target_domain, location_term) in enumerate(
+            deduped,
+            start=1,
+        )
     ]
 
 
@@ -136,16 +159,44 @@ def _title_phrases(definition: JobSearchDefinitionSnapshot) -> list[str]:
 
 def _location_terms(definition: JobSearchDefinitionSnapshot) -> list[str]:
     terms: list[str] = []
-    if WorkplaceType.REMOTE in definition.allowed_workplace_types:
-        terms.append("remote")
-    for geography in definition.allowed_remote_geographies[:1]:
-        terms.append(f"remote {geography}")
     for location in definition.allowed_locations[:1]:
         terms.append(location)
+    for geography in definition.allowed_remote_geographies[:1]:
+        terms.append(f"remote {geography}")
+    if WorkplaceType.REMOTE in definition.allowed_workplace_types:
+        terms.append("remote")
     return _unique_preserving_order(terms)[:MAX_LOCATION_TERMS]
 
 
-def _render_query(title_phrase: str, location_term: str | None) -> str:
+def _logical_targets(title_phrases: list[str], location_terms: list[str]) -> list[_LogicalTarget]:
+    if not title_phrases:
+        return []
+    targets = [
+        _LogicalTarget(
+            title_phrase=title_phrases[0],
+            location_term=location_terms[0] if location_terms else None,
+        )
+    ]
+    if len(targets) >= MAX_LOGICAL_TARGETS:
+        return targets
+    secondary = _secondary_target(title_phrases, location_terms)
+    if secondary is not None:
+        targets.append(secondary)
+    return targets
+
+
+def _secondary_target(
+    title_phrases: list[str],
+    location_terms: list[str],
+) -> _LogicalTarget | None:
+    if location_terms:
+        return _LogicalTarget(title_phrase=title_phrases[0], location_term=None)
+    if len(title_phrases) > 1:
+        return _LogicalTarget(title_phrase=title_phrases[1], location_term=None)
+    return None
+
+
+def _render_base_query(title_phrase: str, location_term: str | None) -> str:
     rendered = f'"{title_phrase}"'
     if location_term is not None:
         if location_term == "remote":
@@ -153,6 +204,16 @@ def _render_query(title_phrase: str, location_term: str | None) -> str:
         else:
             rendered = f'{rendered} "{location_term}"'
     return rendered.strip()
+
+
+def _render_targeted_query(title_phrase: str, location_term: str | None, target_host: str) -> str:
+    return f"{_render_base_query(title_phrase, location_term)} site:{target_host}".strip()
+
+
+def _render_broad_query(title_phrase: str, location_term: str | None) -> str:
+    base_query = _render_base_query(title_phrase, location_term)
+    exclusions = " ".join(f"-site:{domain}" for domain in DISCOVERY_EXCLUDED_AGGREGATOR_DOMAINS)
+    return f"{base_query} {exclusions}".strip()
 
 
 def _normalize_phrase(value: str) -> str:
