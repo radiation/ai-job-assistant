@@ -627,7 +627,10 @@ def _selected_valid_token(run: SourceDetectionRunModel, selected_token: str | No
         raise AmbiguousSourceDetectionError("Select a token before approving this detection run.")
     selected_value = selected_token or run.validated_token or ""
     normalized_selected: str | None
-    if run.detected_provider == JobSourceProvider.ASHBY.value:
+    if run.detected_provider in {
+        JobSourceProvider.ASHBY.value,
+        JobSourceProvider.LEVER.value,
+    }:
         normalized_selected = selected_value.strip().strip("/")
         if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{0,199}", normalized_selected):
             normalized_selected = None

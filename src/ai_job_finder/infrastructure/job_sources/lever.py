@@ -5,7 +5,7 @@ import time
 from datetime import UTC, datetime
 from typing import Any, cast
 from urllib.error import HTTPError, URLError
-from urllib.parse import quote, urlsplit, urlunsplit
+from urllib.parse import quote
 from urllib.request import Request, urlopen
 
 from ai_job_finder.domain.common import utc_now
@@ -164,7 +164,6 @@ def parse_lever_job(
     workplace_type = _workplace_type(
         _optional_str(payload.get("workplaceType")), location, description_raw
     )
-    source_url = _safe_http_url(_optional_str(payload.get("hostedUrl")))
     return NormalizedJobPosting(
         provider=JobSourceProvider.LEVER,
         company_name=source.company_name,
@@ -174,7 +173,7 @@ def parse_lever_job(
         description_raw=description_raw,
         description_normalized=html_to_plain_text(description_raw),
         compensation_text=None,
-        source_url=source_url or f"https://jobs.lever.co/{source.board_token}/{external_id}",
+        source_url=f"https://jobs.lever.co/{source.board_token}/{external_id}",
         external_id=external_id,
         internal_job_id=None,
         source_updated_at=_parse_millis(payload.get("createdAt")),
@@ -229,14 +228,3 @@ def _parse_millis(value: Any) -> datetime | None:
         return datetime.fromtimestamp(value / 1000, tz=UTC)
     except OverflowError, OSError, ValueError:
         return None
-
-
-def _safe_http_url(value: str | None) -> str | None:
-    if value is None:
-        return None
-    parts = urlsplit(value)
-    if parts.scheme.casefold() not in {"http", "https"} or not parts.netloc:
-        return None
-    return urlunsplit(
-        (parts.scheme.casefold(), parts.netloc.casefold(), parts.path, parts.query, "")
-    )

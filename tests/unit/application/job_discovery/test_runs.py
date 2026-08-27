@@ -108,6 +108,19 @@ class FakeAshbyValidator:
         )
 
 
+class FakeLeverValidator:
+    def validate(self, provider: JobSourceProvider, board_token: str) -> JobSourceBoardValidation:
+        assert provider is JobSourceProvider.LEVER
+        return JobSourceBoardValidation(
+            token=board_token,
+            status="valid",
+            valid=True,
+            job_count=2,
+            sample_titles=["Director, Platform Engineering"],
+            company_name="Lever Acme",
+        )
+
+
 class BoardAwareConnector:
     def __init__(
         self,
@@ -287,6 +300,27 @@ def _ashby_posting(external_id: str, title: str) -> NormalizedJobPosting:
         description_normalized="Lead platform engineering with Kubernetes and cloud reliability.",
         compensation_text=None,
         source_url=f"https://jobs.ashbyhq.com/Beta/{external_id}",
+        external_id=external_id,
+        internal_job_id=None,
+        source_updated_at=datetime(2026, 1, 2, tzinfo=UTC),
+        departments=["Engineering"],
+        offices=["Remote United States"],
+        metadata={},
+        raw_payload={"id": external_id},
+    )
+
+
+def _lever_posting(external_id: str, title: str) -> NormalizedJobPosting:
+    return NormalizedJobPosting(
+        provider=JobSourceProvider.LEVER,
+        company_name="Lever Acme",
+        title=title,
+        location_text="Remote United States",
+        workplace_type=WorkplaceType.REMOTE,
+        description_raw="Lead platform engineering with Kubernetes and cloud reliability.",
+        description_normalized="Lead platform engineering with Kubernetes and cloud reliability.",
+        compensation_text=None,
+        source_url=f"https://jobs.lever.co/LuminDigital/{external_id}",
         external_id=external_id,
         internal_job_id=None,
         source_updated_at=datetime(2026, 1, 2, tzinfo=UTC),
@@ -799,6 +833,124 @@ def test_run_job_discovery_imports_and_links_ashby_board_once(
         assert source.board_token == "Beta"
 
 
+def test_run_job_discovery_imports_and_links_lever_board_once(
+    session_factory: sessionmaker[Session],
+) -> None:
+    with session_factory() as session:
+        _seed_candidate(session)
+        search_id = _search(session)
+        search = get_job_search_definition(session, search_id)
+        query = generate_job_discovery_queries(search.to_snapshot(), max_queries=4, result_limit=5)[
+            0
+        ]
+        first_url = "https://jobs.lever.co/LuminDigital/posting-111"
+        second_url = "https://jobs.lever.co/LuminDigital/posting-222"
+        provider = FakeJobDiscoveryProvider(
+            results_by_query={
+                query.rendered_query: [
+                    DiscoveredJobCandidate(
+                        discovered_url=first_url,
+                        provider_name="fake",
+                        query_identifier=query.stable_query_id,
+                        rank=1,
+                        title_hint="Director, Platform Engineering",
+                        company_hint="Lever Acme",
+                    ),
+                    DiscoveredJobCandidate(
+                        discovered_url=second_url,
+                        provider_name="fake",
+                        query_identifier=query.stable_query_id,
+                        rank=2,
+                        title_hint="Principal Platform Architect",
+                        company_hint="Lever Acme",
+                    ),
+                ]
+            }
+        )
+        connector = BoardAwareConnector(
+            jobs_by_token={
+                "LuminDigital": [
+                    _lever_posting("posting-111", "Director, Platform Engineering"),
+                    _lever_posting("posting-222", "Principal Platform Architect"),
+                ]
+            }
+        )
+
+        run = run_job_discovery(
+            session,
+            search_definition_id=search_id,
+            provider_name="fake",
+            provider=provider,
+            fetcher=FakeFetcher({}),
+            board_validator=FakeLeverValidator(),
+            connector=connector,
+            config=_config(),
+        )
+        observations = list_job_discovery_observations(session, discovery_run_id=run.id)
+
+        assert run.status == "completed"
+        assert connector.fetch_calls == ["LuminDigital"]
+        assert run.imported_lead_count == 2
+        assert run.evaluated_count == 2
+        assert all(record.observation.imported_job_lead_id is not None for record in observations)
+        source = session.scalar(select(JobSourceConfigurationModel))
+        assert source is not None
+        assert source.provider == JobSourceProvider.LEVER.value
+        assert source.board_token == "LuminDigital"
+
+
+def test_run_job_discovery_imports_lever_board_when_discovered_posting_is_stale(
+    session_factory: sessionmaker[Session],
+) -> None:
+    with session_factory() as session:
+        _seed_candidate(session)
+        search_id = _search(session)
+        search = get_job_search_definition(session, search_id)
+        query = generate_job_discovery_queries(search.to_snapshot(), max_queries=4, result_limit=5)[
+            0
+        ]
+        stale_url = "https://jobs.lever.co/LuminDigital/stale-posting"
+        provider = FakeJobDiscoveryProvider(
+            results_by_query={
+                query.rendered_query: [
+                    DiscoveredJobCandidate(
+                        discovered_url=stale_url,
+                        provider_name="fake",
+                        query_identifier=query.stable_query_id,
+                        rank=1,
+                        title_hint="Expired role",
+                        company_hint="Lever Acme",
+                    )
+                ]
+            }
+        )
+        connector = BoardAwareConnector(
+            jobs_by_token={
+                "LuminDigital": [_lever_posting("live-posting", "Director, Platform Engineering")]
+            }
+        )
+
+        run = run_job_discovery(
+            session,
+            search_definition_id=search_id,
+            provider_name="fake",
+            provider=provider,
+            fetcher=FakeFetcher({}),
+            board_validator=FakeLeverValidator(),
+            connector=connector,
+            config=_config(),
+        )
+        observation = list_job_discovery_observations(session, discovery_run_id=run.id)[0]
+
+        assert run.status == "partial"
+        assert connector.fetch_calls == ["LuminDigital"]
+        assert observation.observation.import_run_id is not None
+        assert observation.observation.imported_job_lead_id is None
+        assert (
+            observation.observation.processing_status == JobDiscoveryObservationStatus.FAILED.value
+        )
+
+
 def test_run_job_discovery_reuses_prior_resolution_and_avoids_duplicate_sources_and_jobs(
     session_factory: sessionmaker[Session],
 ) -> None:
@@ -1268,7 +1420,7 @@ def test_run_job_discovery_keeps_supported_and_unknown_hosts_eligible_for_source
         observations = list_job_discovery_observations(session, discovery_run_id=run.id)
 
         assert run.status == "completed"
-        expected_fetches = [] if "jobs.ashbyhq.com" in url else [url]
+        expected_fetches = [] if "jobs.ashbyhq.com" in url or "jobs.lever.co" in url else [url]
         assert fetcher.calls == expected_fetches
         assert len(observations) == 1
         assert observations[0].observation.exclusion_reason != (
