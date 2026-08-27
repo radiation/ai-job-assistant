@@ -674,6 +674,119 @@ def test_run_job_discovery_auto_creates_unknown_greenhouse_source_and_retains_we
         assert any(job.title == "Finance Operations Manager" for job in jobs)
 
 
+def test_run_job_discovery_evaluates_new_board_jobs_when_seed_is_stale(
+    session_factory: sessionmaker[Session],
+) -> None:
+    with session_factory() as session:
+        _seed_candidate(session)
+        search_id = _search(session)
+        search = get_job_search_definition(session, search_id)
+        query = generate_job_discovery_queries(search.to_snapshot(), max_queries=4, result_limit=5)[
+            0
+        ]
+        stale_url = "https://boards.greenhouse.io/beta/jobs/old-director"
+        connector = BoardAwareConnector(
+            jobs_by_token={
+                "beta": [
+                    _posting_for_board(
+                        "beta",
+                        "Beta",
+                        "platform-director",
+                        "Director, Platform Engineering",
+                    ),
+                    _posting_for_board(
+                        "beta",
+                        "Beta",
+                        "finance-manager",
+                        "Finance Operations Manager",
+                    ),
+                    replace(
+                        _posting_for_board(
+                            "beta",
+                            "Beta",
+                            "london-director",
+                            "Director, Platform Engineering",
+                        ),
+                        location_text="London, United Kingdom",
+                        workplace_type=WorkplaceType.ONSITE,
+                        offices=["London, United Kingdom"],
+                    ),
+                ]
+            }
+        )
+        provider = FakeJobDiscoveryProvider(
+            results_by_query={
+                query.rendered_query: [
+                    DiscoveredJobCandidate(
+                        discovered_url=stale_url,
+                        provider_name="fake",
+                        query_identifier=query.stable_query_id,
+                        rank=1,
+                        title_hint="Old Director of Engineering",
+                        company_hint="Beta",
+                    )
+                ]
+            }
+        )
+
+        first_run = run_job_discovery(
+            session,
+            search_definition_id=search_id,
+            provider_name="fake",
+            provider=provider,
+            fetcher=FakeFetcher({stale_url: _page_for_token(stale_url, "beta")}),
+            board_validator=connector,
+            connector=connector,
+            config=_config(),
+        )
+        first_observation = list_job_discovery_observations(session, discovery_run_id=first_run.id)[
+            0
+        ]
+        first_matches = list(
+            session.scalars(
+                select(JobSearchMatchModel).where(
+                    JobSearchMatchModel.search_run_id == first_run.saved_search_run_id
+                )
+            )
+        )
+
+        assert first_observation.observation.imported_job_lead_id is None
+        assert (
+            first_observation.observation.processing_status
+            == JobDiscoveryObservationStatus.FAILED.value
+        )
+        assert first_run.saved_search_run_id is not None
+        assert len(list(session.scalars(select(JobLeadModel)))) == 3
+        assert len(first_matches) == 3
+        assert first_run.evaluated_count == 3
+        assert first_run.final_matched_count == 1
+        assert sum(match.matched for match in first_matches) == 1
+        assert sum(not match.matched for match in first_matches) == 2
+
+        second_run = run_job_discovery(
+            session,
+            search_definition_id=search_id,
+            provider_name="fake",
+            provider=provider,
+            fetcher=FakeFetcher({}),
+            board_validator=connector,
+            connector=connector,
+            config=_config(),
+        )
+        second_matches = list(
+            session.scalars(
+                select(JobSearchMatchModel).where(
+                    JobSearchMatchModel.search_run_id == second_run.saved_search_run_id
+                )
+            )
+        )
+
+        assert connector.fetch_calls == ["beta", "beta"]
+        assert len(list(session.scalars(select(JobLeadModel)))) == 3
+        assert len(list(session.scalars(select(JobEvaluationModel)))) == 3
+        assert second_matches == []
+
+
 def test_run_job_discovery_imports_same_board_once_per_run(
     session_factory: sessionmaker[Session],
 ) -> None:

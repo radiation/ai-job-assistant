@@ -15,7 +15,7 @@ from ai_job_finder.application.job_searches import (
     list_job_search_matches,
     run_job_search,
 )
-from ai_job_finder.application.job_sources import run_job_source_import
+from ai_job_finder.application.job_sources import run_job_source_import_with_result
 from ai_job_finder.application.job_sources.discovery import list_ranked_discovered_leads
 from ai_job_finder.application.services import get_current_candidate_profile
 from ai_job_finder.application.source_detection import (
@@ -168,6 +168,7 @@ class _ReusableResolution:
 class _CachedImportOutcome:
     import_run_id: UUID | None
     import_status: str | None
+    surfaced_job_lead_ids: tuple[UUID, ...] = ()
     error_message: str | None = None
 
 
@@ -213,6 +214,7 @@ def run_job_discovery(
     )
     counters = _RunCounters(generated_query_count=0)
     source_imports: dict[UUID, _CachedImportOutcome] = {}
+    search_job_lead_ids: set[UUID] = set()
 
     try:
         generated_queries = generate_job_discovery_queries(
@@ -287,19 +289,19 @@ def run_job_discovery(
                 config=config,
                 counters=counters,
                 source_imports=source_imports,
+                search_job_lead_ids=search_job_lead_ids,
             )
 
-        saved_search_run = run_job_search(session, search_definition_id=definition.id)
+        saved_search_run = run_job_search(
+            session,
+            search_definition_id=definition.id,
+            job_lead_ids=search_job_lead_ids,
+        )
         matches = {
             record.match.job_lead_id: record.match
             for record in list_job_search_matches(session, search_run_id=saved_search_run.id)
         }
-        for record in list_job_discovery_observations(session, discovery_run_id=discovery_run.id):
-            if record.observation.imported_job_lead_id is None:
-                continue
-            match = matches.get(record.observation.imported_job_lead_id)
-            if match is None:
-                continue
+        for match in matches.values():
             if match.job_evaluation_id is not None:
                 counters.evaluated_count += 1
             if match.matched:
@@ -339,6 +341,7 @@ def _process_observation(
     config: JobDiscoveryConfig,
     counters: _RunCounters,
     source_imports: dict[UUID, _CachedImportOutcome],
+    search_job_lead_ids: set[UUID],
 ) -> None:
     try:
         excluded_domain = discovery_excluded_aggregator_domain(observation.normalized_url)
@@ -366,6 +369,8 @@ def _process_observation(
                 config=config,
                 counters=counters,
                 source_imports=source_imports,
+                include_surfaced_jobs_in_search=False,
+                search_job_lead_ids=search_job_lead_ids,
             )
             session.add(observation)
             session.commit()
@@ -405,6 +410,8 @@ def _process_observation(
                 config=config,
                 counters=counters,
                 source_imports=source_imports,
+                include_surfaced_jobs_in_search=not approval.existing_source,
+                search_job_lead_ids=search_job_lead_ids,
             )
         elif detection_run.status == SourceDetectionRunStatus.AMBIGUOUS.value:
             counters.ambiguous_count += 1
@@ -571,11 +578,13 @@ def _import_detected_source(
     config: JobDiscoveryConfig,
     counters: _RunCounters,
     source_imports: dict[UUID, _CachedImportOutcome],
+    include_surfaced_jobs_in_search: bool,
+    search_job_lead_ids: set[UUID],
 ) -> None:
     import_outcome = source_imports.get(source_configuration_id)
     if import_outcome is None:
         try:
-            import_run = run_job_source_import(
+            import_result = run_job_source_import_with_result(
                 session,
                 source_id=source_configuration_id,
                 connector=connector,
@@ -595,10 +604,14 @@ def _import_detected_source(
             )
         else:
             import_outcome = _CachedImportOutcome(
-                import_run_id=import_run.id,
-                import_status=import_run.status,
+                import_run_id=import_result.run.id,
+                import_status=import_result.run.status,
+                surfaced_job_lead_ids=import_result.surfaced_job_lead_ids,
             )
         source_imports[source_configuration_id] = import_outcome
+
+    if include_surfaced_jobs_in_search:
+        search_job_lead_ids.update(import_outcome.surfaced_job_lead_ids)
 
     observation.import_run_id = import_outcome.import_run_id
     if import_outcome.error_message is not None:
@@ -613,6 +626,7 @@ def _import_detected_source(
         source_configuration_id=source_configuration_id,
         import_status=import_outcome.import_status,
         counters=counters,
+        search_job_lead_ids=search_job_lead_ids,
     )
 
 
@@ -623,6 +637,7 @@ def _finalize_imported_observation(
     source_configuration_id: UUID,
     import_status: str | None,
     counters: _RunCounters,
+    search_job_lead_ids: set[UUID],
 ) -> None:
     if import_status is not None and import_status != JobImportRunStatus.SUCCEEDED.value:
         counters.failure_count += 1
@@ -637,6 +652,7 @@ def _finalize_imported_observation(
     )
     if lead is not None:
         observation.imported_job_lead_id = lead.id
+        search_job_lead_ids.add(lead.id)
         observation.processing_status = JobDiscoveryObservationStatus.IMPORTED.value
         observation.exclusion_reason = None
         counters.imported_lead_count += 1

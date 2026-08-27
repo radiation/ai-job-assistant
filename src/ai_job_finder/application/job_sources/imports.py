@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import UTC
 from uuid import UUID
 
@@ -34,6 +35,12 @@ from ai_job_finder.infrastructure.database.models import (
     JobLeadModel,
     JobSourceConfigurationModel,
 )
+
+
+@dataclass(frozen=True, slots=True)
+class JobSourceImportResult:
+    run: JobImportRunModel
+    surfaced_job_lead_ids: tuple[UUID, ...]
 
 
 def _running_import_for_source(session: Session, source_id: UUID) -> JobImportRunModel | None:
@@ -233,6 +240,25 @@ def run_job_source_import(
     close_on_empty: bool = False,
     stale_after_seconds: int = 3600,
 ) -> JobImportRunModel:
+    return run_job_source_import_with_result(
+        session,
+        source_id=source_id,
+        connector=connector,
+        retain_raw_payload=retain_raw_payload,
+        close_on_empty=close_on_empty,
+        stale_after_seconds=stale_after_seconds,
+    ).run
+
+
+def run_job_source_import_with_result(
+    session: Session,
+    *,
+    source_id: UUID,
+    connector: JobSourceConnector,
+    retain_raw_payload: bool = True,
+    close_on_empty: bool = False,
+    stale_after_seconds: int = 3600,
+) -> JobSourceImportResult:
     source = get_job_source_configuration(session, source_id)
     if not source.enabled:
         raise JobSourceDisabledError("Enable the job source before syncing it.")
@@ -245,6 +271,7 @@ def run_job_source_import(
     run = _create_running_import_run(session, source=source)
 
     seen_external_ids: set[str] = set()
+    surfaced_job_lead_ids: list[UUID] = []
     try:
         result = connector.fetch_jobs(source.to_snapshot())
         run.connector_version = result.connector_version
@@ -274,6 +301,7 @@ def run_job_source_import(
                     run.jobs_updated += 1
                 else:
                     run.jobs_unchanged += 1
+                surfaced_job_lead_ids.append(observation.job_lead_id)
                 if created or scoring_change:
                     try:
                         with session.begin_nested():
@@ -317,36 +345,45 @@ def run_job_source_import(
                 seen_external_ids=seen_external_ids,
                 removed_at=result.fetched_at,
             )
-        return _persist_terminal_run_state(
-            session,
-            run_id=run.id,
-            source_id=source.id,
-            status=terminal_status,
-            error_message=run.error_message,
+        return JobSourceImportResult(
+            run=_persist_terminal_run_state(
+                session,
+                run_id=run.id,
+                source_id=source.id,
+                status=terminal_status,
+                error_message=run.error_message,
+            ),
+            surfaced_job_lead_ids=tuple(dict.fromkeys(surfaced_job_lead_ids)),
         )
     except (JobSourceProviderError, SuspiciousEmptyJobSourceResultError) as exc:
         session.rollback()
-        return _finalize_after_exception(
-            session,
-            run_id=run.id,
-            source_id=source_id,
-            status=(
-                JobImportRunStatus.PARTIAL
-                if isinstance(exc, SuspiciousEmptyJobSourceResultError)
-                else JobImportRunStatus.FAILED
+        return JobSourceImportResult(
+            run=_finalize_after_exception(
+                session,
+                run_id=run.id,
+                source_id=source_id,
+                status=(
+                    JobImportRunStatus.PARTIAL
+                    if isinstance(exc, SuspiciousEmptyJobSourceResultError)
+                    else JobImportRunStatus.FAILED
+                ),
+                error_message=_safe_error_message(exc, context="Source import failed"),
+                original_exc=exc,
             ),
-            error_message=_safe_error_message(exc, context="Source import failed"),
-            original_exc=exc,
+            surfaced_job_lead_ids=(),
         )
     except Exception as exc:
         session.rollback()
-        return _finalize_after_exception(
-            session,
-            run_id=run.id,
-            source_id=source_id,
-            status=JobImportRunStatus.FAILED,
-            error_message=_safe_error_message(exc, context="Unexpected source import failure"),
-            original_exc=exc,
+        return JobSourceImportResult(
+            run=_finalize_after_exception(
+                session,
+                run_id=run.id,
+                source_id=source_id,
+                status=JobImportRunStatus.FAILED,
+                error_message=_safe_error_message(exc, context="Unexpected source import failure"),
+                original_exc=exc,
+            ),
+            surfaced_job_lead_ids=(),
         )
 
 

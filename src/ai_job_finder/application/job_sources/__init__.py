@@ -15,6 +15,7 @@ from ai_job_finder.application.job_sources.imports import (
     get_job_import_run,
     list_job_import_runs,
     run_job_source_import,
+    run_job_source_import_with_result,
 )
 from ai_job_finder.application.job_sources.observations import (
     count_active_job_source_observations,
@@ -32,6 +33,7 @@ __all__ = [
     "list_job_source_configurations",
     "list_ranked_discovered_leads",
     "run_job_source_import",
+    "run_job_source_import_with_result",
     "set_job_source_enabled",
     "update_job_source_configuration",
 ]
