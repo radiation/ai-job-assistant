@@ -74,6 +74,19 @@ class FakeAshbyValidator:
         )
 
 
+class FakeLeverValidator:
+    def validate(self, provider: JobSourceProvider, board_token: str) -> JobSourceBoardValidation:
+        assert provider is JobSourceProvider.LEVER
+        return JobSourceBoardValidation(
+            token=board_token,
+            status="valid",
+            valid=True,
+            job_count=2,
+            sample_titles=["Director, Platform Engineering"],
+            company_name="Acme",
+        )
+
+
 class DetectionConnector(FakeJobSourceConnector):
     def __init__(self, validation: JobSourceBoardValidation) -> None:
         super().__init__(jobs=[])
@@ -192,6 +205,46 @@ def test_canonical_ashby_posting_detection_bypasses_public_page_fetch(
         assert result.source.provider == JobSourceProvider.ASHBY.value
         assert result.source.board_token == "Acme"
         assert result.source.display_name == "Acme Ashby"
+
+
+def test_canonical_lever_posting_detection_bypasses_public_page_fetch_and_reuses_source(
+    session_factory: sessionmaker[Session],
+) -> None:
+    with session_factory() as session:
+        existing = create_job_source_configuration(
+            session,
+            provider=JobSourceProvider.LEVER.value,
+            display_name="Acme Lever",
+            company_name="Acme",
+            board_token="LuminDigital",
+            source_url="https://jobs.lever.co/LuminDigital",
+        )
+        run = create_source_detection_run(
+            session,
+            company_name="Acme",
+            input_url="https://jobs.lever.co/LuminDigital/04866248-eacc-4955-9696-50e427b60a7e",
+            brand_alias=None,
+            fetcher=FakeFetcher(error=AssertionError("Lever URL must not be fetched as HTML.")),
+            board_validator=FakeLeverValidator(),
+            config=_config(),
+        )
+
+        result = approve_source_detection_run(
+            session,
+            run_id=run.id,
+            selected_token=None,
+            create_and_sync=False,
+            connector=FakeJobSourceConnector(jobs=[]),
+            retain_raw_payload=True,
+            close_on_empty=False,
+            stale_after_seconds=3600,
+        )
+
+        assert result.run.status == "source_created"
+        assert result.existing_source is True
+        assert result.source.id == existing.id
+        assert result.source.provider == JobSourceProvider.LEVER.value
+        assert run.evidence[0]["external_posting_id"] == "04866248-eacc-4955-9696-50e427b60a7e"
 
 
 def test_ambiguous_detection_requires_explicit_token_selection(

@@ -26,7 +26,11 @@ from ai_job_finder.domain.errors import (
     SourceDetectionApprovalError,
     SourceSyncAfterCreationError,
 )
-from ai_job_finder.domain.job_discovery.targeting import GREENHOUSE_HOSTS, parse_ashby_url
+from ai_job_finder.domain.job_discovery.targeting import (
+    GREENHOUSE_HOSTS,
+    parse_ashby_url,
+    parse_lever_url,
+)
 from ai_job_finder.domain.job_sources import JobSourceConnector
 from ai_job_finder.domain.source_detection import (
     JobSourceBoardValidation,
@@ -278,16 +282,21 @@ def _detect(
     final_url = None
     page: PublicPage | None = None
     if input_url:
-        ashby_url = parse_ashby_url(input_url)
-        if ashby_url is not None:
-            validation = board_validator.validate(JobSourceProvider.ASHBY, ashby_url.board_token)
+        canonical_url = parse_ashby_url(input_url) or parse_lever_url(input_url)
+        if canonical_url is not None:
+            provider = (
+                JobSourceProvider.ASHBY
+                if parse_ashby_url(input_url) is not None
+                else JobSourceProvider.LEVER
+            )
+            validation = board_validator.validate(provider, canonical_url.board_token)
             candidate = _candidate_payload(
-                token=ashby_url.board_token,
+                token=canonical_url.board_token,
                 source="canonical_url",
-                evidence_categories=["canonical_ashby_url"],
+                evidence_categories=[f"canonical_{provider.value}_url"],
                 validation=validation,
                 existing_source=_source_by_token(
-                    session, ashby_url.board_token, provider=JobSourceProvider.ASHBY
+                    session, canonical_url.board_token, provider=provider
                 ),
             )
             return {
@@ -298,18 +307,18 @@ def _detect(
                 ),
                 "normalized_url": input_url,
                 "final_url": input_url,
-                "detected_provider": JobSourceProvider.ASHBY.value if validation.valid else None,
+                "detected_provider": provider.value if validation.valid else None,
                 "candidate_tokens": [candidate],
                 "evidence": [
                     {
-                        "category": "canonical_ashby_url",
-                        "token": ashby_url.board_token,
-                        "external_posting_id": ashby_url.external_posting_id,
+                        "category": f"canonical_{provider.value}_url",
+                        "token": canonical_url.board_token,
+                        "external_posting_id": canonical_url.external_posting_id,
                         "source": "url",
                         "source_url": input_url,
                     }
                 ],
-                "validated_token": ashby_url.board_token if validation.valid else None,
+                "validated_token": canonical_url.board_token if validation.valid else None,
                 "validated_company_name": validation.company_name or company_name,
                 "validated_job_count": validation.job_count,
                 "error_message": validation.error_message,
@@ -618,7 +627,10 @@ def _selected_valid_token(run: SourceDetectionRunModel, selected_token: str | No
         raise AmbiguousSourceDetectionError("Select a token before approving this detection run.")
     selected_value = selected_token or run.validated_token or ""
     normalized_selected: str | None
-    if run.detected_provider == JobSourceProvider.ASHBY.value:
+    if run.detected_provider in {
+        JobSourceProvider.ASHBY.value,
+        JobSourceProvider.LEVER.value,
+    }:
         normalized_selected = selected_value.strip().strip("/")
         if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{0,199}", normalized_selected):
             normalized_selected = None

@@ -15,12 +15,12 @@ Implementation: `infrastructure/storage.py`.
 
 The database stores storage keys and metadata. API responses do not expose filesystem paths.
 
-## Greenhouse
+## Job Sources
 
-- adapter: `infrastructure/job_sources/greenhouse.py`
+- adapters: `infrastructure/job_sources/greenhouse.py`, `ashby.py`, and `lever.py`
 - fake: `infrastructure/job_sources/fake.py`
 
-Connector owns public API calls, timeouts, retries, response/job bounds, malformed-item isolation, normalization, conservative workplace inference, and token validation.
+Connectors own public API calls, timeouts, retries, response/job bounds, malformed-item isolation, normalization, conservative workplace inference, and token validation. Lever uses its public `GET /v0/postings/{site}?mode=json` interface.
 
 Application services own persistence, evaluations, closure, overlap, approval, and terminal states.
 
@@ -32,4 +32,4 @@ This is a bounded fetcher, not a crawler or browser. No JavaScript, cookies, aut
 
 ## Deferred Providers
 
-Lever and Ashby remain deferred. Do not add a broad plugin framework before a second provider proves the extension points.
+Do not add a broad plugin framework before a further provider proves the extension points.

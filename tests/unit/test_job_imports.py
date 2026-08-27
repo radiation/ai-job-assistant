@@ -194,6 +194,39 @@ def _create_source(session: Session) -> UUID:
     return source.id
 
 
+def _lever_posting(*, description: str = "Lead platform engineering.") -> NormalizedJobPosting:
+    return NormalizedJobPosting(
+        provider=JobSourceProvider.LEVER,
+        company_name="LuminDigital",
+        title="Director, Platform Engineering",
+        location_text="Remote United States",
+        workplace_type=WorkplaceType.REMOTE,
+        description_raw=description,
+        description_normalized=description,
+        compensation_text=None,
+        source_url="https://jobs.lever.co/LuminDigital/posting-123",
+        external_id="posting-123",
+        internal_job_id=None,
+        source_updated_at=datetime(2026, 1, 2, tzinfo=UTC),
+        departments=["Engineering"],
+        offices=["Remote United States"],
+        metadata={"employment_type": "Full-time"},
+        raw_payload={"id": "posting-123"},
+    )
+
+
+def _create_lever_source(session: Session) -> UUID:
+    source = create_job_source_configuration(
+        session,
+        provider=JobSourceProvider.LEVER.value,
+        display_name="LuminDigital Lever",
+        company_name="LuminDigital",
+        board_token="LuminDigital",
+        source_url="https://jobs.lever.co/LuminDigital",
+    )
+    return source.id
+
+
 def test_greenhouse_parsing_missing_optional_fields_and_html_normalization() -> None:
     payload = {
         "id": 123,
@@ -263,6 +296,33 @@ def test_import_idempotency_material_change_and_evaluation_history(
         assert changed_run.evaluations_created == 1
         assert len(list(session.scalars(select(JobLeadModel)))) == 1
         assert len(list(session.scalars(select(JobEvaluationModel)))) == 2
+
+
+def test_lever_import_is_idempotent_and_updates_changed_postings(
+    session_factory: sessionmaker[Session],
+) -> None:
+    with session_factory() as session:
+        _seed_candidate(session)
+        source_id = _create_lever_source(session)
+
+        first_run = run_job_source_import(
+            session, source_id=source_id, connector=FakeJobSourceConnector(jobs=[_lever_posting()])
+        )
+        unchanged_run = run_job_source_import(
+            session, source_id=source_id, connector=FakeJobSourceConnector(jobs=[_lever_posting()])
+        )
+        updated_run = run_job_source_import(
+            session,
+            source_id=source_id,
+            connector=FakeJobSourceConnector(
+                jobs=[_lever_posting(description="Lead platform engineering and reliability.")]
+            ),
+        )
+
+        assert first_run.jobs_created == 1
+        assert unchanged_run.jobs_unchanged == 1
+        assert updated_run.jobs_updated == 1
+        assert len(list(session.scalars(select(JobLeadModel)))) == 1
 
 
 def test_discovered_leads_default_to_actionable_location_eligibility(

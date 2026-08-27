@@ -27,6 +27,7 @@ from ai_job_finder.infrastructure.job_discovery import (
 from ai_job_finder.infrastructure.job_sources.ashby import AshbyJobSourceConnector
 from ai_job_finder.infrastructure.job_sources.fake import FileBackedFakeJobSourceConnector
 from ai_job_finder.infrastructure.job_sources.greenhouse import GreenhouseJobSourceConnector
+from ai_job_finder.infrastructure.job_sources.lever import LeverJobSourceConnector
 from ai_job_finder.infrastructure.job_sources.router import (
     ProviderJobSourceBoardValidator,
     ProviderJobSourceConnector,
@@ -93,8 +94,13 @@ def job_source_connector_dependency(
         max_response_bytes=settings.ashby_max_response_bytes,
         max_jobs=settings.ashby_max_jobs,
     )
+    lever = _lever_connector(settings)
     return ProviderJobSourceConnector(
-        {JobSourceProvider.GREENHOUSE: greenhouse, JobSourceProvider.ASHBY: ashby}
+        {
+            JobSourceProvider.GREENHOUSE: greenhouse,
+            JobSourceProvider.ASHBY: ashby,
+            JobSourceProvider.LEVER: lever,
+        }
     )
 
 
@@ -129,6 +135,7 @@ def job_source_board_validator_dependency(
         {
             JobSourceProvider.GREENHOUSE: _greenhouse_connector(settings),
             JobSourceProvider.ASHBY: _ashby_connector(settings),
+            JobSourceProvider.LEVER: _lever_connector(settings),
         }
     )
 
@@ -141,6 +148,17 @@ def _ashby_connector(settings: Settings) -> AshbyJobSourceConnector:
         user_agent=settings.greenhouse_user_agent,
         max_response_bytes=settings.ashby_max_response_bytes,
         max_jobs=settings.ashby_max_jobs,
+    )
+
+
+def _lever_connector(settings: Settings) -> LeverJobSourceConnector:
+    return LeverJobSourceConnector(
+        api_base_url=settings.lever_api_base_url,
+        timeout_seconds=settings.lever_timeout_seconds,
+        transient_retry_count=settings.lever_transient_retry_count,
+        user_agent=settings.greenhouse_user_agent,
+        max_response_bytes=settings.lever_max_response_bytes,
+        max_jobs=settings.lever_max_jobs,
     )
 
 

@@ -81,6 +81,11 @@ class Settings(BaseSettings):
     ashby_transient_retry_count: int = 2
     ashby_max_response_bytes: int | None = 5 * 1024 * 1024
     ashby_max_jobs: int | None = 2_000
+    lever_api_base_url: str = "https://api.lever.co/v0/postings"
+    lever_timeout_seconds: float = 10.0
+    lever_transient_retry_count: int = 2
+    lever_max_response_bytes: int | None = 5 * 1024 * 1024
+    lever_max_jobs: int | None = 2_000
     job_source_stale_after_seconds: int = 3600
     source_detection_timeout_seconds: float = 8.0
     source_detection_transient_retry_count: int = 1

@@ -23,23 +23,28 @@ class _TokenValidator:
         )
 
 
-def test_routes_greenhouse_and_ashby_to_their_own_token_validators() -> None:
+def test_routes_registered_providers_to_their_own_token_validators() -> None:
     greenhouse = _TokenValidator("Greenhouse")
     ashby = _TokenValidator("Ashby")
+    lever = _TokenValidator("Lever")
     validator = ProviderJobSourceBoardValidator(
         {
             JobSourceProvider.GREENHOUSE: greenhouse,
             JobSourceProvider.ASHBY: ashby,
+            JobSourceProvider.LEVER: lever,
         }
     )
 
     greenhouse_result = validator.validate(JobSourceProvider.GREENHOUSE, "acme")
     ashby_result = validator.validate(JobSourceProvider.ASHBY, "Acme")
+    lever_result = validator.validate(JobSourceProvider.LEVER, "LuminDigital")
 
     assert greenhouse.calls == ["acme"]
     assert ashby.calls == ["Acme"]
+    assert lever.calls == ["LuminDigital"]
     assert greenhouse_result.company_name == "Greenhouse"
     assert ashby_result.company_name == "Ashby"
+    assert lever_result.company_name == "Lever"
 
 
 def test_missing_provider_fails_clearly() -> None:
