@@ -6,8 +6,8 @@ from fastapi import APIRouter, status
 
 from ai_job_finder.api.v1.routes.dependencies import (
     DbSession,
-    GreenhouseBoardValidatorDependency,
     JobDiscoveryProviderDependency,
+    JobSourceBoardValidatorDependency,
     JobSourceConnectorDependency,
     PublicPageFetcherDependency,
     SettingsDependency,
@@ -44,7 +44,7 @@ def post_job_discovery_run(
     session: DbSession,
     provider: JobDiscoveryProviderDependency,
     fetcher: PublicPageFetcherDependency,
-    validator: GreenhouseBoardValidatorDependency,
+    board_validator: JobSourceBoardValidatorDependency,
     connector: JobSourceConnectorDependency,
     settings: SettingsDependency,
 ) -> JobDiscoveryRunResponse:
@@ -54,7 +54,7 @@ def post_job_discovery_run(
         provider_name=settings.job_discovery_provider,
         provider=provider,
         fetcher=fetcher,
-        validator=validator,
+        board_validator=board_validator,
         connector=connector,
         config=JobDiscoveryConfig(
             max_queries_per_run=settings.job_discovery_max_queries_per_run,

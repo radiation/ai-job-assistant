@@ -6,7 +6,7 @@ from fastapi import APIRouter, status
 
 from ai_job_finder.api.v1.routes.dependencies import (
     DbSession,
-    GreenhouseBoardValidatorDependency,
+    JobSourceBoardValidatorDependency,
     JobSourceConnectorDependency,
     PublicPageFetcherDependency,
     SettingsDependency,
@@ -42,7 +42,7 @@ def post_source_detection(
     payload: SourceDetectionRunCreateRequest,
     session: DbSession,
     fetcher: PublicPageFetcherDependency,
-    validator: GreenhouseBoardValidatorDependency,
+    board_validator: JobSourceBoardValidatorDependency,
     settings: SettingsDependency,
 ) -> SourceDetectionRunResponse:
     run = create_source_detection_run(
@@ -51,7 +51,7 @@ def post_source_detection(
         input_url=payload.input_url,
         brand_alias=payload.brand_alias,
         fetcher=fetcher,
-        validator=validator,
+        board_validator=board_validator,
         config=SourceDetectionConfig(
             max_linked_scripts=settings.source_detection_max_linked_scripts,
             max_script_bytes=settings.source_detection_max_script_bytes,
@@ -81,13 +81,13 @@ def get_source_detection_route(run_id: UUID, session: DbSession) -> SourceDetect
 def post_source_detection_validate_token(
     payload: ManualGreenhouseTokenValidationRequest,
     session: DbSession,
-    validator: GreenhouseBoardValidatorDependency,
+    board_validator: JobSourceBoardValidatorDependency,
 ) -> ManualGreenhouseTokenValidationResponse:
     return ManualGreenhouseTokenValidationResponse(
         candidate=validate_greenhouse_token(
             session,
             board_token=payload.board_token,
-            validator=validator,
+            board_validator=board_validator,
         )
     )
 

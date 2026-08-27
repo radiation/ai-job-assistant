@@ -26,11 +26,11 @@ from ai_job_finder.domain.errors import (
     SourceDetectionApprovalError,
     SourceSyncAfterCreationError,
 )
-from ai_job_finder.domain.job_discovery.targeting import GREENHOUSE_HOSTS
+from ai_job_finder.domain.job_discovery.targeting import GREENHOUSE_HOSTS, parse_ashby_url
 from ai_job_finder.domain.job_sources import JobSourceConnector
 from ai_job_finder.domain.source_detection import (
-    GreenhouseBoardValidation,
-    GreenhouseBoardValidator,
+    JobSourceBoardValidation,
+    JobSourceBoardValidator,
     PublicPage,
     PublicPageFetcher,
 )
@@ -88,7 +88,7 @@ def create_source_detection_run(
     input_url: str | None,
     brand_alias: str | None,
     fetcher: PublicPageFetcher,
-    validator: GreenhouseBoardValidator,
+    board_validator: JobSourceBoardValidator,
     config: SourceDetectionConfig,
 ) -> SourceDetectionRunModel:
     company = _optional_str(company_name)
@@ -118,7 +118,7 @@ def create_source_detection_run(
             input_url=url,
             brand_alias=alias,
             fetcher=fetcher,
-            validator=validator,
+            board_validator=board_validator,
             config=config,
         )
         _finalize_run(session, run, **outcome)
@@ -180,12 +180,12 @@ def validate_greenhouse_token(
     session: Session,
     *,
     board_token: str,
-    validator: GreenhouseBoardValidator,
+    board_validator: JobSourceBoardValidator,
 ) -> dict[str, Any]:
     token = _normalize_token(board_token)
     if token is None:
         raise NoProviderDetectedError("Provide a Greenhouse board token to validate.")
-    validation = validator.validate_board_token(token)
+    validation = board_validator.validate(JobSourceProvider.GREENHOUSE, token)
     if validation.status == "unavailable":
         raise GreenhouseValidationUnavailableError(
             validation.error_message or "Greenhouse validation is unavailable."
@@ -212,14 +212,15 @@ def approve_source_detection_run(
 ) -> SourceDetectionApprovalResult:
     run = get_source_detection_run(session, run_id)
     token = _selected_valid_token(run, selected_token)
-    existing_source = _source_by_token(session, token)
+    provider = JobSourceProvider(run.detected_provider or JobSourceProvider.GREENHOUSE.value)
+    existing_source = _source_by_token(session, token, provider=provider)
     source_existed = existing_source is not None
     source = existing_source
     if source is None:
         try:
             source = create_job_source_configuration(
                 session,
-                provider=JobSourceProvider.GREENHOUSE.value,
+                provider=provider.value,
                 display_name=_display_name(run, token),
                 company_name=run.validated_company_name or run.company_name or token,
                 board_token=token,
@@ -227,7 +228,7 @@ def approve_source_detection_run(
                 enabled=True,
             )
         except DuplicateJobSourceError:
-            source = _source_by_token(session, token)
+            source = _source_by_token(session, token, provider=provider)
             if source is None:
                 raise
             source_existed = True
@@ -268,7 +269,7 @@ def _detect(
     input_url: str | None,
     brand_alias: str | None,
     fetcher: PublicPageFetcher,
-    validator: GreenhouseBoardValidator,
+    board_validator: JobSourceBoardValidator,
     config: SourceDetectionConfig,
 ) -> dict[str, Any]:
     evidence: list[dict[str, Any]] = []
@@ -277,6 +278,42 @@ def _detect(
     final_url = None
     page: PublicPage | None = None
     if input_url:
+        ashby_url = parse_ashby_url(input_url)
+        if ashby_url is not None:
+            validation = board_validator.validate(JobSourceProvider.ASHBY, ashby_url.board_token)
+            candidate = _candidate_payload(
+                token=ashby_url.board_token,
+                source="canonical_url",
+                evidence_categories=["canonical_ashby_url"],
+                validation=validation,
+                existing_source=_source_by_token(
+                    session, ashby_url.board_token, provider=JobSourceProvider.ASHBY
+                ),
+            )
+            return {
+                "status": (
+                    SourceDetectionRunStatus.DETECTED
+                    if validation.valid
+                    else SourceDetectionRunStatus.NOT_DETECTED
+                ),
+                "normalized_url": input_url,
+                "final_url": input_url,
+                "detected_provider": JobSourceProvider.ASHBY.value if validation.valid else None,
+                "candidate_tokens": [candidate],
+                "evidence": [
+                    {
+                        "category": "canonical_ashby_url",
+                        "token": ashby_url.board_token,
+                        "external_posting_id": ashby_url.external_posting_id,
+                        "source": "url",
+                        "source_url": input_url,
+                    }
+                ],
+                "validated_token": ashby_url.board_token if validation.valid else None,
+                "validated_company_name": validation.company_name or company_name,
+                "validated_job_count": validation.job_count,
+                "error_message": validation.error_message,
+            }
         page = fetcher.fetch(input_url)
         normalized_url = page.requested_url
         final_url = page.final_url
@@ -286,14 +323,14 @@ def _detect(
             _extract_greenhouse_tokens(page.text, source_url=page.final_url, source="html"),
         )
 
-    candidates = _validate_observed_tokens(session, observed_tokens, validator)
+    candidates = _validate_observed_tokens(session, observed_tokens, board_validator)
     valid_candidates = [candidate for candidate in candidates if candidate["validation"]["valid"]]
     if page is not None and not valid_candidates:
         linked_tokens = _tokens_from_linked_scripts(page, fetcher, config)
         for script_evidence in linked_tokens[1]:
             evidence.append(script_evidence)
         _merge_token_evidence(observed_tokens, evidence, linked_tokens[0], add_evidence=False)
-        candidates = _validate_observed_tokens(session, observed_tokens, validator)
+        candidates = _validate_observed_tokens(session, observed_tokens, board_validator)
         valid_candidates = [
             candidate for candidate in candidates if candidate["validation"]["valid"]
         ]
@@ -303,7 +340,7 @@ def _detect(
             session,
             company_name=company_name,
             brand_alias=brand_alias,
-            validator=validator,
+            board_validator=board_validator,
         )
         candidates.extend(generated_candidates)
         valid_candidates = [
@@ -368,11 +405,11 @@ def _finalize_run(
 def _validate_observed_tokens(
     session: Session,
     tokens: OrderedDict[str, set[str]],
-    validator: GreenhouseBoardValidator,
+    board_validator: JobSourceBoardValidator,
 ) -> list[dict[str, Any]]:
     candidates: list[dict[str, Any]] = []
     for token, categories in tokens.items():
-        validation = validator.validate_board_token(token)
+        validation = board_validator.validate(JobSourceProvider.GREENHOUSE, token)
         candidates.append(
             _candidate_payload(
                 token=token,
@@ -390,11 +427,11 @@ def _validate_generated_candidates(
     *,
     company_name: str,
     brand_alias: str | None,
-    validator: GreenhouseBoardValidator,
+    board_validator: JobSourceBoardValidator,
 ) -> list[dict[str, Any]]:
     candidates: list[dict[str, Any]] = []
     for token in _generated_tokens(company_name, brand_alias):
-        validation = validator.validate_board_token(token)
+        validation = board_validator.validate(JobSourceProvider.GREENHOUSE, token)
         if not validation.valid:
             continue
         candidates.append(
@@ -414,7 +451,7 @@ def _candidate_payload(
     token: str,
     source: str,
     evidence_categories: list[str],
-    validation: GreenhouseBoardValidation,
+    validation: JobSourceBoardValidation,
     existing_source: JobSourceConfigurationModel | None,
 ) -> dict[str, Any]:
     return {
@@ -579,7 +616,14 @@ def _selected_valid_token(run: SourceDetectionRunModel, selected_token: str | No
         raise SourceDetectionApprovalError("The detection run does not have a validated token.")
     if len(valid_candidates) > 1 and not selected_token:
         raise AmbiguousSourceDetectionError("Select a token before approving this detection run.")
-    normalized_selected = _normalize_token(selected_token or run.validated_token or "")
+    selected_value = selected_token or run.validated_token or ""
+    normalized_selected: str | None
+    if run.detected_provider == JobSourceProvider.ASHBY.value:
+        normalized_selected = selected_value.strip().strip("/")
+        if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{0,199}", normalized_selected):
+            normalized_selected = None
+    else:
+        normalized_selected = _normalize_token(selected_value)
     if normalized_selected is None:
         raise SourceDetectionApprovalError(
             "Selected token was not validated by this detection run."
@@ -590,10 +634,15 @@ def _selected_valid_token(run: SourceDetectionRunModel, selected_token: str | No
     raise SourceDetectionApprovalError("Selected token was not validated by this detection run.")
 
 
-def _source_by_token(session: Session, token: str) -> JobSourceConfigurationModel | None:
+def _source_by_token(
+    session: Session,
+    token: str,
+    *,
+    provider: JobSourceProvider = JobSourceProvider.GREENHOUSE,
+) -> JobSourceConfigurationModel | None:
     return session.scalar(
         select(JobSourceConfigurationModel).where(
-            JobSourceConfigurationModel.provider == JobSourceProvider.GREENHOUSE.value,
+            JobSourceConfigurationModel.provider == provider.value,
             JobSourceConfigurationModel.board_token == token,
         )
     )
@@ -601,7 +650,8 @@ def _source_by_token(session: Session, token: str) -> JobSourceConfigurationMode
 
 def _display_name(run: SourceDetectionRunModel, token: str) -> str:
     company = run.validated_company_name or run.company_name or token
-    return f"{company} Greenhouse"
+    provider = JobSourceProvider(run.detected_provider or JobSourceProvider.GREENHOUSE.value)
+    return f"{company} {provider.value.title()}"
 
 
 def _bounded_snippet(text: str, start: int, end: int) -> str:

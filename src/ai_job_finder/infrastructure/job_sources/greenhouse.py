@@ -23,7 +23,7 @@ from ai_job_finder.domain.job_sources import (
     JobSourceItemFailure,
     NormalizedJobPosting,
 )
-from ai_job_finder.domain.source_detection import GreenhouseBoardValidation
+from ai_job_finder.domain.source_detection import JobSourceBoardValidation
 
 CONNECTOR_VERSION = "greenhouse-board-api-v1"
 
@@ -76,10 +76,10 @@ class GreenhouseJobSourceConnector:
             job_failures=job_failures,
         )
 
-    def validate_board_token(self, board_token: str) -> GreenhouseBoardValidation:
+    def validate_board_token(self, board_token: str) -> JobSourceBoardValidation:
         token = board_token.strip().lower()
         if not token:
-            return GreenhouseBoardValidation(
+            return JobSourceBoardValidation(
                 token=token,
                 status="invalid",
                 valid=False,
@@ -88,21 +88,21 @@ class GreenhouseJobSourceConnector:
         try:
             payload = self._fetch_json(token)
         except InvalidJobSourceError as exc:
-            return GreenhouseBoardValidation(
+            return JobSourceBoardValidation(
                 token=token,
                 status="invalid",
                 valid=False,
                 error_message=str(exc),
             )
         except MalformedJobSourcePayloadError as exc:
-            return GreenhouseBoardValidation(
+            return JobSourceBoardValidation(
                 token=token,
                 status="malformed",
                 valid=False,
                 error_message=str(exc),
             )
         except JobSourceProviderError as exc:
-            return GreenhouseBoardValidation(
+            return JobSourceBoardValidation(
                 token=token,
                 status="unavailable",
                 valid=False,
@@ -110,7 +110,7 @@ class GreenhouseJobSourceConnector:
             )
         jobs_payload = payload.get("jobs")
         if not isinstance(jobs_payload, list):
-            return GreenhouseBoardValidation(
+            return JobSourceBoardValidation(
                 token=token,
                 status="malformed",
                 valid=False,
@@ -125,7 +125,7 @@ class GreenhouseJobSourceConnector:
             if len(sample_titles) >= 5:
                 break
         company_name = _optional_str(payload.get("company_name"))
-        return GreenhouseBoardValidation(
+        return JobSourceBoardValidation(
             token=token,
             status="valid_empty" if not jobs_payload else "valid",
             valid=True,

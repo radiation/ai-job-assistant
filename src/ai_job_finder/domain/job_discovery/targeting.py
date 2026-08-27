@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import re
+from dataclasses import dataclass
 from urllib.parse import urlsplit
 
 GREENHOUSE_HOSTS = frozenset(
@@ -9,6 +11,30 @@ GREENHOUSE_HOSTS = frozenset(
         "boards-api.greenhouse.io",
     }
 )
+
+ASHBY_CANONICAL_HOST = "jobs.ashbyhq.com"
+ASHBY_HOSTS = frozenset({ASHBY_CANONICAL_HOST})
+ASHBY_BOARD_TOKEN_PATTERN = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]{0,199}")
+
+
+@dataclass(frozen=True, slots=True)
+class AshbyUrl:
+    board_token: str
+    external_posting_id: str | None
+
+
+def parse_ashby_url(url: str) -> AshbyUrl | None:
+    parts = urlsplit(url)
+    if (parts.hostname or "").casefold().rstrip(".") not in ASHBY_HOSTS:
+        return None
+    path_parts = [part for part in parts.path.split("/") if part]
+    if not path_parts or not ASHBY_BOARD_TOKEN_PATTERN.fullmatch(path_parts[0]):
+        return None
+    external_posting_id = path_parts[1] if len(path_parts) > 1 else None
+    if external_posting_id == "application" or len(path_parts) > 2:
+        return None
+    return AshbyUrl(board_token=path_parts[0], external_posting_id=external_posting_id)
+
 
 DISCOVERY_ATS_QUERY_HOSTS = (
     "boards.greenhouse.io",

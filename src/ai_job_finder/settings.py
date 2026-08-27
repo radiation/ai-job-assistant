@@ -76,6 +76,11 @@ class Settings(BaseSettings):
     greenhouse_max_response_bytes: int | None = 5 * 1024 * 1024
     greenhouse_max_jobs: int | None = 2_000
     greenhouse_fake_fixture_path: Path | None = None
+    ashby_api_base_url: str = "https://api.ashbyhq.com/posting-api/job-board"
+    ashby_timeout_seconds: float = 10.0
+    ashby_transient_retry_count: int = 2
+    ashby_max_response_bytes: int | None = 5 * 1024 * 1024
+    ashby_max_jobs: int | None = 2_000
     job_source_stale_after_seconds: int = 3600
     source_detection_timeout_seconds: float = 8.0
     source_detection_transient_retry_count: int = 1
