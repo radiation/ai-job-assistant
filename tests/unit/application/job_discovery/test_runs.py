@@ -742,6 +742,7 @@ def test_run_job_discovery_evaluates_new_board_jobs_when_seed_is_stale(
         first_observation = list_job_discovery_observations(session, discovery_run_id=first_run.id)[
             0
         ]
+        first_detail = get_job_discovery_run_detail(session, first_run.id)
         first_matches = list(
             session.scalars(
                 select(JobSearchMatchModel).where(
@@ -762,6 +763,9 @@ def test_run_job_discovery_evaluates_new_board_jobs_when_seed_is_stale(
         assert first_run.final_matched_count == 1
         assert sum(match.matched for match in first_matches) == 1
         assert sum(not match.matched for match in first_matches) == 2
+        assert first_detail.matching_summary.seed_linked_canonical_jobs_evaluated == 0
+        assert first_detail.matching_summary.additional_board_import_jobs_evaluated == 3
+        assert first_detail.matching_summary.total_canonical_jobs_evaluated == 3
 
         second_run = run_job_discovery(
             session,
@@ -785,6 +789,127 @@ def test_run_job_discovery_evaluates_new_board_jobs_when_seed_is_stale(
         assert len(list(session.scalars(select(JobLeadModel)))) == 3
         assert len(list(session.scalars(select(JobEvaluationModel)))) == 3
         assert second_matches == []
+
+
+def test_discovery_detail_distinguishes_seed_and_new_board_evaluations(
+    session_factory: sessionmaker[Session],
+) -> None:
+    with session_factory() as session:
+        _seed_candidate(session)
+        search_id = _search(session)
+        search = get_job_search_definition(session, search_id)
+        query = generate_job_discovery_queries(search.to_snapshot(), max_queries=4, result_limit=5)[
+            0
+        ]
+        seed_url = "https://boards.greenhouse.io/beta/jobs/direct-seed"
+        connector = BoardAwareConnector(
+            jobs_by_token={
+                "beta": [
+                    _posting_for_board(
+                        "beta", "Beta", "direct-seed", "Director, Platform Engineering"
+                    ),
+                    _posting_for_board("beta", "Beta", "board-one", "Principal Platform Architect"),
+                    _posting_for_board(
+                        "beta", "Beta", "board-two", "Staff Platform Engineering Manager"
+                    ),
+                ]
+            }
+        )
+        provider = FakeJobDiscoveryProvider(
+            results_by_query={
+                query.rendered_query: [
+                    DiscoveredJobCandidate(
+                        discovered_url=seed_url,
+                        provider_name="fake",
+                        query_identifier=query.stable_query_id,
+                        rank=1,
+                        title_hint="Director, Platform Engineering",
+                        company_hint="Beta",
+                    )
+                ]
+            }
+        )
+
+        run = run_job_discovery(
+            session,
+            search_definition_id=search_id,
+            provider_name="fake",
+            provider=provider,
+            fetcher=FakeFetcher({seed_url: _page_for_token(seed_url, "beta")}),
+            board_validator=connector,
+            connector=connector,
+            config=_config(),
+        )
+        detail = get_job_discovery_run_detail(session, run.id)
+
+        assert detail.matching_summary.seed_linked_canonical_jobs_evaluated == 1
+        assert detail.matching_summary.additional_board_import_jobs_evaluated == 2
+        assert detail.matching_summary.total_canonical_jobs_evaluated == 3
+
+
+def test_discovery_detail_does_not_repeat_new_board_fanout_on_rerun(
+    session_factory: sessionmaker[Session],
+) -> None:
+    with session_factory() as session:
+        _seed_candidate(session)
+        search_id = _search(session)
+        search = get_job_search_definition(session, search_id)
+        query = generate_job_discovery_queries(search.to_snapshot(), max_queries=4, result_limit=5)[
+            0
+        ]
+        seed_url = "https://boards.greenhouse.io/beta/jobs/direct-seed"
+        connector = BoardAwareConnector(
+            jobs_by_token={
+                "beta": [
+                    _posting_for_board(
+                        "beta", "Beta", "direct-seed", "Director, Platform Engineering"
+                    ),
+                    _posting_for_board(
+                        "beta", "Beta", "board-only", "Principal Platform Architect"
+                    ),
+                ]
+            }
+        )
+        provider = FakeJobDiscoveryProvider(
+            results_by_query={
+                query.rendered_query: [
+                    DiscoveredJobCandidate(
+                        discovered_url=seed_url,
+                        provider_name="fake",
+                        query_identifier=query.stable_query_id,
+                        rank=1,
+                        title_hint="Director, Platform Engineering",
+                        company_hint="Beta",
+                    )
+                ]
+            }
+        )
+
+        run_job_discovery(
+            session,
+            search_definition_id=search_id,
+            provider_name="fake",
+            provider=provider,
+            fetcher=FakeFetcher({seed_url: _page_for_token(seed_url, "beta")}),
+            board_validator=connector,
+            connector=connector,
+            config=_config(),
+        )
+        rerun = run_job_discovery(
+            session,
+            search_definition_id=search_id,
+            provider_name="fake",
+            provider=provider,
+            fetcher=FakeFetcher({}),
+            board_validator=connector,
+            connector=connector,
+            config=_config(),
+        )
+        detail = get_job_discovery_run_detail(session, rerun.id)
+
+        assert detail.matching_summary.seed_linked_canonical_jobs_evaluated == 1
+        assert detail.matching_summary.additional_board_import_jobs_evaluated == 0
+        assert detail.matching_summary.total_canonical_jobs_evaluated == 1
 
 
 def test_run_job_discovery_imports_same_board_once_per_run(
@@ -1339,7 +1464,7 @@ def test_get_job_discovery_run_detail_distinguishes_ambiguous_unsupported_and_fa
         assert imports_by_token["gamma"].import_status == "failed"
         assert "provider unavailable" in (imports_by_token["gamma"].failure_message or "")
 
-        assert detail.matching_summary.canonical_jobs_evaluated == 2
+        assert detail.matching_summary.total_canonical_jobs_evaluated == 2
         assert detail.matching_summary.saved_search_match_count == 1
         assert detail.top_matches[0].job_lead.title == "Director, Platform Engineering"
         assert detail.top_matches[0].evaluation is not None

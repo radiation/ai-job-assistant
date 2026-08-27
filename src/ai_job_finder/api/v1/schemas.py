@@ -598,7 +598,9 @@ class JobDiscoveryImportResponse(BaseModel):
 
 
 class JobDiscoveryMatchingSummaryResponse(BaseModel):
-    canonical_jobs_evaluated: int
+    seed_linked_canonical_jobs_evaluated: int
+    additional_board_import_jobs_evaluated: int
+    total_canonical_jobs_evaluated: int
     location_eligible_count: int
     location_needs_review_count: int
     location_ineligible_count: int
