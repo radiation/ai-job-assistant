@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterator, Sequence
+from dataclasses import replace
 from datetime import UTC, datetime
 from typing import cast
 from uuid import UUID
@@ -15,6 +16,7 @@ from ai_job_finder.application.job_sources import (
     list_active_job_source_observation_counts,
     list_ranked_discovered_leads,
     run_job_source_import,
+    run_job_source_import_with_result,
 )
 from ai_job_finder.application.job_sources.payload_identity import duplicate_hint_key
 from ai_job_finder.application.services import (
@@ -265,6 +267,36 @@ def test_import_idempotency_material_change_and_evaluation_history(
         assert changed_run.evaluations_created == 1
         assert len(list(session.scalars(select(JobLeadModel)))) == 1
         assert len(list(session.scalars(select(JobEvaluationModel)))) == 2
+
+
+@pytest.mark.parametrize(
+    "provider",
+    list(JobSourceProvider),
+)
+def test_import_result_exposes_canonical_leads_for_all_supported_providers(
+    session_factory: sessionmaker[Session],
+    provider: JobSourceProvider,
+) -> None:
+    with session_factory() as session:
+        _seed_candidate(session)
+        source = create_job_source_configuration(
+            session,
+            provider=provider.value,
+            display_name=f"Acme {provider.value}",
+            company_name="Acme",
+            board_token=f"acme-{provider.value}",
+            source_url=f"https://jobs.example.com/{provider.value}",
+        )
+
+        result = run_job_source_import_with_result(
+            session,
+            source_id=source.id,
+            connector=FakeJobSourceConnector(jobs=[replace(_posting("1"), provider=provider)]),
+        )
+
+        assert result.run.jobs_created == 1
+        assert len(result.surfaced_job_lead_ids) == 1
+        assert result.surfaced_job_lead_ids[0] == session.scalar(select(JobLeadModel.id))
 
 
 def test_discovered_leads_default_to_actionable_location_eligibility(

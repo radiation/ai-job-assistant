@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Collection
 from dataclasses import dataclass
 from datetime import datetime
 from typing import cast
@@ -60,11 +61,12 @@ def _latest_evaluation_subquery() -> Select[tuple[UUID, datetime]]:
     ).group_by(JobEvaluationModel.job_lead_id)
 
 
-def _candidate_leads_query() -> Select[
-    tuple[JobSourceObservationModel, JobLeadModel, JobEvaluationModel | None]
-]:
+def _candidate_leads_query(
+    *,
+    job_lead_ids: Collection[UUID] | None = None,
+) -> Select[tuple[JobSourceObservationModel, JobLeadModel, JobEvaluationModel | None]]:
     latest = _latest_evaluation_subquery().subquery()
-    return cast(
+    query = cast(
         Select[tuple[JobSourceObservationModel, JobLeadModel, JobEvaluationModel | None]],
         select(JobSourceObservationModel, JobLeadModel, JobEvaluationModel)
         .join(JobLeadModel, JobLeadModel.id == JobSourceObservationModel.job_lead_id)
@@ -79,6 +81,9 @@ def _candidate_leads_query() -> Select[
         .where(JobSourceObservationModel.active.is_(True))
         .order_by(JobLeadModel.created_at.asc(), JobLeadModel.id.asc()),
     )
+    if job_lead_ids is not None:
+        query = query.where(JobLeadModel.id.in_(job_lead_ids))
+    return query
 
 
 def _create_running_run(
@@ -275,7 +280,12 @@ def _persist_terminal_run_state(
     return run
 
 
-def run_job_search(session: Session, *, search_definition_id: UUID) -> JobSearchRunModel:
+def run_job_search(
+    session: Session,
+    *,
+    search_definition_id: UUID,
+    job_lead_ids: Collection[UUID] | None = None,
+) -> JobSearchRunModel:
     definition = get_job_search_definition(session, search_definition_id)
     if not definition.enabled:
         raise JobSearchDefinitionDisabledError(
@@ -288,7 +298,12 @@ def run_job_search(session: Session, *, search_definition_id: UUID) -> JobSearch
     run = _create_running_run(session, definition=definition)
     run_error: str | None = None
     try:
-        rows = session.execute(_candidate_leads_query()).all()
+        query = (
+            _candidate_leads_query()
+            if job_lead_ids is None
+            else _candidate_leads_query(job_lead_ids=job_lead_ids)
+        )
+        rows = session.execute(query).all()
         for observation, job_lead, latest_evaluation in rows:
             run.candidates_considered += 1
             try:
