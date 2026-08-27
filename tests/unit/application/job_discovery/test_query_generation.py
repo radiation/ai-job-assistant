@@ -69,20 +69,23 @@ def test_query_generation_is_deterministic_deduplicated_and_capped() -> None:
     second = generate_job_discovery_queries(definition, max_queries=4, result_limit=5)
 
     assert [query.rendered_query for query in first] == [
-        '"Director Platform Engineering" "New York" site:boards.greenhouse.io',
+        "Director Platform Engineering New York site:boards.greenhouse.io",
         (
-            '"Director Developer Experience" "remote United States" '
+            "Director Developer Experience remote United States "
             "-site:indeed.com -site:linkedin.com -site:glassdoor.com -site:ziprecruiter.com"
         ),
-        '"Senior Director Platform Engineering" "New York" site:jobs.ashbyhq.com',
+        "Senior Director Platform Engineering New York site:jobs.ashbyhq.com",
         (
-            '"Senior Director Developer Experience" "remote United States" '
+            "Senior Director Developer Experience remote United States "
             "-site:indeed.com -site:linkedin.com -site:glassdoor.com -site:ziprecruiter.com"
         ),
     ]
     assert [query.stable_query_id for query in first] == [query.stable_query_id for query in second]
     assert len({query.rendered_query for query in first}) == len(first)
     assert all(query.result_limit == 5 for query in first)
+    assert all('"' not in query.rendered_query for query in first)
+    assert any("site:boards.greenhouse.io" in query.rendered_query for query in first)
+    assert any("-site:indeed.com" in query.rendered_query for query in first)
     assert [query.target_domain for query in first] == [
         "boards.greenhouse.io",
         None,
@@ -111,13 +114,13 @@ def test_query_generation_uses_seniority_and_domain_fallbacks() -> None:
     queries = generate_job_discovery_queries(definition, max_queries=4, result_limit=3)
 
     assert [query.rendered_query for query in queries] == [
-        '"Senior Director Developer Experience" site:boards.greenhouse.io',
+        "Senior Director Developer Experience site:boards.greenhouse.io",
         (
-            '"Senior Director Developer Experience" '
+            "Senior Director Developer Experience "
             "-site:indeed.com -site:linkedin.com -site:glassdoor.com -site:ziprecruiter.com"
         ),
-        '"Senior Director Developer Experience" site:jobs.ashbyhq.com',
-        '"Senior Director Developer Experience" site:jobs.lever.co',
+        "Senior Director Developer Experience site:jobs.ashbyhq.com",
+        "Senior Director Developer Experience site:jobs.lever.co",
     ]
 
 
@@ -140,3 +143,4 @@ def test_query_generation_covers_expanded_saved_search_intent() -> None:
     assert any(query.target_domain == "jobs.lever.co" for query in queries)
     assert any(query.target_domain is None for query in queries)
     assert "NYC" not in {query.location_or_workplace_term for query in queries}
+    assert all('"' not in query.rendered_query for query in queries)

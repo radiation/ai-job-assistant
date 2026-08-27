@@ -207,12 +207,9 @@ def _render_queries(
 
 
 def _render_base_query(title_phrase: str, location_term: str | None) -> str:
-    rendered = f'"{title_phrase}"'
+    rendered = _normalize_phrase(title_phrase)
     if location_term is not None:
-        if location_term == "remote":
-            rendered = f"{rendered} remote"
-        else:
-            rendered = f'{rendered} "{location_term}"'
+        rendered = f"{rendered} {_normalize_phrase(location_term)}"
     return rendered.strip()
 
 
