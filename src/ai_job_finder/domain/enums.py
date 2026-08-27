@@ -92,10 +92,12 @@ class JobLeadSource(StrEnum):
     REFERRAL = "referral"
     RECRUITER = "recruiter"
     GREENHOUSE = "greenhouse"
+    ASHBY = "ashby"
 
 
 class JobSourceProvider(StrEnum):
     GREENHOUSE = "greenhouse"
+    ASHBY = "ashby"
 
 
 class JobImportRunStatus(StrEnum):

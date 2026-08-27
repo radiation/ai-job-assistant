@@ -26,9 +26,11 @@ from ai_job_finder.domain.errors import (
     SourceDetectionApprovalError,
     SourceSyncAfterCreationError,
 )
-from ai_job_finder.domain.job_discovery.targeting import GREENHOUSE_HOSTS
+from ai_job_finder.domain.job_discovery.targeting import GREENHOUSE_HOSTS, parse_ashby_url
 from ai_job_finder.domain.job_sources import JobSourceConnector
 from ai_job_finder.domain.source_detection import (
+    AshbyBoardValidation,
+    AshbyBoardValidator,
     GreenhouseBoardValidation,
     GreenhouseBoardValidator,
     PublicPage,
@@ -90,6 +92,7 @@ def create_source_detection_run(
     fetcher: PublicPageFetcher,
     validator: GreenhouseBoardValidator,
     config: SourceDetectionConfig,
+    ashby_validator: AshbyBoardValidator | None = None,
 ) -> SourceDetectionRunModel:
     company = _optional_str(company_name)
     url = _optional_str(input_url)
@@ -120,6 +123,7 @@ def create_source_detection_run(
             fetcher=fetcher,
             validator=validator,
             config=config,
+            ashby_validator=ashby_validator,
         )
         _finalize_run(session, run, **outcome)
     except DomainError as exc:
@@ -212,14 +216,15 @@ def approve_source_detection_run(
 ) -> SourceDetectionApprovalResult:
     run = get_source_detection_run(session, run_id)
     token = _selected_valid_token(run, selected_token)
-    existing_source = _source_by_token(session, token)
+    provider = JobSourceProvider(run.detected_provider or JobSourceProvider.GREENHOUSE.value)
+    existing_source = _source_by_token(session, token, provider=provider)
     source_existed = existing_source is not None
     source = existing_source
     if source is None:
         try:
             source = create_job_source_configuration(
                 session,
-                provider=JobSourceProvider.GREENHOUSE.value,
+                provider=provider.value,
                 display_name=_display_name(run, token),
                 company_name=run.validated_company_name or run.company_name or token,
                 board_token=token,
@@ -227,7 +232,7 @@ def approve_source_detection_run(
                 enabled=True,
             )
         except DuplicateJobSourceError:
-            source = _source_by_token(session, token)
+            source = _source_by_token(session, token, provider=provider)
             if source is None:
                 raise
             source_existed = True
@@ -270,6 +275,7 @@ def _detect(
     fetcher: PublicPageFetcher,
     validator: GreenhouseBoardValidator,
     config: SourceDetectionConfig,
+    ashby_validator: AshbyBoardValidator | None,
 ) -> dict[str, Any]:
     evidence: list[dict[str, Any]] = []
     observed_tokens: OrderedDict[str, set[str]] = OrderedDict()
@@ -277,6 +283,42 @@ def _detect(
     final_url = None
     page: PublicPage | None = None
     if input_url:
+        ashby_url = parse_ashby_url(input_url)
+        if ashby_url is not None and ashby_validator is not None:
+            validation = ashby_validator.validate_board_token(ashby_url.board_token)
+            candidate = _candidate_payload(
+                token=ashby_url.board_token,
+                source="canonical_url",
+                evidence_categories=["canonical_ashby_url"],
+                validation=validation,
+                existing_source=_source_by_token(
+                    session, ashby_url.board_token, provider=JobSourceProvider.ASHBY
+                ),
+            )
+            return {
+                "status": (
+                    SourceDetectionRunStatus.DETECTED
+                    if validation.valid
+                    else SourceDetectionRunStatus.NOT_DETECTED
+                ),
+                "normalized_url": input_url,
+                "final_url": input_url,
+                "detected_provider": JobSourceProvider.ASHBY.value if validation.valid else None,
+                "candidate_tokens": [candidate],
+                "evidence": [
+                    {
+                        "category": "canonical_ashby_url",
+                        "token": ashby_url.board_token,
+                        "external_posting_id": ashby_url.external_posting_id,
+                        "source": "url",
+                        "source_url": input_url,
+                    }
+                ],
+                "validated_token": ashby_url.board_token if validation.valid else None,
+                "validated_company_name": validation.company_name or company_name,
+                "validated_job_count": validation.job_count,
+                "error_message": validation.error_message,
+            }
         page = fetcher.fetch(input_url)
         normalized_url = page.requested_url
         final_url = page.final_url
@@ -414,7 +456,7 @@ def _candidate_payload(
     token: str,
     source: str,
     evidence_categories: list[str],
-    validation: GreenhouseBoardValidation,
+    validation: GreenhouseBoardValidation | AshbyBoardValidation,
     existing_source: JobSourceConfigurationModel | None,
 ) -> dict[str, Any]:
     return {
@@ -579,7 +621,14 @@ def _selected_valid_token(run: SourceDetectionRunModel, selected_token: str | No
         raise SourceDetectionApprovalError("The detection run does not have a validated token.")
     if len(valid_candidates) > 1 and not selected_token:
         raise AmbiguousSourceDetectionError("Select a token before approving this detection run.")
-    normalized_selected = _normalize_token(selected_token or run.validated_token or "")
+    selected_value = selected_token or run.validated_token or ""
+    normalized_selected: str | None
+    if run.detected_provider == JobSourceProvider.ASHBY.value:
+        normalized_selected = selected_value.strip().strip("/")
+        if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{0,199}", normalized_selected):
+            normalized_selected = None
+    else:
+        normalized_selected = _normalize_token(selected_value)
     if normalized_selected is None:
         raise SourceDetectionApprovalError(
             "Selected token was not validated by this detection run."
@@ -590,10 +639,15 @@ def _selected_valid_token(run: SourceDetectionRunModel, selected_token: str | No
     raise SourceDetectionApprovalError("Selected token was not validated by this detection run.")
 
 
-def _source_by_token(session: Session, token: str) -> JobSourceConfigurationModel | None:
+def _source_by_token(
+    session: Session,
+    token: str,
+    *,
+    provider: JobSourceProvider = JobSourceProvider.GREENHOUSE,
+) -> JobSourceConfigurationModel | None:
     return session.scalar(
         select(JobSourceConfigurationModel).where(
-            JobSourceConfigurationModel.provider == JobSourceProvider.GREENHOUSE.value,
+            JobSourceConfigurationModel.provider == provider.value,
             JobSourceConfigurationModel.board_token == token,
         )
     )
@@ -601,7 +655,8 @@ def _source_by_token(session: Session, token: str) -> JobSourceConfigurationMode
 
 def _display_name(run: SourceDetectionRunModel, token: str) -> str:
     company = run.validated_company_name or run.company_name or token
-    return f"{company} Greenhouse"
+    provider = JobSourceProvider(run.detected_provider or JobSourceProvider.GREENHOUSE.value)
+    return f"{company} {provider.value.title()}"
 
 
 def _bounded_snippet(text: str, start: int, end: int) -> str:

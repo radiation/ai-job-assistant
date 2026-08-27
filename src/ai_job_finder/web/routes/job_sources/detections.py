@@ -8,6 +8,7 @@ from fastapi.responses import RedirectResponse
 from pydantic import ValidationError
 
 from ai_job_finder.api.dependencies import (
+    ashby_board_validator_dependency,
     greenhouse_board_validator_dependency,
     job_source_connector_dependency,
     public_page_fetcher_dependency,
@@ -23,7 +24,11 @@ from ai_job_finder.application.source_detection import (
 )
 from ai_job_finder.domain.errors import DomainError
 from ai_job_finder.domain.job_sources import JobSourceConnector
-from ai_job_finder.domain.source_detection import GreenhouseBoardValidator, PublicPageFetcher
+from ai_job_finder.domain.source_detection import (
+    AshbyBoardValidator,
+    GreenhouseBoardValidator,
+    PublicPageFetcher,
+)
 from ai_job_finder.settings import Settings
 from ai_job_finder.web.dependencies import DbSession, optional_str, render_template
 
@@ -35,6 +40,9 @@ JobSourceConnectorDependency = Annotated[
 PublicPageFetcherDependency = Annotated[PublicPageFetcher, Depends(public_page_fetcher_dependency)]
 GreenhouseBoardValidatorDependency = Annotated[
     GreenhouseBoardValidator, Depends(greenhouse_board_validator_dependency)
+]
+AshbyBoardValidatorDependency = Annotated[
+    AshbyBoardValidator, Depends(ashby_board_validator_dependency)
 ]
 
 
@@ -74,6 +82,7 @@ async def job_sources_detect_create(
     session: DbSession,
     fetcher: PublicPageFetcherDependency,
     validator: GreenhouseBoardValidatorDependency,
+    ashby_validator: AshbyBoardValidatorDependency,
     settings: SettingsDependency,
 ) -> Response:
     form = await request.form()
@@ -96,6 +105,7 @@ async def job_sources_detect_create(
         brand_alias=optional_str(values["brand_alias"]),
         fetcher=fetcher,
         validator=validator,
+        ashby_validator=ashby_validator,
         config=SourceDetectionConfig(
             max_linked_scripts=settings.source_detection_max_linked_scripts,
             max_script_bytes=settings.source_detection_max_script_bytes,

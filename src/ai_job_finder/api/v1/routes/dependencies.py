@@ -6,6 +6,7 @@ from fastapi import Depends
 from sqlalchemy.orm import Session
 
 from ai_job_finder.api.dependencies import (
+    ashby_board_validator_dependency,
     career_fact_extractor_dependency,
     db_session_dependency,
     document_storage_dependency,
@@ -18,7 +19,11 @@ from ai_job_finder.api.dependencies import (
 from ai_job_finder.application.extraction import CareerFactExtractor
 from ai_job_finder.application.job_discovery.ports import JobDiscoveryProvider
 from ai_job_finder.domain.job_sources import JobSourceConnector
-from ai_job_finder.domain.source_detection import GreenhouseBoardValidator, PublicPageFetcher
+from ai_job_finder.domain.source_detection import (
+    AshbyBoardValidator,
+    GreenhouseBoardValidator,
+    PublicPageFetcher,
+)
 from ai_job_finder.infrastructure.storage import DocumentStorage
 from ai_job_finder.settings import Settings
 
@@ -35,4 +40,7 @@ JobDiscoveryProviderDependency = Annotated[
 PublicPageFetcherDependency = Annotated[PublicPageFetcher, Depends(public_page_fetcher_dependency)]
 GreenhouseBoardValidatorDependency = Annotated[
     GreenhouseBoardValidator, Depends(greenhouse_board_validator_dependency)
+]
+AshbyBoardValidatorDependency = Annotated[
+    AshbyBoardValidator, Depends(ashby_board_validator_dependency)
 ]

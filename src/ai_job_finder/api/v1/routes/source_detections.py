@@ -5,6 +5,7 @@ from uuid import UUID
 from fastapi import APIRouter, status
 
 from ai_job_finder.api.v1.routes.dependencies import (
+    AshbyBoardValidatorDependency,
     DbSession,
     GreenhouseBoardValidatorDependency,
     JobSourceConnectorDependency,
@@ -43,6 +44,7 @@ def post_source_detection(
     session: DbSession,
     fetcher: PublicPageFetcherDependency,
     validator: GreenhouseBoardValidatorDependency,
+    ashby_validator: AshbyBoardValidatorDependency,
     settings: SettingsDependency,
 ) -> SourceDetectionRunResponse:
     run = create_source_detection_run(
@@ -52,6 +54,7 @@ def post_source_detection(
         brand_alias=payload.brand_alias,
         fetcher=fetcher,
         validator=validator,
+        ashby_validator=ashby_validator,
         config=SourceDetectionConfig(
             max_linked_scripts=settings.source_detection_max_linked_scripts,
             max_script_bytes=settings.source_detection_max_script_bytes,

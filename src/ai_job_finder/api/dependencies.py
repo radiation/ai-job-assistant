@@ -8,20 +8,27 @@ from sqlalchemy.orm import Session
 
 from ai_job_finder.application.extraction import CareerFactExtractor
 from ai_job_finder.application.job_discovery.ports import JobDiscoveryProvider
+from ai_job_finder.domain.enums import JobSourceProvider
 from ai_job_finder.domain.errors import (
     ExtractionProviderUnavailableError,
     JobDiscoveryProviderUnavailableError,
 )
 from ai_job_finder.domain.job_sources import JobSourceConnector
-from ai_job_finder.domain.source_detection import GreenhouseBoardValidator, PublicPageFetcher
+from ai_job_finder.domain.source_detection import (
+    AshbyBoardValidator,
+    GreenhouseBoardValidator,
+    PublicPageFetcher,
+)
 from ai_job_finder.infrastructure.database.session import get_db_session
 from ai_job_finder.infrastructure.job_discovery import (
     BraveSearchJobDiscoveryProvider,
     FakeJobDiscoveryProvider,
     FileBackedFakeJobDiscoveryProvider,
 )
+from ai_job_finder.infrastructure.job_sources.ashby import AshbyJobSourceConnector
 from ai_job_finder.infrastructure.job_sources.fake import FileBackedFakeJobSourceConnector
 from ai_job_finder.infrastructure.job_sources.greenhouse import GreenhouseJobSourceConnector
+from ai_job_finder.infrastructure.job_sources.router import ProviderJobSourceConnector
 from ai_job_finder.infrastructure.llm.fake import FakeCareerFactExtractor
 from ai_job_finder.infrastructure.llm.vertex import VertexGeminiCareerFactExtractor
 from ai_job_finder.infrastructure.public_fetcher import (
@@ -77,13 +84,24 @@ def job_source_connector_dependency(
 ) -> JobSourceConnector:
     if settings.greenhouse_fake_fixture_path is not None:
         return FileBackedFakeJobSourceConnector(settings.greenhouse_fake_fixture_path)
-    return GreenhouseJobSourceConnector(
+    greenhouse = GreenhouseJobSourceConnector(
         api_base_url=settings.greenhouse_api_base_url,
         timeout_seconds=settings.greenhouse_timeout_seconds,
         transient_retry_count=settings.greenhouse_transient_retry_count,
         user_agent=settings.greenhouse_user_agent,
         max_response_bytes=settings.greenhouse_max_response_bytes,
         max_jobs=settings.greenhouse_max_jobs,
+    )
+    ashby = AshbyJobSourceConnector(
+        api_base_url=settings.ashby_api_base_url,
+        timeout_seconds=settings.ashby_timeout_seconds,
+        transient_retry_count=settings.ashby_transient_retry_count,
+        user_agent=settings.greenhouse_user_agent,
+        max_response_bytes=settings.ashby_max_response_bytes,
+        max_jobs=settings.ashby_max_jobs,
+    )
+    return ProviderJobSourceConnector(
+        {JobSourceProvider.GREENHOUSE: greenhouse, JobSourceProvider.ASHBY: ashby}
     )
 
 
@@ -114,8 +132,29 @@ def job_discovery_provider_dependency(
 def greenhouse_board_validator_dependency(
     settings: Annotated[Settings, Depends(settings_dependency)],
 ) -> GreenhouseBoardValidator:
-    connector = job_source_connector_dependency(settings)
-    return connector  # type: ignore[return-value]
+    if settings.greenhouse_fake_fixture_path is not None:
+        return FileBackedFakeJobSourceConnector(settings.greenhouse_fake_fixture_path)
+    return GreenhouseJobSourceConnector(
+        api_base_url=settings.greenhouse_api_base_url,
+        timeout_seconds=settings.greenhouse_timeout_seconds,
+        transient_retry_count=settings.greenhouse_transient_retry_count,
+        user_agent=settings.greenhouse_user_agent,
+        max_response_bytes=settings.greenhouse_max_response_bytes,
+        max_jobs=settings.greenhouse_max_jobs,
+    )
+
+
+def ashby_board_validator_dependency(
+    settings: Annotated[Settings, Depends(settings_dependency)],
+) -> AshbyBoardValidator:
+    return AshbyJobSourceConnector(
+        api_base_url=settings.ashby_api_base_url,
+        timeout_seconds=settings.ashby_timeout_seconds,
+        transient_retry_count=settings.ashby_transient_retry_count,
+        user_agent=settings.greenhouse_user_agent,
+        max_response_bytes=settings.ashby_max_response_bytes,
+        max_jobs=settings.ashby_max_jobs,
+    )
 
 
 def public_page_fetcher_dependency(

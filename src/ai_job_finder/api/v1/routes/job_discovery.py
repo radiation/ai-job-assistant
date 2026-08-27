@@ -5,6 +5,7 @@ from uuid import UUID
 from fastapi import APIRouter, status
 
 from ai_job_finder.api.v1.routes.dependencies import (
+    AshbyBoardValidatorDependency,
     DbSession,
     GreenhouseBoardValidatorDependency,
     JobDiscoveryProviderDependency,
@@ -45,6 +46,7 @@ def post_job_discovery_run(
     provider: JobDiscoveryProviderDependency,
     fetcher: PublicPageFetcherDependency,
     validator: GreenhouseBoardValidatorDependency,
+    ashby_validator: AshbyBoardValidatorDependency,
     connector: JobSourceConnectorDependency,
     settings: SettingsDependency,
 ) -> JobDiscoveryRunResponse:
@@ -55,6 +57,7 @@ def post_job_discovery_run(
         provider=provider,
         fetcher=fetcher,
         validator=validator,
+        ashby_validator=ashby_validator,
         connector=connector,
         config=JobDiscoveryConfig(
             max_queries_per_run=settings.job_discovery_max_queries_per_run,

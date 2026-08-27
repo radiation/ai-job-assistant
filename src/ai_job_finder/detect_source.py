@@ -7,10 +7,13 @@ from ai_job_finder.application.source_detection import (
     approve_source_detection_run,
     create_source_detection_run,
 )
+from ai_job_finder.domain.enums import JobSourceProvider
 from ai_job_finder.infrastructure.database.models import SourceDetectionRunModel
 from ai_job_finder.infrastructure.database.session import get_session_factory
+from ai_job_finder.infrastructure.job_sources.ashby import AshbyJobSourceConnector
 from ai_job_finder.infrastructure.job_sources.fake import FileBackedFakeJobSourceConnector
 from ai_job_finder.infrastructure.job_sources.greenhouse import GreenhouseJobSourceConnector
+from ai_job_finder.infrastructure.job_sources.router import ProviderJobSourceConnector
 from ai_job_finder.infrastructure.public_fetcher import (
     PublicPageFetcherConfig,
     SafePublicPageFetcher,
@@ -33,7 +36,11 @@ def main() -> int:
         parser.error("use only one of --create or --create-and-sync")
 
     settings = get_settings()
-    connector = _greenhouse_connector(settings)
+    greenhouse = _greenhouse_connector(settings)
+    ashby = _ashby_connector(settings)
+    connector = ProviderJobSourceConnector(
+        {JobSourceProvider.GREENHOUSE: greenhouse, JobSourceProvider.ASHBY: ashby}
+    )
     fetcher = SafePublicPageFetcher(
         PublicPageFetcherConfig(
             timeout_seconds=settings.source_detection_timeout_seconds,
@@ -51,7 +58,8 @@ def main() -> int:
             input_url=args.input_url,
             brand_alias=args.brand_alias,
             fetcher=fetcher,
-            validator=connector,
+            validator=greenhouse,
+            ashby_validator=ashby,
             config=SourceDetectionConfig(
                 max_linked_scripts=settings.source_detection_max_linked_scripts,
                 max_script_bytes=settings.source_detection_max_script_bytes,
@@ -104,6 +112,17 @@ def _greenhouse_connector(
         user_agent=settings.greenhouse_user_agent,
         max_response_bytes=settings.greenhouse_max_response_bytes,
         max_jobs=settings.greenhouse_max_jobs,
+    )
+
+
+def _ashby_connector(settings: Settings) -> AshbyJobSourceConnector:
+    return AshbyJobSourceConnector(
+        api_base_url=settings.ashby_api_base_url,
+        timeout_seconds=settings.ashby_timeout_seconds,
+        transient_retry_count=settings.ashby_transient_retry_count,
+        user_agent=settings.greenhouse_user_agent,
+        max_response_bytes=settings.ashby_max_response_bytes,
+        max_jobs=settings.ashby_max_jobs,
     )
 
 

@@ -10,6 +10,7 @@ from pydantic import ValidationError
 from pydantic_core import ErrorDetails
 
 from ai_job_finder.api.v1.routes.dependencies import (
+    AshbyBoardValidatorDependency,
     GreenhouseBoardValidatorDependency,
     JobDiscoveryProviderDependency,
     JobSourceConnectorDependency,
@@ -410,6 +411,7 @@ def job_searches_run_discovery(
     provider: JobDiscoveryProviderDependency,
     fetcher: PublicPageFetcherDependency,
     validator: GreenhouseBoardValidatorDependency,
+    ashby_validator: AshbyBoardValidatorDependency,
     connector: JobSourceConnectorDependency,
     settings: SettingsDependency,
 ) -> Response:
@@ -420,6 +422,7 @@ def job_searches_run_discovery(
         provider=provider,
         fetcher=fetcher,
         validator=validator,
+        ashby_validator=ashby_validator,
         connector=connector,
         config=JobDiscoveryConfig(
             max_queries_per_run=settings.job_discovery_max_queries_per_run,

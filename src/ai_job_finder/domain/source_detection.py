@@ -29,3 +29,18 @@ class GreenhouseBoardValidation:
 
 class GreenhouseBoardValidator(Protocol):
     def validate_board_token(self, board_token: str) -> GreenhouseBoardValidation: ...
+
+
+@dataclass(frozen=True, slots=True)
+class AshbyBoardValidation:
+    token: str
+    status: str
+    valid: bool
+    job_count: int | None = None
+    sample_titles: list[str] = field(default_factory=list)
+    company_name: str | None = None
+    error_message: str | None = None
+
+
+class AshbyBoardValidator(Protocol):
+    def validate_board_token(self, board_token: str) -> AshbyBoardValidation: ...

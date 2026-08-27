@@ -28,7 +28,11 @@ from ai_job_finder.domain.enums import (
     WorkplaceType,
 )
 from ai_job_finder.domain.errors import AmbiguousSourceDetectionError, UnsafeUrlError
-from ai_job_finder.domain.source_detection import GreenhouseBoardValidation, PublicPage
+from ai_job_finder.domain.source_detection import (
+    AshbyBoardValidation,
+    GreenhouseBoardValidation,
+    PublicPage,
+)
 from ai_job_finder.infrastructure.job_sources.fake import FakeJobSourceConnector
 
 
@@ -53,6 +57,18 @@ class FakeValidator:
             token=token,
             status="invalid",
             valid=False,
+        )
+
+
+class FakeAshbyValidator:
+    def validate_board_token(self, board_token: str) -> AshbyBoardValidation:
+        return AshbyBoardValidation(
+            token=board_token,
+            status="valid",
+            valid=True,
+            job_count=2,
+            sample_titles=["Director, Platform Engineering"],
+            company_name="Acme",
         )
 
 
@@ -142,6 +158,39 @@ def test_direct_html_detection_persists_terminal_preview(
         assert run.validated_job_count == 3
         assert run.candidate_tokens[0]["source"] == "observed"
         assert run.evidence[0]["category"] == "direct_api_reference"
+
+
+def test_canonical_ashby_posting_detection_bypasses_public_page_fetch(
+    session_factory: sessionmaker[Session],
+) -> None:
+    with session_factory() as session:
+        run = create_source_detection_run(
+            session,
+            company_name="Acme",
+            input_url="https://jobs.ashbyhq.com/Acme/posting-123",
+            brand_alias=None,
+            fetcher=FakeFetcher(error=AssertionError("Ashby URL must not be fetched as HTML.")),
+            validator=FakeValidator({}),
+            ashby_validator=FakeAshbyValidator(),
+            config=_config(),
+        )
+
+        result = approve_source_detection_run(
+            session,
+            run_id=run.id,
+            selected_token=None,
+            create_and_sync=False,
+            connector=FakeJobSourceConnector(jobs=[]),
+            retain_raw_payload=True,
+            close_on_empty=False,
+            stale_after_seconds=3600,
+        )
+
+        assert result.run.status == "source_created"
+        assert run.detected_provider == JobSourceProvider.ASHBY.value
+        assert result.source.provider == JobSourceProvider.ASHBY.value
+        assert result.source.board_token == "Acme"
+        assert result.source.display_name == "Acme Ashby"
 
 
 def test_ambiguous_detection_requires_explicit_token_selection(

@@ -51,7 +51,11 @@ from ai_job_finder.domain.location_eligibility import (
     JobLocationSignals,
     classify_job_location_eligibility,
 )
-from ai_job_finder.domain.source_detection import GreenhouseBoardValidator, PublicPageFetcher
+from ai_job_finder.domain.source_detection import (
+    AshbyBoardValidator,
+    GreenhouseBoardValidator,
+    PublicPageFetcher,
+)
 from ai_job_finder.infrastructure.database.models import (
     CandidateProfileModel,
     JobDiscoveryObservationModel,
@@ -192,6 +196,7 @@ def run_job_discovery(
     provider: JobDiscoveryProvider,
     fetcher: PublicPageFetcher,
     validator: GreenhouseBoardValidator,
+    ashby_validator: AshbyBoardValidator | None = None,
     connector: JobSourceConnector,
     config: JobDiscoveryConfig,
 ) -> JobDiscoveryRunModel:
@@ -280,6 +285,7 @@ def run_job_discovery(
                 observation=record.observation,
                 fetcher=fetcher,
                 validator=validator,
+                ashby_validator=ashby_validator,
                 connector=connector,
                 config=config,
                 counters=counters,
@@ -332,6 +338,7 @@ def _process_observation(
     observation: JobDiscoveryObservationModel,
     fetcher: PublicPageFetcher,
     validator: GreenhouseBoardValidator,
+    ashby_validator: AshbyBoardValidator | None,
     connector: JobSourceConnector,
     config: JobDiscoveryConfig,
     counters: _RunCounters,
@@ -375,6 +382,7 @@ def _process_observation(
             brand_alias=None,
             fetcher=fetcher,
             validator=validator,
+            ashby_validator=ashby_validator,
             config=config.source_detection,
         )
         observation.source_detection_run_id = detection_run.id

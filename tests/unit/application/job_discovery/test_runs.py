@@ -48,7 +48,11 @@ from ai_job_finder.domain.job_discovery import (
     JobDiscoveryObservationStatus,
 )
 from ai_job_finder.domain.job_sources import JobSourceFetchResult, NormalizedJobPosting
-from ai_job_finder.domain.source_detection import GreenhouseBoardValidation, PublicPage
+from ai_job_finder.domain.source_detection import (
+    AshbyBoardValidation,
+    GreenhouseBoardValidation,
+    PublicPage,
+)
 from ai_job_finder.infrastructure.database.base import Base
 from ai_job_finder.infrastructure.database.models import (
     JobDiscoveryRunModel,
@@ -87,6 +91,18 @@ class FakeValidator:
     def validate_board_token(self, board_token: str) -> GreenhouseBoardValidation:
         return self.validation_by_token.get(
             board_token, GreenhouseBoardValidation(token=board_token, status="invalid", valid=False)
+        )
+
+
+class FakeAshbyValidator:
+    def validate_board_token(self, board_token: str) -> AshbyBoardValidation:
+        return AshbyBoardValidation(
+            token=board_token,
+            status="valid",
+            valid=True,
+            job_count=2,
+            sample_titles=["Director, Platform Engineering"],
+            company_name="Beta",
         )
 
 
@@ -252,6 +268,27 @@ def _posting_for_board(
         source_updated_at=datetime(2026, 1, 2, tzinfo=UTC),
         departments=["Engineering"],
         offices=["Remote"],
+        metadata={},
+        raw_payload={"id": external_id},
+    )
+
+
+def _ashby_posting(external_id: str, title: str) -> NormalizedJobPosting:
+    return NormalizedJobPosting(
+        provider=JobSourceProvider.ASHBY,
+        company_name="Beta",
+        title=title,
+        location_text="Remote United States",
+        workplace_type=WorkplaceType.REMOTE,
+        description_raw="Lead platform engineering with Kubernetes and cloud reliability.",
+        description_normalized="Lead platform engineering with Kubernetes and cloud reliability.",
+        compensation_text=None,
+        source_url=f"https://jobs.ashbyhq.com/Beta/{external_id}",
+        external_id=external_id,
+        internal_job_id=None,
+        source_updated_at=datetime(2026, 1, 2, tzinfo=UTC),
+        departments=["Engineering"],
+        offices=["Remote United States"],
         metadata={},
         raw_payload={"id": external_id},
     )
@@ -692,6 +729,72 @@ def test_run_job_discovery_imports_same_board_once_per_run(
         }
         assert all(record.observation.imported_job_lead_id is not None for record in observations)
         assert len({record.observation.imported_job_lead_id for record in observations}) == 3
+
+
+def test_run_job_discovery_imports_and_links_ashby_board_once(
+    session_factory: sessionmaker[Session],
+) -> None:
+    with session_factory() as session:
+        _seed_candidate(session)
+        search_id = _search(session)
+        search = get_job_search_definition(session, search_id)
+        query = generate_job_discovery_queries(search.to_snapshot(), max_queries=4, result_limit=5)[
+            0
+        ]
+        first_url = "https://jobs.ashbyhq.com/Beta/posting-111"
+        second_url = "https://jobs.ashbyhq.com/Beta/posting-222"
+        provider = FakeJobDiscoveryProvider(
+            results_by_query={
+                query.rendered_query: [
+                    DiscoveredJobCandidate(
+                        discovered_url=first_url,
+                        provider_name="fake",
+                        query_identifier=query.stable_query_id,
+                        rank=1,
+                        title_hint="Director, Platform Engineering",
+                        company_hint="Beta",
+                    ),
+                    DiscoveredJobCandidate(
+                        discovered_url=second_url,
+                        provider_name="fake",
+                        query_identifier=query.stable_query_id,
+                        rank=2,
+                        title_hint="Principal Platform Architect",
+                        company_hint="Beta",
+                    ),
+                ]
+            }
+        )
+        connector = BoardAwareConnector(
+            jobs_by_token={
+                "Beta": [
+                    _ashby_posting("posting-111", "Director, Platform Engineering"),
+                    _ashby_posting("posting-222", "Principal Platform Architect"),
+                ]
+            }
+        )
+
+        run = run_job_discovery(
+            session,
+            search_definition_id=search_id,
+            provider_name="fake",
+            provider=provider,
+            fetcher=FakeFetcher({}),
+            validator=FakeValidator({}),
+            ashby_validator=FakeAshbyValidator(),
+            connector=connector,
+            config=_config(),
+        )
+        observations = list_job_discovery_observations(session, discovery_run_id=run.id)
+
+        assert run.status == "completed"
+        assert connector.fetch_calls == ["Beta"]
+        assert len(observations) == 2
+        assert all(record.observation.imported_job_lead_id is not None for record in observations)
+        source = session.scalar(select(JobSourceConfigurationModel))
+        assert source is not None
+        assert source.provider == JobSourceProvider.ASHBY.value
+        assert source.board_token == "Beta"
 
 
 def test_run_job_discovery_reuses_prior_resolution_and_avoids_duplicate_sources_and_jobs(
