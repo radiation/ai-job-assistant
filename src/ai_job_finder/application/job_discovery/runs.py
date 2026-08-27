@@ -485,6 +485,10 @@ def _import_detected_source(
                 stale_after_seconds=config.stale_after_seconds,
             )
         except Exception as exc:
+            counters.errors = _append_error(
+                counters.errors,
+                f"Import failed for {observation.normalized_url}: {exc}",
+            )
             import_outcome = _CachedImportOutcome(
                 import_run_id=None,
                 import_status=None,
