@@ -35,11 +35,23 @@ from ai_job_finder.application.job_searches import (
     update_job_search_definition,
 )
 from ai_job_finder.application.source_detection import SourceDetectionConfig
+from ai_job_finder.domain.enums import WorkplaceType
 from ai_job_finder.domain.errors import DomainError, NotFoundError
+from ai_job_finder.domain.job_searches import JobSearchDomain, JobSearchSeniority
 from ai_job_finder.infrastructure.database.models import JobSearchDefinitionModel
 from ai_job_finder.web.dependencies import DbSession, render_template, split_multivalue
 
 router = APIRouter(tags=["web"])
+
+_CHECKBOX_FIELDS = {
+    "target_domains",
+    "target_seniority_levels",
+    "allowed_workplace_types",
+}
+
+_FIELD_LABEL_OVERRIDES = {
+    "vice_president": "VP",
+}
 
 _FIELD_LABELS = {
     "name": "Name",
@@ -60,30 +72,48 @@ class SearchListItem:
     run_count: int
 
 
-def _form_defaults() -> dict[str, str]:
+@dataclass(frozen=True, slots=True)
+class FormOption:
+    value: str
+    label: str
+
+
+def _display_label(value: str) -> str:
+    return _FIELD_LABEL_OVERRIDES.get(value, value.replace("_", " ").title())
+
+
+def _options_for(
+    enum_type: type[JobSearchDomain] | type[JobSearchSeniority] | type[WorkplaceType],
+) -> list[FormOption]:
+    return [
+        FormOption(value=option.value, label=_display_label(option.value)) for option in enum_type
+    ]
+
+
+def _form_defaults() -> dict[str, Any]:
     return {
         "name": "",
         "title_include_patterns": "",
         "title_exclude_patterns": "",
-        "target_domains": "",
-        "target_seniority_levels": "",
+        "target_domains": [],
+        "target_seniority_levels": [],
         "allowed_locations": "",
         "allowed_remote_geographies": "",
-        "allowed_workplace_types": "",
+        "allowed_workplace_types": [],
         "minimum_score_threshold": "70",
     }
 
 
-def _values_from_search(search: JobSearchDefinitionModel) -> dict[str, str]:
+def _values_from_search(search: JobSearchDefinitionModel) -> dict[str, Any]:
     return {
         "name": str(search.name),
         "title_include_patterns": "\n".join(search.title_include_patterns),
         "title_exclude_patterns": "\n".join(search.title_exclude_patterns),
-        "target_domains": "\n".join(search.target_domains),
-        "target_seniority_levels": "\n".join(search.target_seniority_levels),
+        "target_domains": list(search.target_domains),
+        "target_seniority_levels": list(search.target_seniority_levels),
         "allowed_locations": "\n".join(search.allowed_locations),
         "allowed_remote_geographies": "\n".join(search.allowed_remote_geographies),
-        "allowed_workplace_types": "\n".join(search.allowed_workplace_types),
+        "allowed_workplace_types": list(search.allowed_workplace_types),
         "minimum_score_threshold": f"{search.minimum_score_threshold:g}",
     }
 
@@ -91,7 +121,7 @@ def _values_from_search(search: JobSearchDefinitionModel) -> dict[str, str]:
 def _form_context(
     *,
     page_title: str,
-    values: dict[str, str],
+    values: dict[str, Any],
     errors: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     field_errors = errors or {}
@@ -100,6 +130,9 @@ def _form_context(
         "form_values": values,
         "form_errors": field_errors,
         "form_error_summary": list(dict.fromkeys(field_errors.values())),
+        "domain_options": _options_for(JobSearchDomain),
+        "seniority_options": _options_for(JobSearchSeniority),
+        "workplace_type_options": _options_for(WorkplaceType),
     }
 
 
@@ -141,18 +174,37 @@ def _validation_errors(exc: ValidationError) -> dict[str, str]:
     return field_errors
 
 
-def _parse_form(values: dict[str, str]) -> JobSearchDefinitionCreateRequest:
+def _selected_values(raw_values: list[str]) -> list[str]:
+    selected: list[str] = []
+    for raw_value in raw_values:
+        for value in split_multivalue(raw_value):
+            if value not in selected:
+                selected.append(value)
+    return selected
+
+
+def _read_form_values(form: Any) -> dict[str, Any]:
+    values: dict[str, Any] = {}
+    for field, default in _form_defaults().items():
+        if field in _CHECKBOX_FIELDS:
+            values[field] = _selected_values([str(value) for value in form.getlist(field)])
+            continue
+        values[field] = str(form.get(field, default))
+    return values
+
+
+def _parse_form(values: dict[str, Any]) -> JobSearchDefinitionCreateRequest:
     return JobSearchDefinitionCreateRequest.model_validate(
         {
             "name": values["name"],
             "enabled": True,
             "title_include_patterns": split_multivalue(values["title_include_patterns"]),
             "title_exclude_patterns": split_multivalue(values["title_exclude_patterns"]),
-            "target_domains": split_multivalue(values["target_domains"]),
-            "target_seniority_levels": split_multivalue(values["target_seniority_levels"]),
+            "target_domains": values["target_domains"],
+            "target_seniority_levels": values["target_seniority_levels"],
             "allowed_locations": split_multivalue(values["allowed_locations"]),
             "allowed_remote_geographies": split_multivalue(values["allowed_remote_geographies"]),
-            "allowed_workplace_types": split_multivalue(values["allowed_workplace_types"]),
+            "allowed_workplace_types": values["allowed_workplace_types"],
             "minimum_score_threshold": values["minimum_score_threshold"],
         }
     )
@@ -183,7 +235,7 @@ def job_searches_new(request: Request) -> Response:
 @router.post("/job-searches")
 async def job_searches_create(request: Request, session: DbSession) -> Response:
     form = await request.form()
-    values = {field: str(form.get(field, "")) for field in _form_defaults()}
+    values = _read_form_values(form)
     try:
         payload = _parse_form(values)
     except ValidationError as exc:
@@ -255,9 +307,7 @@ def job_searches_detail(
             "search": search,
             "runs": list_job_search_runs(session, search_definition_id=search.id),
             "discovery_runs": list_job_discovery_runs(session, search_definition_id=search.id),
-            "form_values": _values_from_search(search),
-            "form_errors": {},
-            "form_error_summary": [],
+            **_form_context(page_title=search.name, values=_values_from_search(search)),
         },
     )
 
@@ -269,7 +319,7 @@ async def job_searches_update(
     session: DbSession,
 ) -> Response:
     form = await request.form()
-    values = {field: str(form.get(field, "")) for field in _form_defaults()}
+    values = _read_form_values(form)
     try:
         payload = _parse_form(values)
     except ValidationError as exc:
@@ -283,9 +333,7 @@ async def job_searches_update(
                 "search": search,
                 "runs": list_job_search_runs(session, search_definition_id=search.id),
                 "discovery_runs": list_job_discovery_runs(session, search_definition_id=search.id),
-                "form_values": values,
-                "form_errors": errors,
-                "form_error_summary": list(dict.fromkeys(errors.values())),
+                **_form_context(page_title=search.name, values=values, errors=errors),
             },
             status_code=422,
         )
@@ -313,9 +361,7 @@ async def job_searches_update(
                 "search": search,
                 "runs": list_job_search_runs(session, search_definition_id=search.id),
                 "discovery_runs": list_job_discovery_runs(session, search_definition_id=search.id),
-                "form_values": values,
-                "form_errors": {"name": str(exc)},
-                "form_error_summary": [str(exc)],
+                **_form_context(page_title=search.name, values=values, errors={"name": str(exc)}),
             },
             status_code=409,
         )

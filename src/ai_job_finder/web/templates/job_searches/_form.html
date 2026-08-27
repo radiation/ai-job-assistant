@@ -28,16 +28,30 @@
   <textarea id="title_exclude_patterns" name="title_exclude_patterns" rows="4">{{ form_values.title_exclude_patterns }}</textarea>
   {% if form_errors.title_exclude_patterns %}<p class="field-error">{{ form_errors.title_exclude_patterns }}</p>{% endif %}
 </div>
-<div class="field-group">
-  <label for="target_domains">Target domains</label>
-  <textarea id="target_domains" name="target_domains" rows="4">{{ form_values.target_domains }}</textarea>
+<fieldset class="field-group checkbox-fieldset">
+  <legend>Target domains</legend>
+  <div class="checkbox-grid">
+    {% for option in domain_options %}
+      <label class="checkbox-option">
+        <input type="checkbox" name="target_domains" value="{{ option.value }}" {% if option.value in form_values.target_domains %}checked{% endif %} />
+        <span>{{ option.label }}</span>
+      </label>
+    {% endfor %}
+  </div>
   {% if form_errors.target_domains %}<p class="field-error">{{ form_errors.target_domains }}</p>{% endif %}
-</div>
-<div class="field-group">
-  <label for="target_seniority_levels">Target seniority levels</label>
-  <textarea id="target_seniority_levels" name="target_seniority_levels" rows="4">{{ form_values.target_seniority_levels }}</textarea>
+</fieldset>
+<fieldset class="field-group checkbox-fieldset">
+  <legend>Target seniority levels</legend>
+  <div class="checkbox-grid">
+    {% for option in seniority_options %}
+      <label class="checkbox-option">
+        <input type="checkbox" name="target_seniority_levels" value="{{ option.value }}" {% if option.value in form_values.target_seniority_levels %}checked{% endif %} />
+        <span>{{ option.label }}</span>
+      </label>
+    {% endfor %}
+  </div>
   {% if form_errors.target_seniority_levels %}<p class="field-error">{{ form_errors.target_seniority_levels }}</p>{% endif %}
-</div>
+</fieldset>
 <div class="field-group">
   <label for="allowed_locations">Allowed locations</label>
   <textarea id="allowed_locations" name="allowed_locations" rows="4">{{ form_values.allowed_locations }}</textarea>
@@ -48,8 +62,15 @@
   <textarea id="allowed_remote_geographies" name="allowed_remote_geographies" rows="4">{{ form_values.allowed_remote_geographies }}</textarea>
   {% if form_errors.allowed_remote_geographies %}<p class="field-error">{{ form_errors.allowed_remote_geographies }}</p>{% endif %}
 </div>
-<div class="field-group">
-  <label for="allowed_workplace_types">Allowed workplace types</label>
-  <textarea id="allowed_workplace_types" name="allowed_workplace_types" rows="3">{{ form_values.allowed_workplace_types }}</textarea>
+<fieldset class="field-group checkbox-fieldset">
+  <legend>Allowed workplace types</legend>
+  <div class="checkbox-grid">
+    {% for option in workplace_type_options %}
+      <label class="checkbox-option">
+        <input type="checkbox" name="allowed_workplace_types" value="{{ option.value }}" {% if option.value in form_values.allowed_workplace_types %}checked{% endif %} />
+        <span>{{ option.label }}</span>
+      </label>
+    {% endfor %}
+  </div>
   {% if form_errors.allowed_workplace_types %}<p class="field-error">{{ form_errors.allowed_workplace_types }}</p>{% endif %}
-</div>
+</fieldset>
