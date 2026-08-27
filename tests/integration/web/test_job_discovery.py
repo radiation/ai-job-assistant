@@ -225,8 +225,11 @@ def test_job_discovery_web_run_history_and_detail(
     detail_response = client.get(run_response.headers["location"])
     assert detail_response.status_code == 200
     assert "Manual discovery run details." in detail_response.text
-    assert "Generated queries" in detail_response.text
-    assert "Observed candidates" in detail_response.text
+    assert "Search phase" in detail_response.text
+    assert "Discovery phase" in detail_response.text
+    assert "Import phase" in detail_response.text
+    assert "Top matched jobs" in detail_response.text
+    assert "Surfaced in /discover" in detail_response.text
     assert "Director, Platform Engineering" in detail_response.text
     assert "Matched" in detail_response.text
 

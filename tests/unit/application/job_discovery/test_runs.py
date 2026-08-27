@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from ai_job_finder.application.job_discovery import (
     JobDiscoveryConfig,
+    get_job_discovery_run_detail,
     list_job_discovery_observations,
     run_job_discovery,
 )
@@ -721,6 +722,224 @@ def test_run_job_discovery_reuses_prior_resolution_and_avoids_duplicate_sources_
         assert second_fetcher.calls == []
         assert len(list(session.scalars(select(JobSourceConfigurationModel)))) == 1
         assert len(list(session.scalars(select(JobLeadModel)))) == 1
+
+
+def test_get_job_discovery_run_detail_marks_previously_seen_urls_and_reused_sources(
+    session_factory: sessionmaker[Session],
+) -> None:
+    with session_factory() as session:
+        _seed_candidate(session)
+        search_id = _search(session)
+        search = get_job_search_definition(session, search_id)
+        queries = generate_job_discovery_queries(
+            search.to_snapshot(), max_queries=4, result_limit=5
+        )
+        job_url = "https://boards.greenhouse.io/beta/jobs/strong"
+        provider = FakeJobDiscoveryProvider(
+            results_by_query={
+                queries[0].rendered_query: [
+                    DiscoveredJobCandidate(
+                        discovered_url=job_url,
+                        provider_name="fake",
+                        query_identifier=queries[0].stable_query_id,
+                        rank=1,
+                        title_hint="Director, Platform Engineering",
+                        company_hint="Beta",
+                    )
+                ]
+            }
+        )
+        connector = BoardAwareConnector(
+            jobs_by_token={
+                "beta": [
+                    _posting_for_board(
+                        "beta",
+                        "Beta",
+                        "strong",
+                        "Director, Platform Engineering",
+                    )
+                ]
+            }
+        )
+
+        first_run = run_job_discovery(
+            session,
+            search_definition_id=search_id,
+            provider_name="fake",
+            provider=provider,
+            fetcher=CountingFetcher({job_url: _page_for_token(job_url, "beta")}),
+            validator=connector,
+            connector=connector,
+            config=_config(),
+        )
+        second_run = run_job_discovery(
+            session,
+            search_definition_id=search_id,
+            provider_name="fake",
+            provider=provider,
+            fetcher=CountingFetcher({}),
+            validator=connector,
+            connector=connector,
+            config=_config(),
+        )
+
+        assert first_run.status == "completed"
+        detail = get_job_discovery_run_detail(session, second_run.id)
+
+        assert len(detail.observations) == 1
+        assert detail.observations[0].previously_seen is True
+        assert detail.observations[0].reused_prior_resolution is True
+        assert detail.observations[0].source_created_in_run is False
+        assert len(detail.imports) == 1
+        assert detail.imports[0].source_created_in_run is False
+        assert detail.imports[0].import_run is not None
+        assert detail.imports[0].import_run.jobs_unchanged == 1
+        assert detail.matching_summary.saved_search_match_count == 1
+        assert detail.matching_summary.surfaced_in_discover_count == 1
+        assert detail.top_matches[0].surfaced_in_discover is True
+
+
+def test_get_job_discovery_run_detail_distinguishes_ambiguous_unsupported_and_failed_imports(
+    session_factory: sessionmaker[Session],
+) -> None:
+    with session_factory() as session:
+        _seed_candidate(session)
+        search_id = _search(session)
+        search = get_job_search_definition(session, search_id)
+        queries = generate_job_discovery_queries(
+            search.to_snapshot(), max_queries=4, result_limit=5
+        )
+        beta_first_url = "https://boards.greenhouse.io/beta/jobs/111"
+        beta_second_url = "https://boards.greenhouse.io/beta/jobs/222"
+        ambiguous_url = "https://example.com/ambiguous"
+        unsupported_url = "https://example.com/unsupported"
+        failed_url = "https://boards.greenhouse.io/gamma/jobs/fail"
+        provider = FakeJobDiscoveryProvider(
+            results_by_query={
+                queries[0].rendered_query: [
+                    DiscoveredJobCandidate(
+                        discovered_url=beta_first_url,
+                        provider_name="fake",
+                        query_identifier=queries[0].stable_query_id,
+                        rank=1,
+                        title_hint="Director, Platform Engineering",
+                        company_hint="Beta",
+                    ),
+                    DiscoveredJobCandidate(
+                        discovered_url=beta_second_url,
+                        provider_name="fake",
+                        query_identifier=queries[0].stable_query_id,
+                        rank=2,
+                        title_hint="Principal Platform Architect",
+                        company_hint="Beta",
+                    ),
+                    DiscoveredJobCandidate(
+                        discovered_url=ambiguous_url,
+                        provider_name="fake",
+                        query_identifier=queries[0].stable_query_id,
+                        rank=3,
+                    ),
+                    DiscoveredJobCandidate(
+                        discovered_url=unsupported_url,
+                        provider_name="fake",
+                        query_identifier=queries[0].stable_query_id,
+                        rank=4,
+                    ),
+                    DiscoveredJobCandidate(
+                        discovered_url=failed_url,
+                        provider_name="fake",
+                        query_identifier=queries[0].stable_query_id,
+                        rank=5,
+                        title_hint="Director, Platform Engineering",
+                        company_hint="Gamma",
+                    ),
+                ]
+            }
+        )
+        connector = BoardAwareConnector(
+            jobs_by_token={
+                "beta": [
+                    _posting_for_board("beta", "Beta", "111", "Director, Platform Engineering"),
+                    _posting_for_board("beta", "Beta", "222", "Principal Platform Architect"),
+                ],
+                "gamma": [],
+            },
+            errors_by_token={"gamma": JobSourceProviderError("provider unavailable")},
+        )
+        validator = FakeValidator(
+            {
+                "acme": GreenhouseBoardValidation(token="acme", status="valid", valid=True),
+                "beta": GreenhouseBoardValidation(token="beta", status="valid", valid=True),
+                "gamma": GreenhouseBoardValidation(token="gamma", status="valid", valid=True),
+            }
+        )
+
+        detail_run = run_job_discovery(
+            session,
+            search_definition_id=search_id,
+            provider_name="fake",
+            provider=provider,
+            fetcher=FakeFetcher(
+                {
+                    beta_first_url: _page_for_token(beta_first_url, "beta"),
+                    beta_second_url: _page_for_token(beta_second_url, "beta"),
+                    ambiguous_url: PublicPage(
+                        requested_url=ambiguous_url,
+                        final_url=ambiguous_url,
+                        content_type="text/html",
+                        text=(
+                            '<a href="https://boards.greenhouse.io/acme">A</a>'
+                            '<a href="https://job-boards.greenhouse.io/beta">B</a>'
+                        ),
+                    ),
+                    unsupported_url: PublicPage(
+                        requested_url=unsupported_url,
+                        final_url=unsupported_url,
+                        content_type="text/html",
+                        text="https://example.com/jobs/1",
+                    ),
+                    failed_url: _page_for_token(failed_url, "gamma"),
+                }
+            ),
+            validator=validator,
+            connector=connector,
+            config=_config(),
+        )
+        detail = get_job_discovery_run_detail(session, detail_run.id)
+
+        observations_by_url = {
+            record.observation.normalized_url: record for record in detail.observations
+        }
+
+        assert detail_run.status == "partial"
+        assert observations_by_url[beta_second_url].source_reused_in_run is True
+        assert (
+            observations_by_url[ambiguous_url].observation.processing_status
+            == JobDiscoveryObservationStatus.AMBIGUOUS.value
+        )
+        assert (
+            observations_by_url[unsupported_url].observation.processing_status
+            == JobDiscoveryObservationStatus.UNSUPPORTED.value
+        )
+        assert (
+            observations_by_url[failed_url].observation.processing_status
+            == JobDiscoveryObservationStatus.FAILED.value
+        )
+
+        imports_by_token = {
+            record.source_configuration.board_token: record for record in detail.imports
+        }
+        assert imports_by_token["beta"].source_reused_in_run is True
+        assert imports_by_token["beta"].import_run is not None
+        assert imports_by_token["beta"].import_run.jobs_created == 2
+        assert imports_by_token["gamma"].import_status == "failed"
+        assert "provider unavailable" in (imports_by_token["gamma"].failure_message or "")
+
+        assert detail.matching_summary.canonical_jobs_evaluated == 2
+        assert detail.matching_summary.saved_search_match_count == 1
+        assert detail.top_matches[0].job_lead.title == "Director, Platform Engineering"
+        assert detail.top_matches[0].evaluation is not None
+        assert detail.discover_jobs[0].job_lead.title == "Director, Platform Engineering"
 
 
 def test_run_job_discovery_does_not_auto_promote_ambiguous_or_unsupported_sources(

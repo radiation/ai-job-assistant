@@ -228,7 +228,13 @@ def test_job_discovery_api_run_list_detail_and_observations(
 
     detail_response = client.get(f"/api/v1/job-discovery-runs/{run_id}")
     assert detail_response.status_code == 200
-    assert len(detail_response.json()["queries"]) >= 1
+    detail_payload = detail_response.json()
+    assert len(detail_payload["queries"]) >= 1
+    assert len(detail_payload["observations"]) == 2
+    assert len(detail_payload["imports"]) == 1
+    assert detail_payload["matching_summary"]["saved_search_match_count"] == 1
+    assert detail_payload["top_matches"][0]["title"] == "Director, Platform Engineering"
+    assert detail_payload["discover_jobs"][0]["title"] == "Director, Platform Engineering"
 
     observations_response = client.get(f"/api/v1/job-discovery-runs/{run_id}/observations")
     assert observations_response.status_code == 200

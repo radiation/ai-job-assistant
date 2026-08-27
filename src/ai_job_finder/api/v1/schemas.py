@@ -550,9 +550,85 @@ class JobDiscoveryObservationResponse(BaseModel):
     job_evaluation_id: UUID | None
 
 
+class JobDiscoveryDetailObservationResponse(BaseModel):
+    id: UUID
+    query_ordinals: list[int]
+    provider: str
+    discovered_url: str
+    normalized_url: str
+    title_hint: str | None
+    company_hint: str | None
+    location_hint: str | None
+    source_detection_status: SourceDetectionRunStatus | None
+    source_detection_run_id: UUID | None
+    detected_provider: str | None
+    previously_seen: bool
+    reused_prior_resolution: bool
+    source_configuration_id: UUID | None
+    source_display_name: str | None
+    source_company_name: str | None
+    source_board_token: str | None
+    source_created_in_run: bool
+    source_reused_in_run: bool
+    import_run_id: UUID | None
+    imported_job_lead_id: UUID | None
+    processing_status: JobDiscoveryObservationStatus
+    exclusion_reason: str | None
+    matched: bool | None
+    score_at_match_time: float | None
+
+
+class JobDiscoveryImportResponse(BaseModel):
+    source_configuration_id: UUID
+    provider: str
+    display_name: str
+    company_name: str
+    board_token: str
+    imported_during_run: bool
+    source_created_in_run: bool
+    source_reused_in_run: bool
+    observation_count: int
+    import_run_id: UUID | None
+    import_status: str | None
+    jobs_created: int
+    jobs_updated: int
+    jobs_unchanged: int
+    jobs_failed: int
+    failure_message: str | None
+
+
+class JobDiscoveryMatchingSummaryResponse(BaseModel):
+    canonical_jobs_evaluated: int
+    location_eligible_count: int
+    location_needs_review_count: int
+    location_ineligible_count: int
+    saved_search_match_count: int
+    actionable_match_count: int
+    surfaced_in_discover_count: int
+
+
+class JobDiscoveryMatchedJobResponse(BaseModel):
+    observation_id: UUID
+    job_lead_id: UUID
+    title: str
+    company_name: str
+    location_text: str | None
+    score: float | None
+    recommendation: Recommendation | None
+    explanation: str | None
+    location_eligibility_status: JobLocationEligibilityStatus
+    location_eligibility_summary: str
+    surfaced_in_discover: bool
+
+
 class JobDiscoveryRunDetailResponse(BaseModel):
     run: JobDiscoveryRunResponse
     queries: list[JobDiscoveryQueryResponse]
+    observations: list[JobDiscoveryDetailObservationResponse]
+    imports: list[JobDiscoveryImportResponse]
+    matching_summary: JobDiscoveryMatchingSummaryResponse
+    top_matches: list[JobDiscoveryMatchedJobResponse]
+    discover_jobs: list[JobDiscoveryMatchedJobResponse]
 
 
 class DiscoveredLeadResponse(BaseModel):
