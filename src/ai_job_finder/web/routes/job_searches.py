@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Any
 from uuid import UUID
 
 from fastapi import APIRouter, Request, Response, status
 from fastapi.responses import RedirectResponse
 from pydantic import ValidationError
+from pydantic_core import ErrorDetails
 
 from ai_job_finder.api.v1.routes.dependencies import (
     GreenhouseBoardValidatorDependency,
@@ -38,6 +40,18 @@ from ai_job_finder.infrastructure.database.models import JobSearchDefinitionMode
 from ai_job_finder.web.dependencies import DbSession, render_template, split_multivalue
 
 router = APIRouter(tags=["web"])
+
+_FIELD_LABELS = {
+    "name": "Name",
+    "title_include_patterns": "Title include pattern",
+    "title_exclude_patterns": "Title exclude pattern",
+    "target_domains": "Target domain",
+    "target_seniority_levels": "Target seniority level",
+    "allowed_locations": "Allowed location",
+    "allowed_remote_geographies": "Allowed remote geography",
+    "allowed_workplace_types": "Allowed workplace type",
+    "minimum_score_threshold": "Minimum score threshold",
+}
 
 
 @dataclass(slots=True)
@@ -74,12 +88,56 @@ def _values_from_search(search: JobSearchDefinitionModel) -> dict[str, str]:
     }
 
 
+def _form_context(
+    *,
+    page_title: str,
+    values: dict[str, str],
+    errors: dict[str, str] | None = None,
+) -> dict[str, Any]:
+    field_errors = errors or {}
+    return {
+        "page_title": page_title,
+        "form_values": values,
+        "form_errors": field_errors,
+        "form_error_summary": list(dict.fromkeys(field_errors.values())),
+    }
+
+
+def _validation_error_field(error: ErrorDetails) -> str | None:
+    for item in error.get("loc", []):
+        if isinstance(item, str):
+            return item
+    return None
+
+
+def _format_validation_error(field_name: str, error: ErrorDetails) -> str:
+    error_type = str(error.get("type", ""))
+    value = error.get("input")
+
+    if field_name == "name" and error_type == "string_too_short":
+        return "Name is required."
+
+    if field_name == "minimum_score_threshold":
+        if error_type in {"float_parsing", "float_type"}:
+            return "Minimum score threshold must be a number between 0 and 100."
+        if error_type in {"greater_than_equal", "less_than_equal"}:
+            return "Minimum score threshold must be between 0 and 100."
+
+    if error_type == "enum":
+        return (
+            f'{_FIELD_LABELS.get(field_name, field_name.replace("_", " "))} "{value}" is not valid.'
+        )
+
+    return str(error["msg"])
+
+
 def _validation_errors(exc: ValidationError) -> dict[str, str]:
     field_errors: dict[str, str] = {}
     for error in exc.errors():
-        location = error.get("loc", [])
-        if location:
-            field_errors.setdefault(str(location[-1]), str(error["msg"]))
+        field_name = _validation_error_field(error)
+        if field_name is None:
+            continue
+        field_errors.setdefault(field_name, _format_validation_error(field_name, error))
     return field_errors
 
 
@@ -118,7 +176,7 @@ def job_searches_new(request: Request) -> Response:
     return render_template(
         request,
         "job_searches/new.html",
-        {"page_title": "New Saved Search", "form_values": _form_defaults(), "form_errors": {}},
+        _form_context(page_title="New Saved Search", values=_form_defaults()),
     )
 
 
@@ -132,11 +190,11 @@ async def job_searches_create(request: Request, session: DbSession) -> Response:
         return render_template(
             request,
             "job_searches/new.html",
-            {
-                "page_title": "New Saved Search",
-                "form_values": values,
-                "form_errors": _validation_errors(exc),
-            },
+            _form_context(
+                page_title="New Saved Search",
+                values=values,
+                errors=_validation_errors(exc),
+            ),
             status_code=422,
         )
     try:
@@ -157,11 +215,11 @@ async def job_searches_create(request: Request, session: DbSession) -> Response:
         return render_template(
             request,
             "job_searches/new.html",
-            {
-                "page_title": "New Saved Search",
-                "form_values": values,
-                "form_errors": {"name": str(exc)},
-            },
+            _form_context(
+                page_title="New Saved Search",
+                values=values,
+                errors={"name": str(exc)},
+            ),
             status_code=409,
         )
     return RedirectResponse(
@@ -199,6 +257,7 @@ def job_searches_detail(
             "discovery_runs": list_job_discovery_runs(session, search_definition_id=search.id),
             "form_values": _values_from_search(search),
             "form_errors": {},
+            "form_error_summary": [],
         },
     )
 
@@ -214,6 +273,7 @@ async def job_searches_update(
     try:
         payload = _parse_form(values)
     except ValidationError as exc:
+        errors = _validation_errors(exc)
         search = get_job_search_definition(session, search_definition_id)
         return render_template(
             request,
@@ -224,7 +284,8 @@ async def job_searches_update(
                 "runs": list_job_search_runs(session, search_definition_id=search.id),
                 "discovery_runs": list_job_discovery_runs(session, search_definition_id=search.id),
                 "form_values": values,
-                "form_errors": _validation_errors(exc),
+                "form_errors": errors,
+                "form_error_summary": list(dict.fromkeys(errors.values())),
             },
             status_code=422,
         )
@@ -254,6 +315,7 @@ async def job_searches_update(
                 "discovery_runs": list_job_discovery_runs(session, search_definition_id=search.id),
                 "form_values": values,
                 "form_errors": {"name": str(exc)},
+                "form_error_summary": [str(exc)],
             },
             status_code=409,
         )

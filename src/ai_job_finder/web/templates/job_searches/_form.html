@@ -1,3 +1,13 @@
+{% if form_error_summary %}
+  <div class="flash flash-error" aria-live="polite">
+    <p>Review the highlighted fields.</p>
+    <ul>
+      {% for message in form_error_summary %}
+        <li>{{ message }}</li>
+      {% endfor %}
+    </ul>
+  </div>
+{% endif %}
 <div class="field-group">
   <label for="name">Name</label>
   <input id="name" name="name" value="{{ form_values.name }}" />
