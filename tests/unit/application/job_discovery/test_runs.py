@@ -4,6 +4,7 @@ from collections.abc import Iterator
 from dataclasses import replace
 from datetime import UTC, datetime
 from typing import Any, cast
+from urllib.parse import urlsplit
 from uuid import UUID
 
 import pytest
@@ -1662,9 +1663,10 @@ def test_run_job_discovery_keeps_supported_and_unknown_hosts_eligible_for_source
         observations = list_job_discovery_observations(session, discovery_run_id=run.id)
 
         assert run.status == "completed"
+        hostname = urlsplit(url).hostname
         expected_fetches = (
             []
-            if ".greenhouse.io" in url or "jobs.ashbyhq.com" in url or "jobs.lever.co" in url
+            if hostname in {"boards.greenhouse.io", "jobs.ashbyhq.com", "jobs.lever.co"}
             else [url]
         )
         assert fetcher.calls == expected_fetches

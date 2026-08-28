@@ -30,18 +30,20 @@ class GreenhouseUrl:
 
 
 def parse_greenhouse_url(url: str) -> GreenhouseUrl | None:
+    greenhouse_board_token_pattern = ASHBY_BOARD_TOKEN_PATTERN
+    greenhouse_posting_id_pattern = LEVER_POSTING_ID_PATTERN
     parts = urlsplit(url)
     if (parts.hostname or "").casefold().rstrip(".") not in GREENHOUSE_HOSTS:
         return None
     path_parts = [part for part in parts.path.split("/") if part]
-    if not path_parts or not ASHBY_BOARD_TOKEN_PATTERN.fullmatch(path_parts[0]):
+    if not path_parts or not greenhouse_board_token_pattern.fullmatch(path_parts[0]):
         return None
     if len(path_parts) == 1:
         return GreenhouseUrl(board_token=path_parts[0].casefold(), external_posting_id=None)
     if (
         len(path_parts) != 3
         or path_parts[1].casefold() != "jobs"
-        or not LEVER_POSTING_ID_PATTERN.fullmatch(path_parts[2])
+        or not greenhouse_posting_id_pattern.fullmatch(path_parts[2])
     ):
         return None
     return GreenhouseUrl(board_token=path_parts[0].casefold(), external_posting_id=path_parts[2])
