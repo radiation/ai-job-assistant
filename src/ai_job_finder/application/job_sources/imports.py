@@ -40,6 +40,9 @@ from ai_job_finder.infrastructure.database.models import (
 @dataclass(frozen=True, slots=True)
 class JobSourceImportResult:
     run: JobImportRunModel
+    created_job_lead_ids: tuple[UUID, ...]
+    updated_job_lead_ids: tuple[UUID, ...]
+    unchanged_job_lead_ids: tuple[UUID, ...]
     surfaced_job_lead_ids: tuple[UUID, ...]
 
 
@@ -271,6 +274,9 @@ def run_job_source_import_with_result(
     run = _create_running_import_run(session, source=source)
 
     seen_external_ids: set[str] = set()
+    created_job_lead_ids: list[UUID] = []
+    updated_job_lead_ids: list[UUID] = []
+    unchanged_job_lead_ids: list[UUID] = []
     surfaced_job_lead_ids: list[UUID] = []
     try:
         result = connector.fetch_jobs(source.to_snapshot())
@@ -297,10 +303,13 @@ def run_job_source_import_with_result(
                     )
                 if created:
                     run.jobs_created += 1
+                    created_job_lead_ids.append(observation.job_lead_id)
                 elif changed:
                     run.jobs_updated += 1
+                    updated_job_lead_ids.append(observation.job_lead_id)
                 else:
                     run.jobs_unchanged += 1
+                    unchanged_job_lead_ids.append(observation.job_lead_id)
                 surfaced_job_lead_ids.append(observation.job_lead_id)
                 if created or scoring_change:
                     try:
@@ -353,6 +362,9 @@ def run_job_source_import_with_result(
                 status=terminal_status,
                 error_message=run.error_message,
             ),
+            created_job_lead_ids=tuple(dict.fromkeys(created_job_lead_ids)),
+            updated_job_lead_ids=tuple(dict.fromkeys(updated_job_lead_ids)),
+            unchanged_job_lead_ids=tuple(dict.fromkeys(unchanged_job_lead_ids)),
             surfaced_job_lead_ids=tuple(dict.fromkeys(surfaced_job_lead_ids)),
         )
     except (JobSourceProviderError, SuspiciousEmptyJobSourceResultError) as exc:
@@ -370,6 +382,9 @@ def run_job_source_import_with_result(
                 error_message=_safe_error_message(exc, context="Source import failed"),
                 original_exc=exc,
             ),
+            created_job_lead_ids=(),
+            updated_job_lead_ids=(),
+            unchanged_job_lead_ids=(),
             surfaced_job_lead_ids=(),
         )
     except Exception as exc:
@@ -383,6 +398,9 @@ def run_job_source_import_with_result(
                 error_message=_safe_error_message(exc, context="Unexpected source import failure"),
                 original_exc=exc,
             ),
+            created_job_lead_ids=(),
+            updated_job_lead_ids=(),
+            unchanged_job_lead_ids=(),
             surfaced_job_lead_ids=(),
         )
 

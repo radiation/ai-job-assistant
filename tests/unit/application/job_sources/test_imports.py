@@ -300,6 +300,7 @@ def test_import_result_exposes_canonical_leads_for_all_supported_providers(
         )
 
         assert result.run.jobs_created == 1
+        assert result.created_job_lead_ids == result.surfaced_job_lead_ids
         assert len(result.surfaced_job_lead_ids) == 1
         assert result.surfaced_job_lead_ids[0] == session.scalar(select(JobLeadModel.id))
 
