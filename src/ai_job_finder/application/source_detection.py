@@ -28,8 +28,7 @@ from ai_job_finder.domain.errors import (
 )
 from ai_job_finder.domain.job_discovery.targeting import (
     GREENHOUSE_HOSTS,
-    parse_ashby_url,
-    parse_lever_url,
+    parse_supported_ats_url,
 )
 from ai_job_finder.domain.job_sources import JobSourceConnector
 from ai_job_finder.domain.source_detection import (
@@ -282,13 +281,9 @@ def _detect(
     final_url = None
     page: PublicPage | None = None
     if input_url:
-        canonical_url = parse_ashby_url(input_url) or parse_lever_url(input_url)
+        canonical_url = parse_supported_ats_url(input_url)
         if canonical_url is not None:
-            provider = (
-                JobSourceProvider.ASHBY
-                if parse_ashby_url(input_url) is not None
-                else JobSourceProvider.LEVER
-            )
+            provider = canonical_url.provider
             validation = board_validator.validate(provider, canonical_url.board_token)
             candidate = _candidate_payload(
                 token=canonical_url.board_token,
