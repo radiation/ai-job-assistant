@@ -661,6 +661,7 @@ def _finalize_imported_observation(
         session,
         source_configuration_id=source_configuration_id,
         normalized_url=observation.normalized_url,
+        source_detection_run_id=observation.source_detection_run_id,
     )
     if lead is not None:
         observation.imported_job_lead_id = lead.id
@@ -680,22 +681,37 @@ def _resolve_imported_job_lead(
     *,
     source_configuration_id: UUID,
     normalized_url: str,
+    source_detection_run_id: UUID | None = None,
 ) -> JobLeadModel | None:
     parsed_url = parse_supported_ats_url(normalized_url)
-    if parsed_url is not None and parsed_url.external_posting_id is not None:
-        source = session.get(JobSourceConfigurationModel, source_configuration_id)
-        if source is not None and source.provider == parsed_url.provider.value:
-            observation = session.scalar(
-                select(JobSourceObservationModel)
-                .options(joinedload(JobSourceObservationModel.job_lead))
-                .where(
-                    JobSourceObservationModel.source_configuration_id == source_configuration_id,
-                    JobSourceObservationModel.provider == parsed_url.provider.value,
-                    JobSourceObservationModel.external_post_id == parsed_url.external_posting_id,
-                )
+    source = session.get(JobSourceConfigurationModel, source_configuration_id)
+    external_posting_id = parsed_url.external_posting_id if parsed_url is not None else None
+    provider = parsed_url.provider.value if parsed_url is not None else None
+    if source_detection_run_id is not None and source is not None:
+        detection_run = session.get(SourceDetectionRunModel, source_detection_run_id)
+        if detection_run is not None:
+            for candidate in detection_run.candidate_tokens:
+                if (
+                    isinstance(candidate, dict)
+                    and candidate.get("provider") == source.provider
+                    and candidate.get("token") == source.board_token
+                    and isinstance(candidate.get("selected_external_posting_id"), str)
+                ):
+                    external_posting_id = candidate["selected_external_posting_id"]
+                    provider = source.provider
+                    break
+    if source is not None and provider == source.provider and external_posting_id is not None:
+        observation = session.scalar(
+            select(JobSourceObservationModel)
+            .options(joinedload(JobSourceObservationModel.job_lead))
+            .where(
+                JobSourceObservationModel.source_configuration_id == source_configuration_id,
+                JobSourceObservationModel.provider == provider,
+                JobSourceObservationModel.external_post_id == external_posting_id,
             )
-            if observation is not None:
-                return observation.job_lead
+        )
+        if observation is not None:
+            return observation.job_lead
     observations = list(
         session.scalars(
             select(JobSourceObservationModel)

@@ -274,12 +274,17 @@ class ApiClient:
         run_id: str,
         *,
         selected_token: str | None = None,
+        selected_provider: str | None = None,
         create_and_sync: bool = False,
     ) -> SourceDetectionApprovalResponse:
         response, body = self._request(
             "POST",
             f"/api/v1/source-detections/{run_id}/approve",
-            json={"selected_token": selected_token, "create_and_sync": create_and_sync},
+            json={
+                "selected_token": selected_token,
+                "selected_provider": selected_provider,
+                "create_and_sync": create_and_sync,
+            },
         )
         self._assert_status(
             "source_detection",

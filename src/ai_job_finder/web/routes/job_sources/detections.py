@@ -21,6 +21,7 @@ from ai_job_finder.application.source_detection import (
     list_source_detection_runs,
     validate_greenhouse_token,
 )
+from ai_job_finder.domain.enums import JobSourceProvider
 from ai_job_finder.domain.errors import DomainError
 from ai_job_finder.domain.job_sources import JobSourceConnector
 from ai_job_finder.domain.source_detection import (
@@ -193,11 +194,21 @@ async def job_source_detection_approve(
 ) -> Response:
     form = await request.form()
     action = str(form.get("action", "create"))
+    selected_value = optional_str(str(form.get("selected_candidate", "")))
+    selected_provider = None
+    selected_token = None
+    if selected_value and ":" in selected_value:
+        provider_value, selected_token = selected_value.split(":", 1)
+        try:
+            selected_provider = JobSourceProvider(provider_value)
+        except ValueError:
+            selected_token = None
     try:
         result = approve_source_detection_run(
             session,
             run_id=run_id,
-            selected_token=optional_str(str(form.get("selected_token", ""))),
+            selected_token=selected_token,
+            selected_provider=selected_provider,
             create_and_sync=action == "create_and_sync",
             connector=connector,
             retain_raw_payload=settings.greenhouse_retain_raw_payload,

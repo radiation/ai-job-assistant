@@ -236,6 +236,7 @@ class ManualGreenhouseTokenValidationRequest(BaseModel):
 
 class SourceDetectionApprovalRequest(BaseModel):
     selected_token: str | None = Field(default=None, max_length=200)
+    selected_provider: JobSourceProvider | None = None
     create_and_sync: bool = False
 
 

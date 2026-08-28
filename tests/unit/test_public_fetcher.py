@@ -1,5 +1,10 @@
 from __future__ import annotations
 
+import gzip
+import zlib
+from email.message import Message
+from io import BytesIO
+
 import pytest
 
 from ai_job_finder.domain.errors import UnsafeUrlError
@@ -46,3 +51,31 @@ def test_fetcher_normalizes_plain_host_to_https() -> None:
     assert (
         SafePublicPageFetcher.normalize_url("example.com/careers") == "https://example.com/careers"
     )
+
+
+def test_fetcher_decodes_bounded_gzip_response() -> None:
+    headers = Message()
+    headers["Content-Encoding"] = "gzip"
+    headers["Content-Type"] = "text/html; charset=utf-8"
+
+    class Response(BytesIO):
+        def __init__(self) -> None:
+            super().__init__(gzip.compress(b"<html>jobs</html>"))
+            self.headers = headers
+
+    assert _fetcher()._read_text(Response(), "https://example.com/careers") == "<html>jobs</html>"
+
+
+def test_fetcher_decodes_bounded_raw_deflate_response() -> None:
+    headers = Message()
+    headers["Content-Encoding"] = "deflate"
+    headers["Content-Type"] = "text/html; charset=utf-8"
+    compressor = zlib.compressobj(wbits=-zlib.MAX_WBITS)
+    body = compressor.compress(b"<html>jobs</html>") + compressor.flush()
+
+    class Response(BytesIO):
+        def __init__(self) -> None:
+            super().__init__(body)
+            self.headers = headers
+
+    assert _fetcher()._read_text(Response(), "https://example.com/careers") == "<html>jobs</html>"
