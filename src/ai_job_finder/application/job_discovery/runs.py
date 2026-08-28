@@ -173,6 +173,7 @@ class _ReusableResolution:
 class _CachedImportOutcome:
     import_run_id: UUID | None
     import_status: str | None
+    created_job_lead_ids: tuple[UUID, ...] = ()
     surfaced_job_lead_ids: tuple[UUID, ...] = ()
     error_message: str | None = None
 
@@ -374,7 +375,7 @@ def _process_observation(
                 config=config,
                 counters=counters,
                 source_imports=source_imports,
-                include_surfaced_jobs_in_search=False,
+                fanout_surfaced_jobs=False,
                 search_job_lead_ids=search_job_lead_ids,
             )
             session.add(observation)
@@ -415,7 +416,7 @@ def _process_observation(
                 config=config,
                 counters=counters,
                 source_imports=source_imports,
-                include_surfaced_jobs_in_search=not approval.existing_source,
+                fanout_surfaced_jobs=not approval.existing_source,
                 search_job_lead_ids=search_job_lead_ids,
             )
         elif detection_run.status == SourceDetectionRunStatus.AMBIGUOUS.value:
@@ -583,7 +584,7 @@ def _import_detected_source(
     config: JobDiscoveryConfig,
     counters: _RunCounters,
     source_imports: dict[UUID, _CachedImportOutcome],
-    include_surfaced_jobs_in_search: bool,
+    fanout_surfaced_jobs: bool,
     search_job_lead_ids: set[UUID],
 ) -> None:
     import_outcome = source_imports.get(source_configuration_id)
@@ -611,12 +612,15 @@ def _import_detected_source(
             import_outcome = _CachedImportOutcome(
                 import_run_id=import_result.run.id,
                 import_status=import_result.run.status,
+                created_job_lead_ids=import_result.created_job_lead_ids,
                 surfaced_job_lead_ids=import_result.surfaced_job_lead_ids,
             )
         source_imports[source_configuration_id] = import_outcome
 
-    if include_surfaced_jobs_in_search:
+    if fanout_surfaced_jobs:
         search_job_lead_ids.update(import_outcome.surfaced_job_lead_ids)
+    else:
+        search_job_lead_ids.update(import_outcome.created_job_lead_ids)
 
     observation.import_run_id = import_outcome.import_run_id
     if import_outcome.error_message is not None:
@@ -1061,20 +1065,7 @@ def _build_matching_detail(
         for record in imported_records
         if record.imported_job_lead is not None and record.imported_job_lead.id in evaluated_job_ids
     }
-    new_board_source_ids = {
-        record.source_configuration.id
-        for record in observations
-        if record.source_created_in_run and record.source_configuration is not None
-    }
-    new_board_job_ids = set(
-        session.scalars(
-            select(JobSourceObservationModel.job_lead_id).where(
-                JobSourceObservationModel.source_configuration_id.in_(new_board_source_ids),
-                JobSourceObservationModel.job_lead_id.in_(evaluated_job_ids),
-            )
-        )
-    )
-    additional_board_import_job_ids = new_board_job_ids - seed_linked_job_ids
+    additional_board_import_job_ids = evaluated_job_ids - seed_linked_job_ids
 
     if not imported_records:
         empty_summary = JobDiscoveryMatchingSummary(

@@ -456,6 +456,14 @@ def test_run_job_discovery_completes_and_links_saved_search_matches(
         )
 
         observations = list_job_discovery_observations(session, discovery_run_id=run.id)
+        detail = get_job_discovery_run_detail(session, run.id)
+        matches = list(
+            session.scalars(
+                select(JobSearchMatchModel).where(
+                    JobSearchMatchModel.search_run_id == run.saved_search_run_id
+                )
+            )
+        )
 
         assert run.status == "completed"
         assert run.provider_result_count == 3
@@ -465,6 +473,11 @@ def test_run_job_discovery_completes_and_links_saved_search_matches(
         assert run.imported_lead_count == 2
         assert run.final_matched_count == 1
         assert run.saved_search_run_id is not None
+        assert detail.matching_summary.seed_linked_canonical_jobs_evaluated == 2
+        assert detail.matching_summary.additional_board_import_jobs_evaluated == 0
+        assert detail.matching_summary.total_canonical_jobs_evaluated == 2
+        assert len(matches) == 2
+        assert len(list(session.scalars(select(JobEvaluationModel)))) == 2
         assert len(observations) == 2
         assert (
             sum(
@@ -844,14 +857,25 @@ def test_discovery_detail_distinguishes_seed_and_new_board_evaluations(
             config=_config(),
         )
         detail = get_job_discovery_run_detail(session, run.id)
+        matches = list(
+            session.scalars(
+                select(JobSearchMatchModel).where(
+                    JobSearchMatchModel.search_run_id == run.saved_search_run_id
+                )
+            )
+        )
 
         assert detail.matching_summary.seed_linked_canonical_jobs_evaluated == 1
         assert detail.matching_summary.additional_board_import_jobs_evaluated == 2
         assert detail.matching_summary.total_canonical_jobs_evaluated == 3
+        assert len(matches) == 3
+        assert len(list(session.scalars(select(JobEvaluationModel)))) == 3
 
 
-def test_discovery_detail_does_not_repeat_new_board_fanout_on_rerun(
+@pytest.mark.parametrize("new_posting_ids", [("new-one",), ("new-one", "new-two")])
+def test_discovery_detail_fans_out_only_created_jobs_on_known_board_refresh(
     session_factory: sessionmaker[Session],
+    new_posting_ids: tuple[str, ...],
 ) -> None:
     with session_factory() as session:
         _seed_candidate(session)
@@ -898,6 +922,12 @@ def test_discovery_detail_does_not_repeat_new_board_fanout_on_rerun(
             connector=connector,
             config=_config(),
         )
+        connector.jobs_by_token["beta"].extend(
+            [
+                _posting_for_board("beta", "Beta", posting_id, "Director, Platform Engineering")
+                for posting_id in new_posting_ids
+            ]
+        )
         rerun = run_job_discovery(
             session,
             search_definition_id=search_id,
@@ -909,10 +939,28 @@ def test_discovery_detail_does_not_repeat_new_board_fanout_on_rerun(
             config=_config(),
         )
         detail = get_job_discovery_run_detail(session, rerun.id)
+        rerun_matches = list(
+            session.scalars(
+                select(JobSearchMatchModel).where(
+                    JobSearchMatchModel.search_run_id == rerun.saved_search_run_id
+                )
+            )
+        )
+        matched_titles = {
+            job_lead.title
+            for match in rerun_matches
+            for job_lead in [session.get(JobLeadModel, match.job_lead_id)]
+            if job_lead is not None
+        }
 
         assert detail.matching_summary.seed_linked_canonical_jobs_evaluated == 1
-        assert detail.matching_summary.additional_board_import_jobs_evaluated == 0
-        assert detail.matching_summary.total_canonical_jobs_evaluated == 1
+        assert detail.matching_summary.additional_board_import_jobs_evaluated == len(
+            new_posting_ids
+        )
+        assert detail.matching_summary.total_canonical_jobs_evaluated == 1 + len(new_posting_ids)
+        assert len(rerun_matches) == 1 + len(new_posting_ids)
+        assert all(match.job_evaluation_id is not None and match.matched for match in rerun_matches)
+        assert matched_titles == {"Director, Platform Engineering"}
 
 
 def test_run_job_discovery_imports_same_board_once_per_run(
@@ -1328,6 +1376,9 @@ def test_get_job_discovery_run_detail_marks_previously_seen_urls_and_reused_sour
         assert detail.imports[0].source_created_in_run is False
         assert detail.imports[0].import_run is not None
         assert detail.imports[0].import_run.jobs_unchanged == 1
+        assert detail.matching_summary.seed_linked_canonical_jobs_evaluated == 1
+        assert detail.matching_summary.additional_board_import_jobs_evaluated == 0
+        assert detail.matching_summary.total_canonical_jobs_evaluated == 1
         assert detail.matching_summary.saved_search_match_count == 1
         assert detail.matching_summary.surfaced_in_discover_count == 1
         assert detail.top_matches[0].surfaced_in_discover is True
