@@ -837,8 +837,8 @@ def _selected_valid_candidate(
         run.detected_provider or JobSourceProvider.GREENHOUSE.value
     )
     if candidate_provider in {
-        JobSourceProvider.ASHBY.value,
-        JobSourceProvider.LEVER.value,
+        JobSourceProvider.ASHBY,
+        JobSourceProvider.LEVER,
     }:
         normalized_selected = selected_value.strip().strip("/")
         if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{0,199}", normalized_selected):
@@ -851,7 +851,8 @@ def _selected_valid_candidate(
         )
     for candidate in valid_candidates:
         if (
-            candidate.get("provider") == candidate_provider.value
+            candidate.get("provider", JobSourceProvider.GREENHOUSE.value)
+            == candidate_provider.value
             and candidate.get("token") == normalized_selected
         ):
             return candidate

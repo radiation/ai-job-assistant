@@ -590,6 +590,40 @@ def test_ambiguous_approval_requires_provider_and_selects_matching_provider(
         assert result.source.board_token == "acme"
 
 
+def test_approval_defaults_missing_historical_candidate_provider_to_greenhouse(
+    session_factory: sessionmaker[Session],
+) -> None:
+    with session_factory() as session:
+        run = create_source_detection_run(
+            session,
+            company_name="Acme",
+            input_url=None,
+            brand_alias=None,
+            fetcher=FakeFetcher(),
+            board_validator=FakeValidator({"acme": _valid("acme")}),
+            config=_config(),
+        )
+        historical_candidate = dict(run.candidate_tokens[0])
+        historical_candidate.pop("provider")
+        run.candidate_tokens = [historical_candidate]
+        session.add(run)
+        session.commit()
+
+        result = approve_source_detection_run(
+            session,
+            run_id=run.id,
+            selected_token=None,
+            create_and_sync=False,
+            connector=FakeJobSourceConnector(),
+            retain_raw_payload=True,
+            close_on_empty=False,
+            stale_after_seconds=3600,
+        )
+
+        assert result.source.provider == JobSourceProvider.GREENHOUSE.value
+        assert result.source.board_token == "acme"
+
+
 def test_unsafe_url_records_failed_terminal_run(session_factory: sessionmaker[Session]) -> None:
     with session_factory() as session:
         run = create_source_detection_run(

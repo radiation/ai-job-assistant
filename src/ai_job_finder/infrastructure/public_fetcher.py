@@ -132,9 +132,6 @@ class SafePublicPageFetcher:
                     if attempt < attempts - 1:
                         time.sleep(_retry_backoff_seconds(attempt))
                         continue
-                        raise UnavailablePageError(
-                            "Public page fetch failed after transient network errors."
-                        ) from exc
             else:
                 raise UnavailablePageError(
                     "Public page fetch failed after transient network errors."
@@ -204,16 +201,21 @@ class SafePublicPageFetcher:
                 with gzip.GzipFile(fileobj=BytesIO(raw)) as compressed:
                     return compressed.read(self.config.max_response_bytes + 1)
             if encoding == "deflate":
-                decompressor = zlib.decompressobj()
-                decoded = decompressor.decompress(raw, self.config.max_response_bytes + 1)
-                return decoded + decompressor.flush(
-                    self.config.max_response_bytes + 1 - len(decoded)
-                )
+                try:
+                    return self._decompress_deflate(raw, zlib.MAX_WBITS)
+                except zlib.error:
+                    return self._decompress_deflate(raw, -zlib.MAX_WBITS)
         except (gzip.BadGzipFile, OSError, zlib.error) as exc:
             raise UnavailablePageError(
                 "Public page response compression could not be decoded."
             ) from exc
         raise UnsupportedContentTypeError("Fetched page content encoding is not supported.")
+
+    def _decompress_deflate(self, raw: bytes, wbits: int) -> bytes:
+        decompressor = zlib.decompressobj(wbits)
+        limit = self.config.max_response_bytes + 1
+        decoded = decompressor.decompress(raw, limit)
+        return decoded + decompressor.flush(limit - len(decoded))
 
     @staticmethod
     def _content_type(value: str | None) -> str:
