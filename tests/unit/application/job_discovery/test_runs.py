@@ -4,6 +4,7 @@ from collections.abc import Iterator
 from dataclasses import replace
 from datetime import UTC, datetime
 from typing import Any, cast
+from urllib.parse import urlsplit
 from uuid import UUID
 
 import pytest
@@ -752,10 +753,12 @@ def test_run_job_discovery_evaluates_new_board_jobs_when_seed_is_stale(
         )
 
         assert first_observation.observation.imported_job_lead_id is None
-        assert (
-            first_observation.observation.processing_status
-            == JobDiscoveryObservationStatus.FAILED.value
+        assert first_observation.observation.processing_status == (
+            JobDiscoveryObservationStatus.DETECTED_SUPPORTED.value
         )
+        assert first_run.status == "completed"
+        assert first_run.failure_count == 0
+        assert "seed did not reconcile" in (first_observation.observation.exclusion_reason or "")
         assert first_run.saved_search_run_id is not None
         assert len(list(session.scalars(select(JobLeadModel)))) == 3
         assert len(first_matches) == 3
@@ -1016,7 +1019,7 @@ def test_run_job_discovery_imports_and_links_ashby_board_once(
         query = generate_job_discovery_queries(search.to_snapshot(), max_queries=4, result_limit=5)[
             0
         ]
-        first_url = "https://jobs.ashbyhq.com/Beta/posting-111"
+        first_url = "https://jobs.ashbyhq.com/Beta/posting-111?workplaceType=Remote"
         second_url = "https://jobs.ashbyhq.com/Beta/posting-222"
         provider = FakeJobDiscoveryProvider(
             results_by_query={
@@ -1180,12 +1183,14 @@ def test_run_job_discovery_imports_lever_board_when_discovered_posting_is_stale(
         )
         observation = list_job_discovery_observations(session, discovery_run_id=run.id)[0]
 
-        assert run.status == "partial"
+        assert run.status == "completed"
+        assert run.failure_count == 0
         assert connector.fetch_calls == ["LuminDigital"]
         assert observation.observation.import_run_id is not None
         assert observation.observation.imported_job_lead_id is None
         assert (
-            observation.observation.processing_status == JobDiscoveryObservationStatus.FAILED.value
+            observation.observation.processing_status
+            == JobDiscoveryObservationStatus.DETECTED_SUPPORTED.value
         )
 
 
@@ -1247,7 +1252,7 @@ def test_run_job_discovery_reuses_prior_resolution_and_avoids_duplicate_sources_
 
         assert first_run.status == "completed"
         assert second_run.status == "completed"
-        assert first_fetcher.calls == [job_url]
+        assert first_fetcher.calls == []
         assert second_fetcher.calls == []
         assert len(list(session.scalars(select(JobSourceConfigurationModel)))) == 1
         assert len(list(session.scalars(select(JobLeadModel)))) == 1
@@ -1658,7 +1663,12 @@ def test_run_job_discovery_keeps_supported_and_unknown_hosts_eligible_for_source
         observations = list_job_discovery_observations(session, discovery_run_id=run.id)
 
         assert run.status == "completed"
-        expected_fetches = [] if "jobs.ashbyhq.com" in url or "jobs.lever.co" in url else [url]
+        hostname = urlsplit(url).hostname
+        expected_fetches = (
+            []
+            if hostname in {"boards.greenhouse.io", "jobs.ashbyhq.com", "jobs.lever.co"}
+            else [url]
+        )
         assert fetcher.calls == expected_fetches
         assert len(observations) == 1
         assert observations[0].observation.exclusion_reason != (

@@ -4,6 +4,8 @@ import re
 from dataclasses import dataclass
 from urllib.parse import urlsplit
 
+from ai_job_finder.domain.enums import JobSourceProvider
+
 GREENHOUSE_HOSTS = frozenset(
     {
         "boards.greenhouse.io",
@@ -19,6 +21,32 @@ LEVER_CANONICAL_HOST = "jobs.lever.co"
 LEVER_HOSTS = frozenset({LEVER_CANONICAL_HOST})
 LEVER_BOARD_TOKEN_PATTERN = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]{0,199}")
 LEVER_POSTING_ID_PATTERN = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]{0,199}")
+
+
+@dataclass(frozen=True, slots=True)
+class GreenhouseUrl:
+    board_token: str
+    external_posting_id: str | None
+
+
+def parse_greenhouse_url(url: str) -> GreenhouseUrl | None:
+    greenhouse_board_token_pattern = ASHBY_BOARD_TOKEN_PATTERN
+    greenhouse_posting_id_pattern = LEVER_POSTING_ID_PATTERN
+    parts = urlsplit(url)
+    if (parts.hostname or "").casefold().rstrip(".") not in GREENHOUSE_HOSTS:
+        return None
+    path_parts = [part for part in parts.path.split("/") if part]
+    if not path_parts or not greenhouse_board_token_pattern.fullmatch(path_parts[0]):
+        return None
+    if len(path_parts) == 1:
+        return GreenhouseUrl(board_token=path_parts[0].casefold(), external_posting_id=None)
+    if (
+        len(path_parts) != 3
+        or path_parts[1].casefold() != "jobs"
+        or not greenhouse_posting_id_pattern.fullmatch(path_parts[2])
+    ):
+        return None
+    return GreenhouseUrl(board_token=path_parts[0].casefold(), external_posting_id=path_parts[2])
 
 
 @dataclass(frozen=True, slots=True)
@@ -61,6 +89,38 @@ def parse_lever_url(url: str) -> LeverUrl | None:
     if len(path_parts) > 2:
         return None
     return LeverUrl(board_token=path_parts[0], external_posting_id=external_posting_id)
+
+
+@dataclass(frozen=True, slots=True)
+class SupportedAtsUrl:
+    provider: JobSourceProvider
+    board_token: str
+    external_posting_id: str | None
+
+
+def parse_supported_ats_url(url: str) -> SupportedAtsUrl | None:
+    greenhouse = parse_greenhouse_url(url)
+    if greenhouse is not None:
+        return SupportedAtsUrl(
+            provider=JobSourceProvider.GREENHOUSE,
+            board_token=greenhouse.board_token,
+            external_posting_id=greenhouse.external_posting_id,
+        )
+    ashby = parse_ashby_url(url)
+    if ashby is not None:
+        return SupportedAtsUrl(
+            provider=JobSourceProvider.ASHBY,
+            board_token=ashby.board_token,
+            external_posting_id=ashby.external_posting_id,
+        )
+    lever = parse_lever_url(url)
+    if lever is not None:
+        return SupportedAtsUrl(
+            provider=JobSourceProvider.LEVER,
+            board_token=lever.board_token,
+            external_posting_id=lever.external_posting_id,
+        )
+    return None
 
 
 DISCOVERY_ATS_QUERY_HOSTS = (

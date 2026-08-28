@@ -45,7 +45,10 @@ from ai_job_finder.domain.job_discovery import (
     JobDiscoveryRunStatus,
     normalize_job_discovery_url,
 )
-from ai_job_finder.domain.job_discovery.targeting import discovery_excluded_aggregator_domain
+from ai_job_finder.domain.job_discovery.targeting import (
+    discovery_excluded_aggregator_domain,
+    parse_supported_ats_url,
+)
 from ai_job_finder.domain.job_sources import JobSourceConnector
 from ai_job_finder.domain.location_eligibility import (
     JobLocationSignals,
@@ -647,6 +650,9 @@ def _finalize_imported_observation(
             counters.errors,
             f"Import for {observation.normalized_url} finished with {import_status}.",
         )
+        observation.processing_status = JobDiscoveryObservationStatus.FAILED.value
+        observation.exclusion_reason = f"Source import finished with {import_status}."
+        return
     lead = _resolve_imported_job_lead(
         session,
         source_configuration_id=source_configuration_id,
@@ -659,12 +665,10 @@ def _finalize_imported_observation(
         observation.exclusion_reason = None
         counters.imported_lead_count += 1
         return
-    observation.processing_status = JobDiscoveryObservationStatus.FAILED.value
+    observation.processing_status = JobDiscoveryObservationStatus.DETECTED_SUPPORTED.value
     observation.exclusion_reason = (
-        "Source import completed, but the discovered URL did not resolve "
-        "to a specific imported lead."
+        "Source import completed, but the seed did not reconcile to a currently imported lead."
     )
-    counters.failure_count += 1
 
 
 def _resolve_imported_job_lead(
@@ -673,6 +677,21 @@ def _resolve_imported_job_lead(
     source_configuration_id: UUID,
     normalized_url: str,
 ) -> JobLeadModel | None:
+    parsed_url = parse_supported_ats_url(normalized_url)
+    if parsed_url is not None and parsed_url.external_posting_id is not None:
+        source = session.get(JobSourceConfigurationModel, source_configuration_id)
+        if source is not None and source.provider == parsed_url.provider.value:
+            observation = session.scalar(
+                select(JobSourceObservationModel)
+                .options(joinedload(JobSourceObservationModel.job_lead))
+                .where(
+                    JobSourceObservationModel.source_configuration_id == source_configuration_id,
+                    JobSourceObservationModel.provider == parsed_url.provider.value,
+                    JobSourceObservationModel.external_post_id == parsed_url.external_posting_id,
+                )
+            )
+            if observation is not None:
+                return observation.job_lead
     observations = list(
         session.scalars(
             select(JobSourceObservationModel)
