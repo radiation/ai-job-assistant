@@ -46,6 +46,29 @@ class JobSourceImportResult:
     surfaced_job_lead_ids: tuple[UUID, ...]
 
 
+def _disjoint_import_result_ids(
+    created_job_lead_ids: list[UUID],
+    updated_job_lead_ids: list[UUID],
+    unchanged_job_lead_ids: list[UUID],
+) -> tuple[tuple[UUID, ...], tuple[UUID, ...], tuple[UUID, ...]]:
+    seen_job_lead_ids: set[UUID] = set()
+
+    def unique_ids(job_lead_ids: list[UUID]) -> tuple[UUID, ...]:
+        result: list[UUID] = []
+        for job_lead_id in job_lead_ids:
+            if job_lead_id in seen_job_lead_ids:
+                continue
+            seen_job_lead_ids.add(job_lead_id)
+            result.append(job_lead_id)
+        return tuple(result)
+
+    return (
+        unique_ids(created_job_lead_ids),
+        unique_ids(updated_job_lead_ids),
+        unique_ids(unchanged_job_lead_ids),
+    )
+
+
 def _running_import_for_source(session: Session, source_id: UUID) -> JobImportRunModel | None:
     return session.scalar(
         select(JobImportRunModel)
@@ -354,6 +377,11 @@ def run_job_source_import_with_result(
                 seen_external_ids=seen_external_ids,
                 removed_at=result.fetched_at,
             )
+        created_ids, updated_ids, unchanged_ids = _disjoint_import_result_ids(
+            created_job_lead_ids,
+            updated_job_lead_ids,
+            unchanged_job_lead_ids,
+        )
         return JobSourceImportResult(
             run=_persist_terminal_run_state(
                 session,
@@ -362,9 +390,9 @@ def run_job_source_import_with_result(
                 status=terminal_status,
                 error_message=run.error_message,
             ),
-            created_job_lead_ids=tuple(dict.fromkeys(created_job_lead_ids)),
-            updated_job_lead_ids=tuple(dict.fromkeys(updated_job_lead_ids)),
-            unchanged_job_lead_ids=tuple(dict.fromkeys(unchanged_job_lead_ids)),
+            created_job_lead_ids=created_ids,
+            updated_job_lead_ids=updated_ids,
+            unchanged_job_lead_ids=unchanged_ids,
             surfaced_job_lead_ids=tuple(dict.fromkeys(surfaced_job_lead_ids)),
         )
     except (JobSourceProviderError, SuspiciousEmptyJobSourceResultError) as exc:

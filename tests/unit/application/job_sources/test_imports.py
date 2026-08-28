@@ -4,7 +4,7 @@ from collections.abc import Iterator, Sequence
 from dataclasses import replace
 from datetime import UTC, datetime
 from typing import cast
-from uuid import UUID
+from uuid import UUID, uuid4
 
 import pytest
 from sqlalchemy import select
@@ -18,6 +18,7 @@ from ai_job_finder.application.job_sources import (
     run_job_source_import,
     run_job_source_import_with_result,
 )
+from ai_job_finder.application.job_sources.imports import _disjoint_import_result_ids
 from ai_job_finder.application.job_sources.payload_identity import duplicate_hint_key
 from ai_job_finder.application.services import (
     create_candidate_profile,
@@ -301,8 +302,27 @@ def test_import_result_exposes_canonical_leads_for_all_supported_providers(
 
         assert result.run.jobs_created == 1
         assert result.created_job_lead_ids == result.surfaced_job_lead_ids
+        assert result.updated_job_lead_ids == ()
+        assert result.unchanged_job_lead_ids == ()
         assert len(result.surfaced_job_lead_ids) == 1
         assert result.surfaced_job_lead_ids[0] == session.scalar(select(JobLeadModel.id))
+
+
+def test_import_result_id_categories_are_disjoint_and_preserve_precedence_order() -> None:
+    created_first = uuid4()
+    created_second = uuid4()
+    updated_only = uuid4()
+    unchanged_only = uuid4()
+
+    created_ids, updated_ids, unchanged_ids = _disjoint_import_result_ids(
+        [created_first, created_second, created_first],
+        [created_second, updated_only, updated_only],
+        [created_first, updated_only, unchanged_only, unchanged_only],
+    )
+
+    assert created_ids == (created_first, created_second)
+    assert updated_ids == (updated_only,)
+    assert unchanged_ids == (unchanged_only,)
 
 
 def test_discovered_leads_default_to_actionable_location_eligibility(
