@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any, cast
 
 import pytest
@@ -27,7 +28,11 @@ from ai_job_finder.domain.enums import (
     RemotePreference,
     WorkplaceType,
 )
-from ai_job_finder.domain.errors import AmbiguousSourceDetectionError, UnsafeUrlError
+from ai_job_finder.domain.errors import (
+    AmbiguousSourceDetectionError,
+    UnavailablePageError,
+    UnsafeUrlError,
+)
 from ai_job_finder.domain.source_detection import (
     JobSourceBoardValidation,
     PublicPage,
@@ -87,6 +92,17 @@ class FakeLeverValidator:
         )
 
 
+class FakeMultiProviderValidator:
+    def __init__(self, valid: dict[tuple[JobSourceProvider, str], JobSourceBoardValidation]):
+        self.valid = valid
+
+    def validate(self, provider: JobSourceProvider, board_token: str) -> JobSourceBoardValidation:
+        return self.valid.get(
+            (provider, board_token),
+            JobSourceBoardValidation(token=board_token, status="invalid", valid=False),
+        )
+
+
 class DetectionConnector(FakeJobSourceConnector):
     def __init__(self, validation: JobSourceBoardValidation) -> None:
         super().__init__(jobs=[])
@@ -108,6 +124,10 @@ def _config() -> SourceDetectionConfig:
 
 def _page(html: str, *, url: str = "https://example.com/careers") -> PublicPage:
     return PublicPage(requested_url=url, final_url=url, content_type="text/html", text=html)
+
+
+def _fixture(name: str) -> str:
+    return (Path(__file__).parents[1] / "fixtures" / "public_pages" / name).read_text()
 
 
 def _valid(token: str, *, jobs: int = 2) -> JobSourceBoardValidation:
@@ -173,6 +193,189 @@ def test_direct_html_detection_persists_terminal_preview(
         assert run.validated_job_count == 3
         assert run.candidate_tokens[0]["source"] == "observed"
         assert run.evidence[0]["category"] == "direct_api_reference"
+
+
+def test_third_party_page_supported_job_link_recovers_greenhouse_source(
+    session_factory: sessionmaker[Session],
+) -> None:
+    url = "https://aggregator.example/jobs/123"
+    with session_factory() as session:
+        run = create_source_detection_run(
+            session,
+            company_name="Acme",
+            input_url=url,
+            brand_alias=None,
+            fetcher=FakeFetcher({url: _page(_fixture("third_party_greenhouse_job.html"), url=url)}),
+            board_validator=FakeValidator({"acme": _valid("acme")}),
+            config=_config(),
+        )
+
+        assert run.status == "detected"
+        assert run.detected_provider == JobSourceProvider.GREENHOUSE.value
+        assert run.validated_token == "acme"
+        assert run.evidence[0]["category"] == "supported_ats_link"
+
+
+def test_redirect_to_supported_ats_recovers_without_html_inference(
+    session_factory: sessionmaker[Session],
+) -> None:
+    url = "https://redirector.example/job/123"
+    with session_factory() as session:
+        run = create_source_detection_run(
+            session,
+            company_name="Acme",
+            input_url=url,
+            brand_alias=None,
+            fetcher=FakeFetcher(
+                {
+                    url: PublicPage(
+                        requested_url=url,
+                        final_url="https://boards.greenhouse.io/acme/jobs/role-123",
+                        content_type="text/html",
+                        text="No ATS link in body.",
+                    )
+                }
+            ),
+            board_validator=FakeValidator({"acme": _valid("acme")}),
+            config=_config(),
+        )
+
+        assert run.status == "detected"
+        assert run.evidence[0]["category"] == "redirected_supported_ats_url"
+
+
+def test_json_ld_jobposting_recovers_ashby_source(session_factory: sessionmaker[Session]) -> None:
+    url = "https://aggregator.example/jobs/456"
+    with session_factory() as session:
+        run = create_source_detection_run(
+            session,
+            company_name="Acme",
+            input_url=url,
+            brand_alias=None,
+            fetcher=FakeFetcher({url: _page(_fixture("jobposting_ashby.jsonld.html"), url=url)}),
+            board_validator=FakeAshbyValidator(),
+            config=_config(),
+        )
+
+        assert run.status == "detected"
+        assert run.detected_provider == JobSourceProvider.ASHBY.value
+        assert run.validated_token == "Acme"
+        assert run.evidence[0]["category"] == "structured_data_supported_ats_url"
+
+
+def test_company_careers_page_recovers_lever_board(session_factory: sessionmaker[Session]) -> None:
+    url = "https://acme.example/careers"
+    with session_factory() as session:
+        run = create_source_detection_run(
+            session,
+            company_name="Acme",
+            input_url=url,
+            brand_alias=None,
+            fetcher=FakeFetcher({url: _page(_fixture("company_careers_lever.html"), url=url)}),
+            board_validator=FakeLeverValidator(),
+            config=_config(),
+        )
+
+        assert run.status == "detected"
+        assert run.detected_provider == JobSourceProvider.LEVER.value
+        assert run.validated_token == "AcmeCo"
+
+
+def test_equivalent_supported_links_collapse_to_one_board(
+    session_factory: sessionmaker[Session],
+) -> None:
+    url = "https://acme.example/careers"
+    with session_factory() as session:
+        run = create_source_detection_run(
+            session,
+            company_name="Acme",
+            input_url=url,
+            brand_alias=None,
+            fetcher=FakeFetcher(
+                {
+                    url: _page(
+                        '<a href="https://boards.greenhouse.io/acme">Jobs</a>'
+                        '<a href="https://boards.greenhouse.io/acme/jobs/role-123">Apply</a>',
+                        url=url,
+                    )
+                }
+            ),
+            board_validator=FakeValidator({"acme": _valid("acme")}),
+            config=_config(),
+        )
+
+        assert run.status == "detected"
+        assert len(run.candidate_tokens) == 1
+
+
+def test_distinct_supported_boards_remain_ambiguous(session_factory: sessionmaker[Session]) -> None:
+    url = "https://aggregator.example/jobs/123"
+    with session_factory() as session:
+        run = create_source_detection_run(
+            session,
+            company_name="Acme",
+            input_url=url,
+            brand_alias=None,
+            fetcher=FakeFetcher(
+                {
+                    url: _page(
+                        '<a href="https://boards.greenhouse.io/acme">Acme</a>'
+                        '<a href="https://jobs.lever.co/Beta">Beta</a>',
+                        url=url,
+                    )
+                }
+            ),
+            board_validator=FakeMultiProviderValidator(
+                {
+                    (JobSourceProvider.GREENHOUSE, "acme"): _valid("acme"),
+                    (JobSourceProvider.LEVER, "Beta"): JobSourceBoardValidation(
+                        token="Beta", status="valid", valid=True
+                    ),
+                }
+            ),
+            config=_config(),
+        )
+
+        assert run.status == "ambiguous"
+        assert {(item["provider"], item["token"]) for item in run.candidate_tokens} == {
+            ("greenhouse", "acme"),
+            ("lever", "Beta"),
+        }
+
+
+def test_successful_unsupported_public_page_is_not_detected(
+    session_factory: sessionmaker[Session],
+) -> None:
+    url = "https://aggregator.example/jobs/unsupported"
+    with session_factory() as session:
+        run = create_source_detection_run(
+            session,
+            company_name=None,
+            input_url=url,
+            brand_alias=None,
+            fetcher=FakeFetcher({url: _page(_fixture("unsupported_aggregator.html"), url=url)}),
+            board_validator=FakeValidator({}),
+            config=_config(),
+        )
+
+        assert run.status == "not_detected"
+        assert run.error_message is None
+
+
+def test_public_page_fetch_failure_remains_failed(session_factory: sessionmaker[Session]) -> None:
+    with session_factory() as session:
+        run = create_source_detection_run(
+            session,
+            company_name=None,
+            input_url="https://aggregator.example/jobs/unavailable",
+            brand_alias=None,
+            fetcher=FakeFetcher(error=UnavailablePageError("Public page returned HTTP 403.")),
+            board_validator=FakeValidator({}),
+            config=_config(),
+        )
+
+        assert run.status == "failed"
+        assert run.error_message == "Public page returned HTTP 403."
 
 
 def test_canonical_ashby_posting_detection_bypasses_public_page_fetch(
@@ -284,6 +487,7 @@ def test_ambiguous_detection_requires_explicit_token_selection(
             session,
             run_id=run.id,
             selected_token="beta",
+            selected_provider=JobSourceProvider.GREENHOUSE,
             create_and_sync=False,
             connector=DetectionConnector(_valid("beta")),
             retain_raw_payload=True,
@@ -311,6 +515,7 @@ def test_generated_candidate_is_presented_only_after_validation(
         assert run.status == "detected"
         assert run.candidate_tokens == [
             {
+                "provider": "greenhouse",
                 "token": "acme",
                 "source": "generated",
                 "evidence_categories": ["generated_candidate_validated"],
@@ -323,8 +528,66 @@ def test_generated_candidate_is_presented_only_after_validation(
                     "error_message": None,
                 },
                 "existing_source_configuration_id": None,
+                "selected_external_posting_id": None,
             }
         ]
+
+
+def test_ambiguous_approval_requires_provider_and_selects_matching_provider(
+    session_factory: sessionmaker[Session],
+) -> None:
+    url = "https://aggregator.example/jobs/123"
+    with session_factory() as session:
+        run = create_source_detection_run(
+            session,
+            company_name="Acme",
+            input_url=url,
+            brand_alias=None,
+            fetcher=FakeFetcher(
+                {
+                    url: _page(
+                        '<a href="https://boards.greenhouse.io/acme">Greenhouse</a>'
+                        '<a href="https://jobs.lever.co/acme">Lever</a>',
+                        url=url,
+                    )
+                }
+            ),
+            board_validator=FakeMultiProviderValidator(
+                {
+                    (JobSourceProvider.GREENHOUSE, "acme"): _valid("acme"),
+                    (JobSourceProvider.LEVER, "acme"): JobSourceBoardValidation(
+                        token="acme", status="valid", valid=True, company_name="Acme"
+                    ),
+                }
+            ),
+            config=_config(),
+        )
+
+        with pytest.raises(AmbiguousSourceDetectionError):
+            approve_source_detection_run(
+                session,
+                run_id=run.id,
+                selected_token="acme",
+                create_and_sync=False,
+                connector=FakeJobSourceConnector(),
+                retain_raw_payload=True,
+                close_on_empty=False,
+                stale_after_seconds=3600,
+            )
+        result = approve_source_detection_run(
+            session,
+            run_id=run.id,
+            selected_token="acme",
+            selected_provider=JobSourceProvider.LEVER,
+            create_and_sync=False,
+            connector=FakeJobSourceConnector(),
+            retain_raw_payload=True,
+            close_on_empty=False,
+            stale_after_seconds=3600,
+        )
+
+        assert result.source.provider == JobSourceProvider.LEVER.value
+        assert result.source.board_token == "acme"
 
 
 def test_unsafe_url_records_failed_terminal_run(session_factory: sessionmaker[Session]) -> None:

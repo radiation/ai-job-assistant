@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import gzip
 import ipaddress
 import socket
 import time
+import zlib
 from collections.abc import Iterable
 from dataclasses import dataclass
 from email.message import Message
+from io import BytesIO
 from typing import IO, Protocol
 from urllib.error import HTTPError, URLError
 from urllib.parse import urljoin, urlsplit, urlunsplit
@@ -52,6 +55,7 @@ class PublicPageFetcherConfig:
         "text/html",
         "application/xhtml+xml",
         "text/plain",
+        "application/json",
         "application/javascript",
         "text/javascript",
     )
@@ -75,7 +79,7 @@ class SafePublicPageFetcher:
                 headers={
                     "User-Agent": self.config.user_agent,
                     "Accept": (
-                        "text/html,application/xhtml+xml,text/plain,"
+                        "text/html,application/xhtml+xml,application/json,text/plain,"
                         "application/javascript,text/javascript;q=0.9,*/*;q=0.1"
                     ),
                 },
@@ -122,15 +126,19 @@ class SafePublicPageFetcher:
                         if attempt < attempts - 1:
                             time.sleep(_retry_backoff_seconds(attempt))
                             continue
-                    raise UnavailablePageError("Public page fetch failed.") from exc
+                    raise UnavailablePageError(f"Public page returned HTTP {exc.code}.") from exc
                 except (TimeoutError, URLError, OSError) as exc:
                     last_error = exc
                     if attempt < attempts - 1:
                         time.sleep(_retry_backoff_seconds(attempt))
                         continue
-                    raise UnavailablePageError("Public page fetch failed.") from exc
+                        raise UnavailablePageError(
+                            "Public page fetch failed after transient network errors."
+                        ) from exc
             else:
-                raise UnavailablePageError("Public page fetch failed.") from last_error
+                raise UnavailablePageError(
+                    "Public page fetch failed after transient network errors."
+                ) from last_error
 
     @staticmethod
     def normalize_url(url: str) -> str:
@@ -178,11 +186,34 @@ class SafePublicPageFetcher:
         raw = response.read(self.config.max_response_bytes + 1)
         if len(raw) > self.config.max_response_bytes:
             raise OversizedResponseError("Fetched page exceeded the configured size limit.")
+        raw = self._decode_content_encoding(raw, response.headers.get("Content-Encoding"))
+        if len(raw) > self.config.max_response_bytes:
+            raise OversizedResponseError("Fetched page exceeded the configured size limit.")
         encoding = response.headers.get_content_charset() or "utf-8"
         try:
             return raw.decode(encoding, errors="replace")
         except LookupError as exc:
             raise UnsupportedContentTypeError(f"Unsupported response charset for {url}.") from exc
+
+    def _decode_content_encoding(self, raw: bytes, content_encoding: str | None) -> bytes:
+        encoding = (content_encoding or "identity").casefold().strip()
+        try:
+            if encoding in {"", "identity"}:
+                return raw
+            if encoding in {"gzip", "x-gzip"}:
+                with gzip.GzipFile(fileobj=BytesIO(raw)) as compressed:
+                    return compressed.read(self.config.max_response_bytes + 1)
+            if encoding == "deflate":
+                decompressor = zlib.decompressobj()
+                decoded = decompressor.decompress(raw, self.config.max_response_bytes + 1)
+                return decoded + decompressor.flush(
+                    self.config.max_response_bytes + 1 - len(decoded)
+                )
+        except (gzip.BadGzipFile, OSError, zlib.error) as exc:
+            raise UnavailablePageError(
+                "Public page response compression could not be decoded."
+            ) from exc
+        raise UnsupportedContentTypeError("Fetched page content encoding is not supported.")
 
     @staticmethod
     def _content_type(value: str | None) -> str:

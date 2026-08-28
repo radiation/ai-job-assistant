@@ -32,6 +32,9 @@ def main() -> int:
     parser.add_argument("--create", action="store_true")
     parser.add_argument("--create-and-sync", action="store_true")
     parser.add_argument("--select-token")
+    parser.add_argument(
+        "--select-provider", choices=[provider.value for provider in JobSourceProvider]
+    )
     args = parser.parse_args()
     if not args.company_name and not args.input_url:
         parser.error("provide --company, --url, or both")
@@ -77,6 +80,9 @@ def main() -> int:
                 session,
                 run_id=run.id,
                 selected_token=args.select_token,
+                selected_provider=(
+                    JobSourceProvider(args.select_provider) if args.select_provider else None
+                ),
                 create_and_sync=args.create_and_sync,
                 connector=connector,
                 retain_raw_payload=settings.greenhouse_retain_raw_payload,

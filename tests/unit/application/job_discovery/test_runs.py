@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections.abc import Iterator
 from dataclasses import replace
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any, cast
 from urllib.parse import urlsplit
 from uuid import UUID
@@ -240,6 +241,12 @@ def _page_for_token(url: str, token: str) -> PublicPage:
         final_url=url,
         content_type="text/html",
         text=f"https://boards-api.greenhouse.io/v1/boards/{token}/jobs",
+    )
+
+
+def _public_page_fixture(name: str) -> str:
+    return (Path(__file__).parents[3] / "fixtures" / "public_pages" / name).read_text(
+        encoding="utf-8"
     )
 
 
@@ -686,6 +693,135 @@ def test_run_job_discovery_auto_creates_unknown_greenhouse_source_and_retains_we
         assert len(matches) == 2
         assert sum(1 for match in matches if match.matched) == 1
         assert any(job.title == "Finance Operations Manager" for job in jobs)
+
+
+def test_run_job_discovery_recovers_third_party_link_and_imports_canonical_board(
+    session_factory: sessionmaker[Session],
+) -> None:
+    with session_factory() as session:
+        _seed_candidate(session)
+        search_id = _search(session)
+        query = generate_job_discovery_queries(
+            get_job_search_definition(session, search_id).to_snapshot(),
+            max_queries=4,
+            result_limit=5,
+        )[0]
+        public_url = "https://aggregator.example/jobs/123"
+        connector = BoardAwareConnector(
+            jobs_by_token={
+                "acme": [
+                    _posting_for_board("acme", "Acme", "role-123", "Director, Platform Engineering")
+                ]
+            }
+        )
+        run = run_job_discovery(
+            session,
+            search_definition_id=search_id,
+            provider_name="fake",
+            provider=FakeJobDiscoveryProvider(
+                results_by_query={
+                    query.rendered_query: [
+                        DiscoveredJobCandidate(
+                            discovered_url=public_url,
+                            provider_name="fake",
+                            query_identifier=query.stable_query_id,
+                            rank=1,
+                            title_hint="Director, Platform Engineering",
+                            company_hint="Acme",
+                        )
+                    ]
+                }
+            ),
+            fetcher=FakeFetcher(
+                {
+                    public_url: PublicPage(
+                        requested_url=public_url,
+                        final_url=public_url,
+                        content_type="text/html",
+                        text=_public_page_fixture("third_party_greenhouse_job.html"),
+                    )
+                }
+            ),
+            board_validator=connector,
+            connector=connector,
+            config=_config(),
+        )
+
+        observation = list_job_discovery_observations(session, discovery_run_id=run.id)[0]
+        source = session.scalar(select(JobSourceConfigurationModel))
+        assert run.status == "completed"
+        assert run.detected_count == 1
+        assert run.imported_lead_count == 1
+        assert connector.fetch_calls == ["acme"]
+        assert source is not None and source.board_token == "acme"
+        assert (
+            observation.observation.processing_status
+            == JobDiscoveryObservationStatus.IMPORTED.value
+        )
+
+
+def test_run_job_discovery_reconciles_application_link_before_other_board_links(
+    session_factory: sessionmaker[Session],
+) -> None:
+    with session_factory() as session:
+        _seed_candidate(session)
+        search_id = _search(session)
+        query = generate_job_discovery_queries(
+            get_job_search_definition(session, search_id).to_snapshot(),
+            max_queries=4,
+            result_limit=5,
+        )[0]
+        public_url = "https://aggregator.example/jobs/job-a"
+        connector = BoardAwareConnector(
+            jobs_by_token={
+                "acme": [
+                    _posting_for_board("acme", "Acme", "job-a", "Director, Platform Engineering"),
+                    _posting_for_board("acme", "Acme", "job-b", "Finance Operations Manager"),
+                ]
+            }
+        )
+        run = run_job_discovery(
+            session,
+            search_definition_id=search_id,
+            provider_name="fake",
+            provider=FakeJobDiscoveryProvider(
+                results_by_query={
+                    query.rendered_query: [
+                        DiscoveredJobCandidate(
+                            discovered_url=public_url,
+                            provider_name="fake",
+                            query_identifier=query.stable_query_id,
+                            rank=1,
+                            title_hint="Director, Platform Engineering",
+                            company_hint="Acme",
+                        )
+                    ]
+                }
+            ),
+            fetcher=FakeFetcher(
+                {
+                    public_url: PublicPage(
+                        requested_url=public_url,
+                        final_url=public_url,
+                        content_type="text/html",
+                        text=(
+                            '<a href="https://boards.greenhouse.io/acme/jobs/job-b">Other job</a>'
+                            '<form action="https://boards.greenhouse.io/acme/jobs/job-a"></form>'
+                        ),
+                    )
+                }
+            ),
+            board_validator=connector,
+            connector=connector,
+            config=_config(),
+        )
+
+        observation = list_job_discovery_observations(session, discovery_run_id=run.id)[0]
+        imported = session.get(JobLeadModel, observation.observation.imported_job_lead_id)
+        assert run.imported_lead_count == 1
+        assert imported is not None
+        assert imported.external_id is not None
+        assert imported.external_id.endswith(":job-a")
 
 
 def test_run_job_discovery_evaluates_new_board_jobs_when_seed_is_stale(

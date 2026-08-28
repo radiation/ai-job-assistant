@@ -107,6 +107,7 @@ def post_source_detection_approve(
         session,
         run_id=run_id,
         selected_token=payload.selected_token,
+        selected_provider=payload.selected_provider,
         create_and_sync=payload.create_and_sync,
         connector=connector,
         retain_raw_payload=settings.greenhouse_retain_raw_payload,

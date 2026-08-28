@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import json
 import re
 from collections import OrderedDict
 from dataclasses import dataclass
+from html.parser import HTMLParser
 from typing import Any
 from urllib.parse import urljoin, urlsplit
 from uuid import UUID
@@ -67,6 +69,49 @@ LEGAL_SUFFIXES = {
     "limited",
     "plc",
 }
+
+
+class _PublicPageSignalParser(HTMLParser):
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self.urls: list[tuple[str, str]] = []
+        self.json_ld_documents: list[str] = []
+        self._in_json_ld_script = False
+        self._json_ld_parts: list[str] = []
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        attributes = {name.casefold(): value for name, value in attrs if value is not None}
+        if tag.casefold() == "script":
+            script_type = (attributes.get("type") or "").casefold().split(";", 1)[0].strip()
+            self._in_json_ld_script = script_type == "application/ld+json"
+            self._json_ld_parts = []
+            return
+        for attribute in ("href", "action"):
+            value = attributes.get(attribute)
+            if value:
+                category = "supported_ats_link"
+                if (
+                    tag.casefold() == "link"
+                    and "canonical" in (attributes.get("rel") or "").casefold().split()
+                ):
+                    category = "canonical_supported_ats_url"
+                elif tag.casefold() == "form":
+                    category = "application_supported_ats_url"
+                self.urls.append((value, category))
+        if tag.casefold() == "meta":
+            value = attributes.get("content")
+            if value:
+                self.urls.append((value, "metadata_supported_ats_url"))
+
+    def handle_data(self, data: str) -> None:
+        if self._in_json_ld_script:
+            self._json_ld_parts.append(data)
+
+    def handle_endtag(self, tag: str) -> None:
+        if tag.casefold() == "script" and self._in_json_ld_script:
+            self.json_ld_documents.append("".join(self._json_ld_parts))
+            self._in_json_ld_script = False
+            self._json_ld_parts = []
 
 
 @dataclass(frozen=True, slots=True)
@@ -194,11 +239,13 @@ def validate_greenhouse_token(
             validation.error_message or "Greenhouse validation is unavailable."
         )
     return _candidate_payload(
+        provider=JobSourceProvider.GREENHOUSE,
         token=token,
         source="manual",
         evidence_categories=["manual_token"],
         validation=validation,
         existing_source=_source_by_token(session, token),
+        selected_external_posting_id=None,
     )
 
 
@@ -207,6 +254,7 @@ def approve_source_detection_run(
     *,
     run_id: UUID,
     selected_token: str | None,
+    selected_provider: JobSourceProvider | None = None,
     create_and_sync: bool,
     connector: JobSourceConnector,
     retain_raw_payload: bool,
@@ -214,8 +262,15 @@ def approve_source_detection_run(
     stale_after_seconds: int,
 ) -> SourceDetectionApprovalResult:
     run = get_source_detection_run(session, run_id)
-    token = _selected_valid_token(run, selected_token)
-    provider = JobSourceProvider(run.detected_provider or JobSourceProvider.GREENHOUSE.value)
+    selected_candidate = _selected_valid_candidate(run, selected_token, selected_provider)
+    token = str(selected_candidate["token"])
+    provider = JobSourceProvider(
+        str(
+            selected_candidate.get("provider")
+            or run.detected_provider
+            or JobSourceProvider.GREENHOUSE.value
+        )
+    )
     existing_source = _source_by_token(session, token, provider=provider)
     source_existed = existing_source is not None
     source = existing_source
@@ -276,7 +331,7 @@ def _detect(
     config: SourceDetectionConfig,
 ) -> dict[str, Any]:
     evidence: list[dict[str, Any]] = []
-    observed_tokens: OrderedDict[str, set[str]] = OrderedDict()
+    observed_candidates: OrderedDict[tuple[JobSourceProvider, str], set[str]] = OrderedDict()
     normalized_url = None
     final_url = None
     page: PublicPage | None = None
@@ -286,6 +341,7 @@ def _detect(
             provider = canonical_url.provider
             validation = board_validator.validate(provider, canonical_url.board_token)
             candidate = _candidate_payload(
+                provider=provider,
                 token=canonical_url.board_token,
                 source="canonical_url",
                 evidence_categories=[f"canonical_{provider.value}_url"],
@@ -293,6 +349,7 @@ def _detect(
                 existing_source=_source_by_token(
                     session, canonical_url.board_token, provider=provider
                 ),
+                selected_external_posting_id=canonical_url.external_posting_id,
             )
             return {
                 "status": (
@@ -321,20 +378,47 @@ def _detect(
         page = fetcher.fetch(input_url)
         normalized_url = page.requested_url
         final_url = page.final_url
-        _merge_token_evidence(
-            observed_tokens,
+        redirect_target = parse_supported_ats_url(page.final_url)
+        if redirect_target is not None:
+            _merge_candidate_evidence(
+                observed_candidates,
+                evidence,
+                [
+                    _supported_url_evidence(
+                        redirect_target,
+                        category="redirected_supported_ats_url",
+                        source="redirect",
+                        source_url=page.final_url,
+                    )
+                ],
+            )
+        _merge_candidate_evidence(
+            observed_candidates,
             evidence,
-            _extract_greenhouse_tokens(page.text, source_url=page.final_url, source="html"),
+            _extract_public_page_supported_candidates(page),
+        )
+        _merge_candidate_evidence(
+            observed_candidates,
+            evidence,
+            _greenhouse_token_candidates(
+                _extract_greenhouse_tokens(page.text, source_url=page.final_url, source="html")
+            ),
         )
 
-    candidates = _validate_observed_tokens(session, observed_tokens, board_validator)
+    candidates = _validate_observed_candidates(
+        session, observed_candidates, evidence, board_validator
+    )
     valid_candidates = [candidate for candidate in candidates if candidate["validation"]["valid"]]
     if page is not None and not valid_candidates:
         linked_tokens = _tokens_from_linked_scripts(page, fetcher, config)
-        for script_evidence in linked_tokens[1]:
-            evidence.append(script_evidence)
-        _merge_token_evidence(observed_tokens, evidence, linked_tokens[0], add_evidence=False)
-        candidates = _validate_observed_tokens(session, observed_tokens, board_validator)
+        _merge_candidate_evidence(
+            observed_candidates,
+            evidence,
+            _greenhouse_token_candidates(linked_tokens[0]),
+        )
+        candidates = _validate_observed_candidates(
+            session, observed_candidates, evidence, board_validator
+        )
         valid_candidates = [
             candidate for candidate in candidates if candidate["validation"]["valid"]
         ]
@@ -366,7 +450,7 @@ def _detect(
         "status": status,
         "normalized_url": normalized_url,
         "final_url": final_url,
-        "detected_provider": JobSourceProvider.GREENHOUSE.value if valid_candidates else None,
+        "detected_provider": selected["provider"] if selected else None,
         "candidate_tokens": candidates,
         "evidence": evidence,
         "validated_token": selected["token"] if selected else None,
@@ -406,21 +490,26 @@ def _finalize_run(
     session.commit()
 
 
-def _validate_observed_tokens(
+def _validate_observed_candidates(
     session: Session,
-    tokens: OrderedDict[str, set[str]],
+    candidates_by_identity: OrderedDict[tuple[JobSourceProvider, str], set[str]],
+    evidence: list[dict[str, Any]],
     board_validator: JobSourceBoardValidator,
 ) -> list[dict[str, Any]]:
     candidates: list[dict[str, Any]] = []
-    for token, categories in tokens.items():
-        validation = board_validator.validate(JobSourceProvider.GREENHOUSE, token)
+    for (provider, token), categories in candidates_by_identity.items():
+        validation = board_validator.validate(provider, token)
         candidates.append(
             _candidate_payload(
+                provider=provider,
                 token=token,
                 source="observed",
                 evidence_categories=sorted(categories),
                 validation=validation,
-                existing_source=_source_by_token(session, token),
+                existing_source=_source_by_token(session, token, provider=provider),
+                selected_external_posting_id=_selected_external_posting_id(
+                    evidence, provider=provider, token=token
+                ),
             )
         )
     return candidates
@@ -440,11 +529,13 @@ def _validate_generated_candidates(
             continue
         candidates.append(
             _candidate_payload(
+                provider=JobSourceProvider.GREENHOUSE,
                 token=token,
                 source="generated",
                 evidence_categories=["generated_candidate_validated"],
                 validation=validation,
                 existing_source=_source_by_token(session, token),
+                selected_external_posting_id=None,
             )
         )
     return candidates
@@ -452,13 +543,16 @@ def _validate_generated_candidates(
 
 def _candidate_payload(
     *,
+    provider: JobSourceProvider,
     token: str,
     source: str,
     evidence_categories: list[str],
     validation: JobSourceBoardValidation,
     existing_source: JobSourceConfigurationModel | None,
+    selected_external_posting_id: str | None,
 ) -> dict[str, Any]:
     return {
+        "provider": provider.value,
         "token": token,
         "source": source,
         "evidence_categories": evidence_categories,
@@ -471,6 +565,7 @@ def _candidate_payload(
             "error_message": validation.error_message,
         },
         "existing_source_configuration_id": str(existing_source.id) if existing_source else None,
+        "selected_external_posting_id": selected_external_posting_id,
     }
 
 
@@ -498,6 +593,118 @@ def _tokens_from_linked_scripts(
             tokens.append(item)
             evidence.append(item)
     return tokens, evidence
+
+
+def _extract_public_page_supported_candidates(page: PublicPage) -> list[dict[str, Any]]:
+    parser = _PublicPageSignalParser()
+    parser.feed(page.text)
+    parser.close()
+    evidence: list[dict[str, Any]] = []
+    for value, category in parser.urls:
+        candidate = parse_supported_ats_url(urljoin(page.final_url, value.strip()))
+        if candidate is not None:
+            evidence.append(
+                _supported_url_evidence(
+                    candidate,
+                    category=category,
+                    source="html",
+                    source_url=page.final_url,
+                )
+            )
+    for document in parser.json_ld_documents:
+        try:
+            payload = json.loads(document)
+        except json.JSONDecodeError:
+            continue
+        for value in _string_values(payload):
+            candidate = parse_supported_ats_url(urljoin(page.final_url, value.strip()))
+            if candidate is not None:
+                evidence.append(
+                    _supported_url_evidence(
+                        candidate,
+                        category="structured_data_supported_ats_url",
+                        source="json_ld",
+                        source_url=page.final_url,
+                    )
+                )
+    supported_url_pattern = re.compile(
+        r"https?://(?:boards(?:-api)?\.greenhouse\.io|job-boards\.greenhouse\.io|"
+        r"jobs\.ashbyhq\.com|jobs\.lever\.co)/[^\s\"'<>]+",
+        flags=re.IGNORECASE,
+    )
+    for match in supported_url_pattern.finditer(page.text):
+        candidate = parse_supported_ats_url(match.group(0).rstrip(".,;:)]}"))
+        if candidate is not None:
+            evidence.append(
+                _supported_url_evidence(
+                    candidate,
+                    category="embedded_supported_ats_url",
+                    source="html",
+                    source_url=page.final_url,
+                    snippet=_bounded_snippet(page.text, match.start(), match.end()),
+                )
+            )
+    return evidence
+
+
+def _string_values(value: Any) -> list[str]:
+    if isinstance(value, str):
+        return [value]
+    if isinstance(value, list):
+        return [item for child in value for item in _string_values(child)]
+    if isinstance(value, dict):
+        return [item for child in value.values() for item in _string_values(child)]
+    return []
+
+
+def _supported_url_evidence(
+    candidate: Any,
+    *,
+    category: str,
+    source: str,
+    source_url: str,
+    snippet: str | None = None,
+) -> dict[str, Any]:
+    evidence = {
+        "category": category,
+        "provider": candidate.provider.value,
+        "token": candidate.board_token,
+        "external_posting_id": candidate.external_posting_id,
+        "source": source,
+        "source_url": source_url,
+    }
+    if snippet is not None:
+        evidence["snippet"] = snippet
+    return evidence
+
+
+def _greenhouse_token_candidates(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return [{**item, "provider": JobSourceProvider.GREENHOUSE.value} for item in items]
+
+
+def _selected_external_posting_id(
+    evidence: list[dict[str, Any]], *, provider: JobSourceProvider, token: str
+) -> str | None:
+    priority = {
+        "application_supported_ats_url": 0,
+        "redirected_supported_ats_url": 1,
+        "canonical_supported_ats_url": 2,
+        "structured_data_supported_ats_url": 3,
+        "supported_ats_link": 4,
+        "metadata_supported_ats_url": 5,
+        "embedded_supported_ats_url": 6,
+    }
+    matching = [
+        (priority.get(str(item.get("category")), len(priority)), index, item)
+        for index, item in enumerate(evidence)
+        if item.get("provider") == provider.value
+        and item.get("token") == token
+        and isinstance(item.get("external_posting_id"), str)
+    ]
+    if not matching:
+        return None
+    selected = min(matching, key=lambda item: (item[0], item[1]))[2].get("external_posting_id")
+    return selected if isinstance(selected, str) else None
 
 
 def _extract_greenhouse_tokens(text: str, *, source_url: str, source: str) -> list[dict[str, Any]]:
@@ -533,18 +740,16 @@ def _extract_greenhouse_tokens(text: str, *, source_url: str, source: str) -> li
     return evidence
 
 
-def _merge_token_evidence(
-    tokens: OrderedDict[str, set[str]],
+def _merge_candidate_evidence(
+    candidates_by_identity: OrderedDict[tuple[JobSourceProvider, str], set[str]],
     evidence: list[dict[str, Any]],
     items: list[dict[str, Any]],
-    *,
-    add_evidence: bool = True,
 ) -> None:
     for item in items:
-        token = item["token"]
-        tokens.setdefault(token, set()).add(str(item["category"]))
-        if add_evidence:
-            evidence.append(item)
+        provider = JobSourceProvider(str(item["provider"]))
+        token = str(item["token"])
+        candidates_by_identity.setdefault((provider, token), set()).add(str(item["category"]))
+        evidence.append(item)
 
 
 def _script_urls(html: str, base_url: str) -> list[str]:
@@ -608,7 +813,11 @@ def _status_for_valid_candidates(candidates: list[dict[str, Any]]) -> SourceDete
     return SourceDetectionRunStatus.DETECTED
 
 
-def _selected_valid_token(run: SourceDetectionRunModel, selected_token: str | None) -> str:
+def _selected_valid_candidate(
+    run: SourceDetectionRunModel,
+    selected_token: str | None,
+    selected_provider: JobSourceProvider | None,
+) -> dict[str, Any]:
     valid_candidates = [
         candidate
         for candidate in run.candidate_tokens
@@ -618,11 +827,16 @@ def _selected_valid_token(run: SourceDetectionRunModel, selected_token: str | No
     ]
     if not valid_candidates:
         raise SourceDetectionApprovalError("The detection run does not have a validated token.")
-    if len(valid_candidates) > 1 and not selected_token:
-        raise AmbiguousSourceDetectionError("Select a token before approving this detection run.")
+    if len(valid_candidates) > 1 and (not selected_token or selected_provider is None):
+        raise AmbiguousSourceDetectionError(
+            "Select both a provider and token before approving this detection run."
+        )
     selected_value = selected_token or run.validated_token or ""
     normalized_selected: str | None
-    if run.detected_provider in {
+    candidate_provider = selected_provider or JobSourceProvider(
+        run.detected_provider or JobSourceProvider.GREENHOUSE.value
+    )
+    if candidate_provider in {
         JobSourceProvider.ASHBY.value,
         JobSourceProvider.LEVER.value,
     }:
@@ -636,8 +850,11 @@ def _selected_valid_token(run: SourceDetectionRunModel, selected_token: str | No
             "Selected token was not validated by this detection run."
         )
     for candidate in valid_candidates:
-        if candidate.get("token") == normalized_selected:
-            return normalized_selected
+        if (
+            candidate.get("provider") == candidate_provider.value
+            and candidate.get("token") == normalized_selected
+        ):
+            return candidate
     raise SourceDetectionApprovalError("Selected token was not validated by this detection run.")
 
 
