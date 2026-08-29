@@ -17,7 +17,11 @@
             "expected_ordering_group": "platform-core",
             "rationale": "Direct alignment with target function, seniority, and verified platform evidence.",
             "expected_match": true,
-            "expected_domains": ["platform_engineering", "developer_experience"],
+            "expected_domains": [
+                "platform_engineering",
+                "developer_experience",
+                "engineering_productivity"
+            ],
             "expected_seniority": ["senior_director"]
         },
         {
@@ -49,7 +53,7 @@
             "expected_ordering_group": "edge",
             "rationale": "Some relevant signals but weaker seniority and location alignment.",
             "expected_match": false,
-            "expected_domains": ["platform_engineering"],
+            "expected_domains": ["platform_engineering", "engineering_productivity"],
             "expected_seniority": ["manager"]
         },
         {
@@ -169,7 +173,11 @@
             "expected_ordering_group": "platform-core",
             "rationale": "Engineering productivity is an explicit target family.",
             "expected_match": true,
-            "expected_domains": ["developer_experience", "engineering_productivity"],
+            "expected_domains": [
+                "platform_engineering",
+                "developer_experience",
+                "engineering_productivity"
+            ],
             "expected_seniority": ["senior_director"]
         },
         {
@@ -185,7 +193,7 @@
             "expected_ordering_group": "borderline",
             "rationale": "Technically aligned but below the saved-search leadership band.",
             "expected_match": false,
-            "expected_domains": ["platform_engineering"],
+            "expected_domains": ["platform_engineering", "engineering_productivity"],
             "expected_seniority": ["senior_manager"]
         },
         {
@@ -233,7 +241,11 @@
             "expected_ordering_group": "ic",
             "rationale": "Relevant function but explicitly individual-contributor seniority.",
             "expected_match": false,
-            "expected_domains": ["platform_engineering", "infrastructure"],
+            "expected_domains": [
+                "platform_engineering",
+                "infrastructure",
+                "engineering_productivity"
+            ],
             "expected_seniority": []
         },
         {
@@ -249,7 +261,11 @@
             "expected_ordering_group": "ic",
             "rationale": "Staff is not leadership for this saved search.",
             "expected_match": false,
-            "expected_domains": ["platform_engineering", "infrastructure"],
+            "expected_domains": [
+                "platform_engineering",
+                "infrastructure",
+                "engineering_productivity"
+            ],
             "expected_seniority": ["staff"]
         },
         {

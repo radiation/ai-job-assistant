@@ -6,6 +6,7 @@ from fastapi.testclient import TestClient
 
 from ai_job_finder.domain.enums import JobSourceProvider, WorkplaceType
 from ai_job_finder.domain.job_sources import NormalizedJobPosting
+from ai_job_finder.domain.scoring import DEFAULT_SCORING_VERSION
 
 
 def _create_candidate(client: TestClient) -> dict[str, Any]:
@@ -126,7 +127,7 @@ def test_entity_creation_and_retrieval_flow(client: TestClient) -> None:
     )
 
     assert evaluation_response.status_code == 201
-    assert evaluation_response.json()["scoring_version"] == "candidate_evidence_v2"
+    assert evaluation_response.json()["scoring_version"] == DEFAULT_SCORING_VERSION
     assert "Matched verified evidence:" in evaluation_response.json()["explanation"]
 
     latest_response = client.get(f"/api/v1/job-leads/{job_id}/evaluations/latest")

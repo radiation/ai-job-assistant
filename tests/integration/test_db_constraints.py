@@ -32,6 +32,7 @@ from ai_job_finder.domain.enums import (
 )
 from ai_job_finder.domain.errors import SingleCandidateViolationError
 from ai_job_finder.domain.job_sources import NormalizedJobPosting
+from ai_job_finder.domain.scoring import DEFAULT_SCORING_VERSION
 from ai_job_finder.infrastructure.database.models import (
     CandidateProfileModel,
     CareerFactModel,
@@ -306,10 +307,10 @@ def test_previous_evaluation_history_is_preserved(session_factory: sessionmaker[
         )
         stored = session.query(JobEvaluationModel).filter_by(job_lead_id=job.id).all()
 
-        assert current_evaluation.scoring_version == "candidate_evidence_v2"
+        assert current_evaluation.scoring_version == DEFAULT_SCORING_VERSION
         assert {evaluation.scoring_version for evaluation in stored} == {
             "foundation_v1",
-            "candidate_evidence_v2",
+            DEFAULT_SCORING_VERSION,
         }
 
 

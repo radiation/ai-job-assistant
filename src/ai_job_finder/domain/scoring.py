@@ -19,7 +19,7 @@ from ai_job_finder.domain.job_search_terminology import (
     target_function_matches,
 )
 
-DEFAULT_SCORING_VERSION: Final[str] = "candidate_evidence_v4"
+DEFAULT_SCORING_VERSION: Final[str] = "candidate_evidence_v5"
 _RECOMMENDATION_THRESHOLDS: Final[tuple[tuple[Recommendation, float], ...]] = (
     (Recommendation.STRONG_RECOMMEND, 80.0),
     (Recommendation.RECOMMEND, 65.0),
@@ -173,14 +173,18 @@ def _normalize(text: str | None) -> str:
 
 def _level_target_matches_title(target: str, title: str) -> bool:
     aliases = {
-        "vice president": ("vice president", " vp ", "svp", "avp"),
+        "vice president": ("vice president", "vp", "svp", "avp"),
         "senior director": ("senior director",),
         "director": ("director",),
-        "head": ("head of", "head,"),
+        "head": ("head of", "head"),
         "senior manager": ("senior manager",),
         "manager": ("manager",),
     }
-    return any(alias in f" {title} " for alias in aliases.get(target, (target,)))
+    normalized_title = f" {normalize_job_search_text(title)} "
+    return any(
+        f" {normalize_job_search_text(alias)} " in normalized_title
+        for alias in aliases.get(target, (target,))
+    )
 
 
 def _dedupe_preserving_order(values: list[str]) -> list[str]:
