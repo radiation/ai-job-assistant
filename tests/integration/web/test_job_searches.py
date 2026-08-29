@@ -115,6 +115,31 @@ def test_valid_saved_search_accepts_blank_optional_multivalue_fields(
     assert search.minimum_score_threshold == 70.0
 
 
+def test_saved_search_detail_configures_and_displays_daily_discovery_schedule(
+    client: TestClient,
+) -> None:
+    create_response = client.post(
+        "/job-searches",
+        data=_saved_search_form_data(),
+        follow_redirects=False,
+    )
+    assert create_response.status_code == 303
+    search_url = create_response.headers["location"]
+
+    schedule_response = client.post(
+        f"{search_url}/discovery-schedule",
+        data={"enabled": "true", "cadence": "daily"},
+        follow_redirects=False,
+    )
+    detail_response = client.get(search_url)
+
+    assert schedule_response.status_code == 303
+    assert "Scheduled discovery" in detail_response.text
+    assert "Actionable alerts" in detail_response.text
+    assert "Last attempted" in detail_response.text
+    assert "Stop daily discovery" in detail_response.text
+
+
 def test_saved_search_creation_with_rendered_canonical_values_succeeds(
     client: TestClient,
     session_factory: sessionmaker[Session],

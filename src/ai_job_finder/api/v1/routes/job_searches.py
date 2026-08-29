@@ -12,7 +12,9 @@ from ai_job_finder.api.v1.schemas import (
     JobSearchMatchResponse,
     JobSearchRunDetailResponse,
     JobSearchRunResponse,
+    ScheduledDiscoveryUpdateRequest,
 )
+from ai_job_finder.application.job_discovery import configure_scheduled_discovery
 from ai_job_finder.application.job_searches import (
     create_job_search_definition,
     get_job_search_definition,
@@ -123,6 +125,25 @@ def post_job_search_disable(
             session,
             search_definition_id=search_definition_id,
             enabled=False,
+        )
+    )
+
+
+@router.put(
+    "/job-searches/{search_definition_id}/discovery-schedule",
+    response_model=JobSearchDefinitionResponse,
+)
+def put_job_search_discovery_schedule(
+    search_definition_id: UUID,
+    payload: ScheduledDiscoveryUpdateRequest,
+    session: DbSession,
+) -> JobSearchDefinitionResponse:
+    return JobSearchDefinitionResponse.model_validate(
+        configure_scheduled_discovery(
+            session,
+            search_definition_id=search_definition_id,
+            enabled=payload.enabled,
+            cadence=payload.cadence,
         )
     )
 

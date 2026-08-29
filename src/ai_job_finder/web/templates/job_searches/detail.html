@@ -58,6 +58,42 @@
       {% endif %}
     </article>
     <article class="panel">
+      <h2>Scheduled discovery</h2>
+      <dl class="detail-list">
+        <div><dt>Enabled</dt><dd>{{ 'Yes' if search.scheduled_discovery_enabled else 'No' }}</dd></div>
+        <div><dt>Cadence</dt><dd>Daily</dd></div>
+        <div><dt>Last attempted</dt><dd>{{ search.last_scheduled_discovery_attempted_at|datetime if search.last_scheduled_discovery_attempted_at else 'Never' }}</dd></div>
+        <div><dt>Last completed</dt><dd>{{ search.last_scheduled_discovery_completed_at|datetime if search.last_scheduled_discovery_completed_at else 'Never' }}</dd></div>
+        <div><dt>Next run</dt><dd>{{ search.next_scheduled_discovery_at|datetime if search.next_scheduled_discovery_at else 'Not scheduled' }}</dd></div>
+      </dl>
+      <form method="post" action="/job-searches/{{ search.id }}/discovery-schedule" class="actions-row">
+        <input type="hidden" name="enabled" value="{{ 'false' if search.scheduled_discovery_enabled else 'true' }}" />
+        <input type="hidden" name="cadence" value="daily" />
+        <button class="button-secondary" type="submit">{{ 'Stop daily discovery' if search.scheduled_discovery_enabled else 'Start daily discovery' }}</button>
+      </form>
+    </article>
+    <article class="panel">
+      <h2>Actionable alerts</h2>
+      {% if notifications %}
+        <table class="job-table">
+          <thead><tr><th>Delivery</th><th>Attempted</th><th>Sent</th><th>Failure</th><th>Job</th></tr></thead>
+          <tbody>
+            {% for notification in notifications %}
+              <tr>
+                <td><span class="badge badge-status">{{ notification.delivery_status|humanize }}</span></td>
+                <td>{{ notification.attempted_at|datetime if notification.attempted_at else 'Not attempted' }}</td>
+                <td>{{ notification.sent_at|datetime if notification.sent_at else 'Not sent' }}</td>
+                <td>{{ notification.failure_message or '-' }}</td>
+                <td><a href="/jobs/{{ notification.job_lead_id }}">View job</a></td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      {% else %}
+        <p class="muted">No actionable alerts yet.</p>
+      {% endif %}
+    </article>
+    <article class="panel">
       <h2>Discovery history</h2>
       <p class="muted">Discovery runs generate deterministic external queries, persist observed candidate URLs, and reuse source detection plus approved source imports.</p>
       {% if discovery_runs %}
