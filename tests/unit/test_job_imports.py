@@ -9,6 +9,11 @@ import pytest
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
+from ai_job_finder.application.job_searches import (
+    create_job_search_definition,
+    run_job_search,
+    update_job_search_definition,
+)
 from ai_job_finder.application.job_sources import (
     create_job_source_configuration,
     list_ranked_discovered_leads,
@@ -227,6 +232,31 @@ def _create_lever_source(session: Session) -> UUID:
     return source.id
 
 
+def _run_actionable_search(
+    session: Session,
+    search_id: UUID | None = None,
+    *,
+    name: str = "Actionable platform roles",
+) -> UUID:
+    if search_id is not None:
+        run_job_search(session, search_definition_id=search_id)
+        return search_id
+    search = create_job_search_definition(
+        session,
+        name=name,
+        title_include_patterns=[],
+        title_exclude_patterns=[],
+        target_domains=[],
+        target_seniority_levels=[],
+        allowed_locations=[],
+        allowed_remote_geographies=[],
+        allowed_workplace_types=[],
+        minimum_score_threshold=0,
+    )
+    run_job_search(session, search_definition_id=search.id)
+    return search.id
+
+
 def test_greenhouse_parsing_missing_optional_fields_and_html_normalization() -> None:
     payload = {
         "id": 123,
@@ -342,6 +372,7 @@ def test_discovered_leads_default_to_actionable_location_eligibility(
                 ]
             ),
         )
+        _run_actionable_search(session)
 
         visible = list_ranked_discovered_leads(session)
         all_items = list_ranked_discovered_leads(session, include_ineligible=True)
@@ -371,6 +402,7 @@ def test_discovered_lead_location_eligibility_recomputes_from_candidate_preferen
         )
 
         assert list_ranked_discovered_leads(session) == []
+        search_id = _run_actionable_search(session)
 
         update_candidate_profile(
             session,
@@ -382,11 +414,146 @@ def test_discovered_lead_location_eligibility_recomputes_from_candidate_preferen
             target_levels=["director"],
             target_functions=["platform engineering"],
         )
+        _run_actionable_search(session, search_id)
 
         visible = list_ranked_discovered_leads(session)
 
         assert [item.job.location_text for item in visible] == ["Edinburgh"]
         assert visible[0].location_eligibility.status is JobLocationEligibilityStatus.ELIGIBLE
+
+
+def test_discover_queue_deduplicates_current_matches_and_uses_persisted_explanations(
+    session_factory: sessionmaker[Session],
+) -> None:
+    with session_factory() as session:
+        _seed_candidate(session)
+        source_id = _create_source(session)
+        run_job_source_import(
+            session,
+            source_id=source_id,
+            connector=FakeJobSourceConnector(jobs=[_posting("one"), _posting("two")]),
+        )
+        first_search_id = _run_actionable_search(session)
+        _run_actionable_search(session, first_search_id)
+        second_search_id = _run_actionable_search(
+            session,
+            name="Second actionable platform roles",
+        )
+
+        queue = list_ranked_discovered_leads(session)
+        filtered_queue = list_ranked_discovered_leads(
+            session,
+            search_definition_id=first_search_id,
+        )
+
+        assert len(queue) == 2
+        assert len({item.job.id for item in queue}) == 2
+        assert all(len(item.saved_search_matches) == 2 for item in queue)
+        for item in queue:
+            assert item.latest_evaluation is not None
+            assert (
+                item.saved_search_matches[0].score_at_match_time
+                == item.latest_evaluation.overall_score
+            )
+        assert all(
+            item.saved_search_matches[0].decision_explanation["outcome"] == "matched"
+            for item in queue
+        )
+        assert len(filtered_queue) == 2
+        assert all(
+            {match.search_definition_id for match in item.saved_search_matches} == {first_search_id}
+            for item in filtered_queue
+        )
+        assert first_search_id != second_search_id
+
+
+def test_discover_queue_suppresses_resolved_and_inactive_matches(
+    session_factory: sessionmaker[Session],
+) -> None:
+    with session_factory() as session:
+        _seed_candidate(session)
+        source_id = _create_source(session)
+        run_job_source_import(
+            session,
+            source_id=source_id,
+            connector=FakeJobSourceConnector(jobs=[_posting("resolved"), _posting("inactive")]),
+        )
+        _run_actionable_search(session)
+        resolved = session.scalar(
+            select(JobLeadModel).where(JobLeadModel.external_id.endswith(":resolved"))
+        )
+        assert resolved is not None
+        update_job_lead_status(session, resolved.id, PostingStatus.REJECTED.value)
+        run_job_source_import(
+            session,
+            source_id=source_id,
+            connector=FakeJobSourceConnector(jobs=[_posting("resolved")]),
+        )
+
+        queue = list_ranked_discovered_leads(session, include_ineligible=True)
+
+        assert queue == []
+
+
+def test_discover_queue_removes_a_job_after_its_latest_search_match_is_excluded(
+    session_factory: sessionmaker[Session],
+) -> None:
+    with session_factory() as session:
+        _seed_candidate(session)
+        source_id = _create_source(session)
+        run_job_source_import(
+            session,
+            source_id=source_id,
+            connector=FakeJobSourceConnector(jobs=[_posting("one")]),
+        )
+        search_id = _run_actionable_search(session)
+        assert len(list_ranked_discovered_leads(session)) == 1
+        update_job_search_definition(
+            session,
+            search_definition_id=search_id,
+            name="Actionable platform roles",
+            title_include_patterns=[],
+            title_exclude_patterns=["platform engineering"],
+            target_domains=[],
+            target_seniority_levels=[],
+            allowed_locations=[],
+            allowed_remote_geographies=[],
+            allowed_workplace_types=[],
+            minimum_score_threshold=0,
+        )
+        _run_actionable_search(session, search_id)
+
+        assert list_ranked_discovered_leads(session) == []
+
+
+def test_discover_queue_orders_by_recommendation_then_score_deterministically(
+    session_factory: sessionmaker[Session],
+) -> None:
+    with session_factory() as session:
+        _seed_candidate(session)
+        source_id = _create_source(session)
+        run_job_source_import(
+            session,
+            source_id=source_id,
+            connector=FakeJobSourceConnector(
+                jobs=[
+                    _posting("higher", description="Lead platform engineering with Kubernetes."),
+                    _posting("lower", description="Platform engineering leadership."),
+                ]
+            ),
+        )
+        _run_actionable_search(session)
+
+        first = list_ranked_discovered_leads(session)
+        second = list_ranked_discovered_leads(session)
+        scores: list[float] = []
+        for item in first:
+            score = item.saved_search_matches[0].score_at_match_time
+            assert score is not None
+            scores.append(score)
+
+        assert [item.job.id for item in first] == [item.job.id for item in second]
+        assert scores == sorted(scores, reverse=True)
 
 
 def test_closure_safety_failure_empty_and_reactivation(

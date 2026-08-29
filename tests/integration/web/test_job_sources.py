@@ -197,6 +197,26 @@ def test_job_sources_and_discover_pages(
     assert run_response.status_code == 200
     assert "Succeeded" in run_response.text
 
+    search_response = client.post(
+        "/job-searches",
+        data={
+            "name": "All imported roles",
+            "title_include_patterns": "",
+            "title_exclude_patterns": "",
+            "target_domains": "",
+            "target_seniority_levels": "",
+            "allowed_locations": "",
+            "allowed_remote_geographies": "",
+            "allowed_workplace_types": "",
+            "minimum_score_threshold": "0",
+        },
+        follow_redirects=False,
+    )
+    assert search_response.status_code == 303
+    search_id = search_response.headers["location"].split("/job-searches/")[1]
+    search_run = client.post(f"/job-searches/{search_id}/runs", follow_redirects=False)
+    assert search_run.status_code == 303
+
     with session_factory() as session:
         review_job = (
             session.query(JobLeadModel).filter(JobLeadModel.external_id.endswith(":review-1")).one()

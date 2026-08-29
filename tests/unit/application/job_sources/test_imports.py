@@ -10,6 +10,10 @@ import pytest
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
+from ai_job_finder.application.job_searches import (
+    create_job_search_definition,
+    run_job_search,
+)
 from ai_job_finder.application.job_sources import (
     count_active_job_source_observations,
     create_job_source_configuration,
@@ -199,6 +203,26 @@ def _create_source(session: Session) -> UUID:
     return source.id
 
 
+def _run_actionable_search(session: Session, search_id: UUID | None = None) -> UUID:
+    if search_id is not None:
+        run_job_search(session, search_definition_id=search_id)
+        return search_id
+    search = create_job_search_definition(
+        session,
+        name="Actionable platform roles",
+        title_include_patterns=[],
+        title_exclude_patterns=[],
+        target_domains=[],
+        target_seniority_levels=[],
+        allowed_locations=[],
+        allowed_remote_geographies=[],
+        allowed_workplace_types=[],
+        minimum_score_threshold=0,
+    )
+    run_job_search(session, search_definition_id=search.id)
+    return search.id
+
+
 def test_greenhouse_parsing_missing_optional_fields_and_html_normalization() -> None:
     payload = {
         "id": 123,
@@ -342,6 +366,7 @@ def test_discovered_leads_default_to_actionable_location_eligibility(
                 ]
             ),
         )
+        _run_actionable_search(session)
 
         visible = list_ranked_discovered_leads(session)
         all_items = list_ranked_discovered_leads(session, include_ineligible=True)
@@ -371,6 +396,7 @@ def test_discovered_lead_location_eligibility_recomputes_from_candidate_preferen
         )
 
         assert list_ranked_discovered_leads(session) == []
+        search_id = _run_actionable_search(session)
 
         update_candidate_profile(
             session,
@@ -382,6 +408,7 @@ def test_discovered_lead_location_eligibility_recomputes_from_candidate_preferen
             target_levels=["director"],
             target_functions=["platform engineering"],
         )
+        _run_actionable_search(session, search_id)
 
         visible = list_ranked_discovered_leads(session)
 
