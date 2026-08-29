@@ -3,17 +3,26 @@ from __future__ import annotations
 from uuid import UUID
 
 from ai_job_finder.domain.common import new_uuid, utc_now
-from ai_job_finder.domain.enums import PostingStatus, Recommendation, WorkplaceType
-from ai_job_finder.domain.evaluation import EvaluationResult
+from ai_job_finder.domain.enums import (
+    JobLocationEligibilityReason,
+    JobLocationEligibilityStatus,
+    PostingStatus,
+    Recommendation,
+    WorkplaceType,
+)
+from ai_job_finder.domain.evaluation import EvaluationResult, ScoreComponent
 from ai_job_finder.domain.job_lead import JobLeadSnapshot
 from ai_job_finder.domain.job_searches import (
     JobSearchDefinitionSnapshot,
     JobSearchDomain,
+    JobSearchExclusionReason,
     JobSearchLocationContext,
     JobSearchSeniority,
     evaluate_job_search_match,
 )
 from ai_job_finder.domain.job_searches.matching import normalize_search_text
+from ai_job_finder.domain.location_eligibility import JobLocationEligibilityResult
+from ai_job_finder.domain.scoring import recommendation_minimum_score
 
 
 def _job(
@@ -46,7 +55,10 @@ def _job(
     )
 
 
-def _evaluation(score: float = 88.0) -> EvaluationResult:
+def _evaluation(
+    score: float = 88.0,
+    recommendation: Recommendation = Recommendation.STRONG_RECOMMEND,
+) -> EvaluationResult:
     now = utc_now()
     return EvaluationResult(
         id=new_uuid(),
@@ -60,9 +72,17 @@ def _evaluation(score: float = 88.0) -> EvaluationResult:
         platform_ownership_score=88,
         referral_priority_score=0,
         overall_score=score,
-        recommendation=Recommendation.STRONG_RECOMMEND,
+        recommendation=recommendation,
         explanation="Scoring version: candidate_evidence_v2",
         evaluated_at=now,
+        score_components=(
+            ScoreComponent(
+                name="leadership_scope",
+                score=80,
+                weight=0.2,
+                weighted_score=16,
+            ),
+        ),
     )
 
 
@@ -127,6 +147,9 @@ def test_saved_search_match_captures_title_domain_seniority_location_and_thresho
     assert result.matched_criteria["target_domains"] == ["platform_engineering"]
     assert result.matched_criteria["target_seniority_levels"] == ["senior_director"]
     assert "remote" in result.matched_criteria["location"]
+    assert result.explanation.outcome == "matched"
+    assert result.explanation.score_components[0].name == "leadership_scope"
+    assert result.explanation.actionable is True
 
 
 def test_title_exclude_patterns_override_include_patterns() -> None:
@@ -138,6 +161,7 @@ def test_title_exclude_patterns_override_include_patterns() -> None:
 
     assert result.matched is False
     assert "Job title matched an exclude pattern." in result.exclusion_reasons
+    assert JobSearchExclusionReason.TITLE_EXCLUDED in result.exclusion_reason_codes
 
 
 def test_domain_matching_fails_when_no_domain_signal_is_present() -> None:
@@ -149,6 +173,7 @@ def test_domain_matching_fails_when_no_domain_signal_is_present() -> None:
 
     assert result.criteria_matched is False
     assert "Job domain signals did not match the saved-search domains." in result.exclusion_reasons
+    assert JobSearchExclusionReason.ROLE_FAMILY_MISMATCH in result.exclusion_reason_codes
 
 
 def test_seniority_matching_uses_normalized_title_signals() -> None:
@@ -171,6 +196,7 @@ def test_remote_geography_must_match_saved_search_when_configured() -> None:
 
     assert result.criteria_matched is False
     assert "Remote role geography does not match the saved search." in result.exclusion_reasons
+    assert JobSearchExclusionReason.REMOTE_GEOGRAPHY_MISMATCH in result.exclusion_reason_codes
 
 
 def test_presence_required_roles_match_allowed_locations() -> None:
@@ -206,6 +232,9 @@ def test_score_threshold_is_separate_from_criteria_matching() -> None:
         "Job evaluation score is below the saved-search minimum threshold."
         in result.exclusion_reasons
     )
+    assert result.explanation.score == 82.0
+    assert result.explanation.match_threshold == 90.0
+    assert JobSearchExclusionReason.BELOW_MATCH_THRESHOLD in result.exclusion_reason_codes
 
 
 def test_missing_evaluation_is_reported_explicitly() -> None:
@@ -216,3 +245,40 @@ def test_missing_evaluation_is_reported_explicitly() -> None:
     assert (
         "Job has no evaluation for saved-search threshold comparison." in result.exclusion_reasons
     )
+    assert JobSearchExclusionReason.EVALUATION_MISSING in result.exclusion_reason_codes
+
+
+def test_needs_review_location_is_distinct_from_saved_search_matching() -> None:
+    result = evaluate_job_search_match(
+        _search_definition(),
+        _job(),
+        _evaluation(),
+        location_eligibility=JobLocationEligibilityResult(
+            status=JobLocationEligibilityStatus.NEEDS_REVIEW,
+            reasons=[JobLocationEligibilityReason.REMOTE_GEOGRAPHY_UNCLEAR],
+            summary="Remote role does not state a clear eligible geography.",
+        ),
+    )
+
+    assert result.matched is True
+    assert result.explanation.location_eligibility is not None
+    assert result.explanation.to_payload()["location_eligibility"] == {
+        "status": "needs_review",
+        "reason_codes": ["remote_geography_unclear"],
+        "summary": "Remote role does not state a clear eligible geography.",
+    }
+
+
+def test_match_threshold_and_actionable_threshold_are_distinct() -> None:
+    result = evaluate_job_search_match(
+        _search_definition(minimum_score_threshold=60.0),
+        _job(),
+        _evaluation(64.0, recommendation=Recommendation.HOLD),
+    )
+
+    assert result.matched is True
+    assert result.explanation.match_threshold == 60.0
+    assert result.explanation.actionable_threshold == recommendation_minimum_score(
+        Recommendation.RECOMMEND
+    )
+    assert result.explanation.actionable is False

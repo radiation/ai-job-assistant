@@ -129,6 +129,7 @@ class JobDiscoveryMatchingSummary:
     saved_search_match_count: int
     actionable_match_count: int
     surfaced_in_discover_count: int
+    exclusion_reason_counts: dict[str, int]
 
 
 @dataclass(frozen=True, slots=True)
@@ -1095,6 +1096,12 @@ def _build_matching_detail(
         if record.imported_job_lead is not None and record.imported_job_lead.id in evaluated_job_ids
     }
     additional_board_import_job_ids = evaluated_job_ids - seed_linked_job_ids
+    exclusion_reason_counts: dict[str, int] = {}
+    for saved_search_match in matches_by_job_id.values():
+        if saved_search_match.matched:
+            continue
+        for reason_code in saved_search_match.exclusion_reason_codes:
+            exclusion_reason_counts[reason_code] = exclusion_reason_counts.get(reason_code, 0) + 1
 
     if not imported_records:
         empty_summary = JobDiscoveryMatchingSummary(
@@ -1107,6 +1114,7 @@ def _build_matching_detail(
             saved_search_match_count=0,
             actionable_match_count=0,
             surfaced_in_discover_count=0,
+            exclusion_reason_counts=exclusion_reason_counts,
         )
         return empty_summary, [], []
 
@@ -1222,6 +1230,7 @@ def _build_matching_detail(
         saved_search_match_count=len(matched_records),
         actionable_match_count=actionable_match_count,
         surfaced_in_discover_count=len(discover_jobs),
+        exclusion_reason_counts=dict(sorted(exclusion_reason_counts.items())),
     )
     return matching_summary, matched_records[:MAX_TOP_MATCHES], discover_jobs
 

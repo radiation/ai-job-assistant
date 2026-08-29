@@ -11,10 +11,16 @@ from ai_job_finder.domain.enums import (
     RemotePreference,
     WorkplaceType,
 )
-from ai_job_finder.domain.evaluation import EvaluationResult
+from ai_job_finder.domain.evaluation import EvaluationResult, ScoreComponent
 from ai_job_finder.domain.job_lead import JobLeadSnapshot
 
 DEFAULT_SCORING_VERSION: Final[str] = "candidate_evidence_v2"
+_RECOMMENDATION_THRESHOLDS: Final[tuple[tuple[Recommendation, float], ...]] = (
+    (Recommendation.STRONG_RECOMMEND, 80.0),
+    (Recommendation.RECOMMEND, 65.0),
+    (Recommendation.HOLD, 45.0),
+    (Recommendation.DECLINE, 0.0),
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -87,18 +93,39 @@ def evaluate_job_fit(
     referral_priority_score = 0
     missing_evidence.append("Referral priority remains intentionally deferred in this slice.")
 
+    score_components = (
+        _score_component("level_alignment", level_score, active_config.weights.level_alignment),
+        _score_component(
+            "target_function_alignment",
+            function_score,
+            active_config.weights.target_function_alignment,
+        ),
+        _score_component(
+            "location_alignment", location_score, active_config.weights.location_alignment
+        ),
+        _score_component(
+            "platform_ownership", platform_score, active_config.weights.platform_ownership
+        ),
+        _score_component(
+            "leadership_scope", leadership_score, active_config.weights.leadership_scope
+        ),
+        _score_component(
+            "technical_alignment",
+            technical_alignment_score,
+            active_config.weights.technical_alignment,
+        ),
+        _score_component(
+            "referral_priority",
+            referral_priority_score,
+            active_config.weights.referral_priority,
+        ),
+    )
     overall_score = round(
-        (level_score * active_config.weights.level_alignment)
-        + (function_score * active_config.weights.target_function_alignment)
-        + (location_score * active_config.weights.location_alignment)
-        + (platform_score * active_config.weights.platform_ownership)
-        + (leadership_score * active_config.weights.leadership_scope)
-        + (technical_alignment_score * active_config.weights.technical_alignment)
-        + (referral_priority_score * active_config.weights.referral_priority),
+        sum(component.weighted_score for component in score_components),
         2,
     )
 
-    recommendation = _recommendation_for_score(overall_score)
+    recommendation = recommendation_for_score(overall_score)
     explanation = _build_explanation(
         version=active_config.version,
         matched_evidence=matched_evidence,
@@ -122,6 +149,16 @@ def evaluate_job_fit(
         recommendation=recommendation,
         explanation=explanation,
         evaluated_at=utc_now(),
+        score_components=score_components,
+    )
+
+
+def _score_component(name: str, score: int, weight: float) -> ScoreComponent:
+    return ScoreComponent(
+        name=name,
+        score=score,
+        weight=weight,
+        weighted_score=score * weight,
     )
 
 
@@ -500,14 +537,18 @@ def _score_evidence_rules(
     return score, (positive_signals, concerns, missing_evidence, matched_evidence)
 
 
-def _recommendation_for_score(score: float) -> Recommendation:
-    if score >= 80:
-        return Recommendation.STRONG_RECOMMEND
-    if score >= 65:
-        return Recommendation.RECOMMEND
-    if score >= 45:
-        return Recommendation.HOLD
-    return Recommendation.DECLINE
+def recommendation_for_score(score: float) -> Recommendation:
+    for recommendation, minimum_score in _RECOMMENDATION_THRESHOLDS:
+        if score >= minimum_score:
+            return recommendation
+    raise ValueError("Score must not be less than zero.")
+
+
+def recommendation_minimum_score(recommendation: Recommendation) -> float:
+    for candidate_recommendation, minimum_score in _RECOMMENDATION_THRESHOLDS:
+        if recommendation is candidate_recommendation:
+            return minimum_score
+    raise ValueError(f"No minimum score is configured for recommendation {recommendation!r}.")
 
 
 def _build_explanation(

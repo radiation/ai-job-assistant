@@ -45,6 +45,14 @@
         <div><dt>High-scoring actionable</dt><dd>{{ detail.matching_summary.actionable_match_count }}</dd></div>
         <div><dt>Surfaced in /discover</dt><dd>{{ detail.matching_summary.surfaced_in_discover_count }}</dd></div>
       </dl>
+      {% if detail.matching_summary.exclusion_reason_counts %}
+        <h3>Excluded by deterministic reason</h3>
+        <dl class="detail-list">
+          {% for reason, count in detail.matching_summary.exclusion_reason_counts.items() %}
+            <div><dt>{{ reason|humanize }}</dt><dd>{{ count }}</dd></div>
+          {% endfor %}
+        </dl>
+      {% endif %}
     </article>
   </section>
 
@@ -125,6 +133,7 @@
                 {% if record.saved_search_match %}
                   <div><span class="badge badge-status">{{ 'Matched' if record.saved_search_match.matched else 'Excluded' }}</span></div>
                   <div class="muted">Score {{ '%.1f'|format(record.saved_search_match.score_at_match_time or 0) }}</div>
+                  {% if record.saved_search_match.exclusion_reason_codes %}<div class="muted">{{ record.saved_search_match.exclusion_reason_codes|join(', ') }}</div>{% endif %}
                 {% else %}
                   <div class="muted">No linked saved-search result.</div>
                 {% endif %}

@@ -146,6 +146,16 @@ def get_job_discovery_run_route(
                     if record.saved_search_match
                     else None
                 ),
+                exclusion_reason_codes=(
+                    list(record.saved_search_match.exclusion_reason_codes)
+                    if record.saved_search_match
+                    else None
+                ),
+                decision_explanation=(
+                    dict(record.saved_search_match.decision_explanation)
+                    if record.saved_search_match
+                    else None
+                ),
             )
             for record in detail.observations
         ],
@@ -186,6 +196,7 @@ def get_job_discovery_run_route(
             saved_search_match_count=detail.matching_summary.saved_search_match_count,
             actionable_match_count=detail.matching_summary.actionable_match_count,
             surfaced_in_discover_count=detail.matching_summary.surfaced_in_discover_count,
+            exclusion_reason_counts=detail.matching_summary.exclusion_reason_counts,
         ),
         top_matches=[
             JobDiscoveryMatchedJobResponse(

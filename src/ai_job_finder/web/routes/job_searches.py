@@ -42,6 +42,7 @@ from ai_job_finder.infrastructure.database.models import JobSearchDefinitionMode
 from ai_job_finder.web.dependencies import DbSession, render_template, split_multivalue
 
 router = APIRouter(tags=["web"])
+_RUN_DETAIL_PAGE_SIZE = 100
 
 _CHECKBOX_FIELDS = {
     "target_domains",
@@ -442,8 +443,22 @@ def job_searches_run_discovery(
 
 
 @router.get("/job-search-runs/{run_id}")
-def job_search_runs_detail(request: Request, run_id: UUID, session: DbSession) -> Response:
+def job_search_runs_detail(
+    request: Request,
+    run_id: UUID,
+    session: DbSession,
+    page: int = 1,
+) -> Response:
     run = get_job_search_run(session, run_id)
+    current_page = max(page, 1)
+    match_record_count = run.candidates_considered - run.failures_count
+    match_offset = (current_page - 1) * _RUN_DETAIL_PAGE_SIZE
+    match_records = list_job_search_matches(
+        session,
+        search_run_id=run_id,
+        limit=_RUN_DETAIL_PAGE_SIZE,
+        offset=match_offset,
+    )
     return render_template(
         request,
         "job_searches/run_detail.html",
@@ -451,7 +466,14 @@ def job_search_runs_detail(request: Request, run_id: UUID, session: DbSession) -
             "page_title": f"Saved Search Run {run.id}",
             "run": run,
             "search": get_job_search_definition(session, run.search_definition_id),
-            "match_records": list_job_search_matches(session, search_run_id=run_id),
+            "match_records": match_records,
+            "match_record_count": match_record_count,
+            "matched_count": run.candidates_considered - run.excluded_count,
+            "current_page": current_page,
+            "has_previous_page": current_page > 1,
+            "has_next_page": match_offset + len(match_records) < match_record_count,
+            "page_start": match_offset + 1 if match_records else 0,
+            "page_end": match_offset + len(match_records),
         },
     )
 

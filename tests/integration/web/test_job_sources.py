@@ -346,7 +346,9 @@ def test_saved_search_pages_and_discovery_filter(
 
     run_detail = client.get(run_response.headers["location"])
     assert run_detail.status_code == 200
-    assert "Matched jobs" in run_detail.text
+    assert "Matched jobs on this page" in run_detail.text
+    assert "Showing match records 1 through 2 of 2." in run_detail.text
+    assert "Score component breakdown for this page" in run_detail.text
     assert "Director, Platform Engineering" in run_detail.text
     assert "Finance Operations Manager" in run_detail.text
 

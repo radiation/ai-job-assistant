@@ -29,6 +29,10 @@ from ai_job_finder.domain.job_searches import (
     JobSearchRunStatus,
     evaluate_job_search_match,
 )
+from ai_job_finder.domain.location_eligibility import (
+    JobLocationSignals,
+    classify_job_location_eligibility,
+)
 from ai_job_finder.domain.scoring import DEFAULT_SCORING_VERSION, evaluate_job_fit
 from ai_job_finder.infrastructure.database.models import (
     CandidateProfileModel,
@@ -129,6 +133,8 @@ def _should_create_new_evaluation(
         return True
     if latest_evaluation.scoring_version != DEFAULT_SCORING_VERSION:
         return True
+    if not latest_evaluation.score_components:
+        return True
     if latest_evaluation.evaluated_at < candidate_updated_at:
         return True
     if latest_evaluation.evaluated_at < job_updated_at:
@@ -165,6 +171,15 @@ def _materialize_evaluation(
         recommendation=evaluation.recommendation.value,
         explanation=evaluation.explanation,
         evaluated_at=evaluation.evaluated_at,
+        score_components=[
+            {
+                "name": component.name,
+                "score": component.score,
+                "weight": component.weight,
+                "weighted_score": component.weighted_score,
+            }
+            for component in evaluation.score_components
+        ],
     )
     session.add(evaluation_model)
     session.flush()
@@ -254,6 +269,8 @@ def _persist_match(
             matched=result.matched,
             matched_criteria=result.matched_criteria,
             exclusion_reasons=result.exclusion_reasons,
+            exclusion_reason_codes=[reason.value for reason in result.exclusion_reason_codes],
+            decision_explanation=result.explanation.to_payload(),
             inferred_domains=[domain.value for domain in result.inferred_domains],
             inferred_seniority_levels=[level.value for level in result.inferred_seniority_levels],
         )
@@ -325,11 +342,21 @@ def run_job_search(
                         )
                     if evaluation is not None:
                         run.evaluated_count += 1
+                    location_context = _location_context(observation, job_lead)
                     result = evaluate_job_search_match(
                         definition.to_snapshot(),
                         job_lead.to_snapshot(),
                         evaluation.to_snapshot() if evaluation is not None else None,
-                        location_context=_location_context(observation, job_lead),
+                        location_context=location_context,
+                        location_eligibility=classify_job_location_eligibility(
+                            candidate.to_snapshot(),
+                            JobLocationSignals(
+                                location_text=location_context.location_text,
+                                workplace_type=location_context.workplace_type,
+                                offices=location_context.offices,
+                                metadata=location_context.metadata,
+                            ),
+                        ),
                     )
                     if result.criteria_matched:
                         run.matched_by_criteria += 1
@@ -417,7 +444,13 @@ def list_job_search_matches(
     *,
     search_run_id: UUID,
     matched_only: bool = False,
+    limit: int | None = None,
+    offset: int = 0,
 ) -> list[JobSearchRunMatchRecord]:
+    if limit is not None and limit < 1:
+        raise ValueError("Match record limit must be at least one.")
+    if offset < 0:
+        raise ValueError("Match record offset must not be negative.")
     get_job_search_run(session, search_run_id)
     query = (
         select(JobSearchMatchModel)
@@ -434,6 +467,10 @@ def list_job_search_matches(
     )
     if matched_only:
         query = query.where(JobSearchMatchModel.matched.is_(True))
+    if limit is not None:
+        query = query.limit(limit)
+    if offset:
+        query = query.offset(offset)
     rows = list(session.scalars(query))
     return [
         JobSearchRunMatchRecord(

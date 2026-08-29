@@ -24,7 +24,7 @@
         <div><dt>Criteria matched</dt><dd>{{ run.matched_by_criteria }}</dd></div>
         <div><dt>Evaluations used</dt><dd>{{ run.evaluated_count }}</dd></div>
         <div><dt>Above threshold</dt><dd>{{ run.above_threshold_count }}</dd></div>
-        <div><dt>Final matches</dt><dd>{{ match_records | selectattr('match.matched') | list | length }}</dd></div>
+        <div><dt>Final matches</dt><dd>{{ matched_count }}</dd></div>
         <div><dt>Excluded</dt><dd>{{ run.excluded_count }}</dd></div>
         <div><dt>Failures</dt><dd>{{ run.failures_count }}</dd></div>
         <div><dt>Error</dt><dd>{{ run.error_message or 'None' }}</dd></div>
@@ -33,11 +33,27 @@
   </section>
 
   <section class="panel">
-    <h2>Matched jobs</h2>
+    {% if match_records %}
+      <p class="muted">Showing match records {{ page_start }} through {{ page_end }} of {{ match_record_count }}.</p>
+    {% else %}
+      <p class="muted">No match records are available on this page.</p>
+    {% endif %}
+    <div class="actions-row">
+      {% if has_previous_page %}
+        <a class="button-link button-secondary" href="/job-search-runs/{{ run.id }}?page={{ current_page - 1 }}">Previous</a>
+      {% endif %}
+      {% if has_next_page %}
+        <a class="button-link button-secondary" href="/job-search-runs/{{ run.id }}?page={{ current_page + 1 }}">Next</a>
+      {% endif %}
+    </div>
+  </section>
+
+  <section class="panel">
+    <h2>Matched jobs on this page</h2>
     {% set matched_records = match_records | selectattr('match.matched') | list %}
     {% if matched_records %}
       <table class="job-table">
-        <thead><tr><th>Company</th><th>Title</th><th>Score</th><th>Recommendation</th><th>Criteria</th><th></th></tr></thead>
+        <thead><tr><th>Company</th><th>Title</th><th>Score</th><th>Recommendation</th><th>Criteria</th><th>Location</th><th></th></tr></thead>
         <tbody>
           {% for record in matched_records %}
             <tr>
@@ -46,6 +62,7 @@
               <td>{{ '%.1f'|format(record.match.score_at_match_time or 0) }}</td>
               <td>{{ record.match.recommendation_at_match_time|humanize if record.match.recommendation_at_match_time else 'Not scored' }}</td>
               <td>{{ record.match.matched_criteria.keys()|join(', ') }}</td>
+              <td>{{ record.match.decision_explanation.get('location_eligibility', {}).get('status', 'Not classified')|humanize if record.match.decision_explanation.get('location_eligibility') else 'Not classified' }}</td>
               <td><a href="/jobs/{{ record.job_lead.id }}">View job</a></td>
             </tr>
           {% endfor %}
@@ -57,24 +74,50 @@
   </section>
 
   <section class="panel">
-    <h2>Excluded jobs</h2>
+    <h2>Excluded jobs on this page</h2>
     {% set excluded_records = match_records | rejectattr('match.matched') | list %}
     {% if excluded_records %}
       <table class="job-table">
-        <thead><tr><th>Company</th><th>Title</th><th>Score</th><th>Reasons</th></tr></thead>
+        <thead><tr><th>Company</th><th>Title</th><th>Score</th><th>Reason codes</th><th>Reasons</th><th>Threshold</th></tr></thead>
         <tbody>
           {% for record in excluded_records %}
             <tr>
               <td>{{ record.job_lead.company_name }}</td>
               <td>{{ record.job_lead.title }}</td>
               <td>{{ '%.1f'|format(record.match.score_at_match_time or 0) if record.match.score_at_match_time is not none else 'N/A' }}</td>
+              <td>{{ record.match.exclusion_reason_codes|join(', ') or 'None' }}</td>
               <td>{{ record.match.exclusion_reasons|join('; ') or 'Not retained' }}</td>
+              <td>{{ record.match.decision_explanation.get('match_threshold', 'N/A') }}</td>
             </tr>
           {% endfor %}
         </tbody>
       </table>
     {% else %}
       <p class="muted">No exclusions were recorded for this run.</p>
+    {% endif %}
+  </section>
+
+  <section class="panel">
+    <h2>Score component breakdown for this page</h2>
+    {% if match_records %}
+      <table class="job-table">
+        <thead><tr><th>Job</th><th>Component</th><th>Score</th><th>Weight</th><th>Contribution</th></tr></thead>
+        <tbody>
+          {% for record in match_records %}
+            {% for component in record.match.decision_explanation.get('score_components', []) %}
+              <tr>
+                <td>{{ record.job_lead.company_name }} · {{ record.job_lead.title }}</td>
+                <td>{{ component.name|humanize }}</td>
+                <td>{{ component.score }}</td>
+                <td>{{ component.weight }}</td>
+                <td>{{ '%.2f'|format(component.weighted_score) }}</td>
+              </tr>
+            {% endfor %}
+          {% endfor %}
+        </tbody>
+      </table>
+    {% else %}
+      <p class="muted">No score components are available on this page.</p>
     {% endif %}
   </section>
 {% endblock %}

@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
 from sqlalchemy import (
+    JSON,
     DateTime,
     Float,
     ForeignKey,
@@ -24,7 +25,7 @@ from ai_job_finder.domain.enums import (
     SourcePostingStatus,
     WorkplaceType,
 )
-from ai_job_finder.domain.evaluation import EvaluationResult
+from ai_job_finder.domain.evaluation import EvaluationResult, ScoreComponent
 from ai_job_finder.domain.job_lead import JobLeadSnapshot
 from ai_job_finder.infrastructure.database.base import Base
 
@@ -119,6 +120,7 @@ class JobEvaluationModel(Base):
     overall_score: Mapped[float] = mapped_column(Float)
     recommendation: Mapped[str] = mapped_column(String(30))
     explanation: Mapped[str] = mapped_column(Text)
+    score_components: Mapped[list[dict[str, Any]]] = mapped_column(JSON, default=list)
     evaluated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
 
@@ -143,4 +145,13 @@ class JobEvaluationModel(Base):
             recommendation=Recommendation(self.recommendation),
             explanation=self.explanation,
             evaluated_at=self.evaluated_at,
+            score_components=tuple(
+                ScoreComponent(
+                    name=str(component["name"]),
+                    score=int(component["score"]),
+                    weight=float(component["weight"]),
+                    weighted_score=float(component["weighted_score"]),
+                )
+                for component in self.score_components
+            ),
         )

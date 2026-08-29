@@ -8,6 +8,14 @@ from ai_job_finder.domain.enums import Recommendation
 
 
 @dataclass(frozen=True, slots=True)
+class ScoreComponent:
+    name: str
+    score: int
+    weight: float
+    weighted_score: float
+
+
+@dataclass(frozen=True, slots=True)
 class EvaluationResult:
     id: UUID
     candidate_profile_id: UUID
@@ -23,3 +31,4 @@ class EvaluationResult:
     recommendation: Recommendation
     explanation: str
     evaluated_at: datetime
+    score_components: tuple[ScoreComponent, ...] = ()

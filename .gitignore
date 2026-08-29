@@ -209,6 +209,9 @@ tempCodeRunnerFile.py
 # CodeGraph local index state
 .codegraph/
 
+# Graphify generated analysis output
+graphify-out/
+
 # PyPI configuration file
 .pypirc
 
