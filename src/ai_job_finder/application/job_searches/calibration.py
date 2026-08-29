@@ -22,7 +22,7 @@ from ai_job_finder.domain.scoring import DEFAULT_SCORING_VERSION, evaluate_job_f
 
 GOLDEN_SET_PATH = Path("tests/fixtures/scoring/golden_set_v1.json")
 EXPECTED_FIXTURE_VERSION = "v1"
-EXPECTED_FIXTURE_KIND = "synthetic_smoke"
+EXPECTED_FIXTURE_KIND = "discovery_match_calibration"
 EXPECTED_CANDIDATE_PROFILE = "synthetic"
 BUCKET_TO_RECOMMENDATION: dict[str, Recommendation] = {
     "strong_fit": Recommendation.STRONG_RECOMMEND,
@@ -66,6 +66,9 @@ class GoldenSetCase:
     expected_max_score: float | None
     expected_ordering_group: str | None
     rationale: str | None
+    expected_match: bool | None
+    expected_domains: list[str]
+    expected_seniority: list[str]
 
 
 @dataclass(frozen=True, slots=True)
@@ -101,8 +104,15 @@ def calibration_candidate() -> CandidateProfileSnapshot:
         preferred_locations=["Seattle", "Remote"],
         acceptable_remote_geographies=["United States"],
         remote_preference=RemotePreference.FLEXIBLE,
-        target_levels=["director", "senior director", "vice president"],
-        target_functions=["platform engineering", "developer experience", "infrastructure"],
+        target_levels=["director", "senior director", "vice president", "head"],
+        target_functions=[
+            "platform engineering",
+            "developer experience",
+            "developer productivity",
+            "engineering productivity",
+            "developer infrastructure",
+            "infrastructure",
+        ],
         is_active=True,
         created_at=now,
         updated_at=now,
@@ -190,6 +200,9 @@ def load_golden_set(path: Path | None = None) -> CalibrationFixture:
                     else None
                 ),
                 rationale=str(item["rationale"]) if item.get("rationale") else None,
+                expected_match=(bool(item["expected_match"]) if "expected_match" in item else None),
+                expected_domains=[str(value) for value in item.get("expected_domains", [])],
+                expected_seniority=[str(value) for value in item.get("expected_seniority", [])],
             )
         )
     _validate_fixture_metadata(metadata)

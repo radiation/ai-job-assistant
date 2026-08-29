@@ -16,6 +16,7 @@ from ai_job_finder.domain.enums import (
 )
 from ai_job_finder.domain.job_lead import JobLeadSnapshot
 from ai_job_finder.domain.scoring import (
+    _level_target_matches_title,
     evaluate_job_fit,
     recommendation_for_score,
     recommendation_minimum_score,
@@ -93,7 +94,7 @@ def test_scoring_outputs_components_and_explanation() -> None:
     assert evaluation.platform_ownership_score >= 45
     assert evaluation.leadership_scope_score >= 60
     assert evaluation.technical_alignment_score >= 60
-    assert "Scoring version: candidate_evidence_v2" in evaluation.explanation
+    assert "Scoring version: candidate_evidence_v5" in evaluation.explanation
     assert "Matched verified evidence:" in evaluation.explanation
     assert "Positive signals:" in evaluation.explanation
     assert "Concerns:" in evaluation.explanation
@@ -105,7 +106,13 @@ def test_overall_score_and_recommendation_thresholds() -> None:
 
     assert evaluation.overall_score >= 80
     assert evaluation.recommendation is Recommendation.STRONG_RECOMMEND
-    assert evaluation.scoring_version == "candidate_evidence_v2"
+    assert evaluation.scoring_version == "candidate_evidence_v5"
+
+
+def test_level_target_aliases_are_normalized_and_token_bounded() -> None:
+    assert _level_target_matches_title("head", "Head, Platform Engineering")
+    assert _level_target_matches_title("vice president", "SVP, Engineering")
+    assert not _level_target_matches_title("vice president", "svplatform engineer")
 
 
 def test_recommendation_minimum_score_is_the_evaluator_boundary() -> None:

@@ -260,7 +260,20 @@ def _canonical_location(value: str) -> str:
 
 def _canonical_remote_geography(value: str) -> str:
     normalized = _normalize(value)
-    if normalized in {"us", "u s", "usa", "u s a", "united states", "united states of america"}:
+    if normalized in {
+        "us",
+        "u s",
+        "usa",
+        "u s a",
+        "united states",
+        "united states of america",
+        "remote us",
+        "us remote",
+        "us only",
+        "us only remote",
+        "united states remote",
+        "united states only",
+    }:
         return "united states"
     if normalized.startswith("remote "):
         return _canonical_remote_geography(normalized.removeprefix("remote "))

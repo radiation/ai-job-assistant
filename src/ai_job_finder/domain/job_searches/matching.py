@@ -8,72 +8,11 @@ from typing import Any
 from ai_job_finder.domain.enums import Recommendation, WorkplaceType
 from ai_job_finder.domain.evaluation import EvaluationResult, ScoreComponent
 from ai_job_finder.domain.job_lead import JobLeadSnapshot
+from ai_job_finder.domain.job_search_terminology import infer_job_search_domain_values
 from ai_job_finder.domain.job_searches.enums import JobSearchDomain, JobSearchSeniority
 from ai_job_finder.domain.job_searches.models import JobSearchDefinitionSnapshot
 from ai_job_finder.domain.location_eligibility import JobLocationEligibilityResult
 from ai_job_finder.domain.scoring import recommendation_minimum_score
-
-_DOMAIN_RULES: tuple[tuple[JobSearchDomain, tuple[str, ...]], ...] = (
-    (
-        JobSearchDomain.PLATFORM_ENGINEERING,
-        (
-            "platform engineering",
-            "developer platform",
-            "internal platform",
-            "platform team",
-        ),
-    ),
-    (
-        JobSearchDomain.DEVELOPER_EXPERIENCE,
-        (
-            "developer experience",
-            "devex",
-            "developer enablement",
-        ),
-    ),
-    (
-        JobSearchDomain.INFRASTRUCTURE,
-        (
-            "infrastructure",
-            "cloud infrastructure",
-            "reliability engineering",
-            "site reliability",
-        ),
-    ),
-    (
-        JobSearchDomain.ENGINEERING_PRODUCTIVITY,
-        (
-            "engineering productivity",
-            "developer productivity",
-            "productivity engineering",
-        ),
-    ),
-    (
-        JobSearchDomain.AI_PLATFORM,
-        (
-            "ai platform",
-            "ml platform",
-            "machine learning platform",
-            "ai infrastructure",
-        ),
-    ),
-    (
-        JobSearchDomain.DATA_PLATFORM,
-        (
-            "data platform",
-            "data infrastructure",
-            "analytics platform",
-        ),
-    ),
-    (
-        JobSearchDomain.SHARED_SERVICES,
-        (
-            "shared services",
-            "common services",
-            "core services",
-        ),
-    ),
-)
 
 _SENIORITY_RULES: tuple[tuple[JobSearchSeniority, tuple[str, ...]], ...] = (
     (JobSearchSeniority.EXECUTIVE, ("chief ", "cto", "cio", "ciso")),
@@ -184,7 +123,7 @@ def evaluate_job_search_match(
     title_include = _matching_patterns(title_text, definition.title_include_patterns)
     title_exclude = _matching_patterns(title_text, definition.title_exclude_patterns)
 
-    inferred_domains = infer_job_search_domains(job)
+    inferred_domains = [JobSearchDomain(domain) for domain in infer_job_search_domain_values(job)]
     inferred_seniority = infer_job_search_seniority(job)
     location_match, location_reasons, location_hits = _match_location(
         definition,
@@ -306,20 +245,11 @@ def evaluate_job_search_match(
     )
 
 
-def infer_job_search_domains(job: JobLeadSnapshot) -> list[JobSearchDomain]:
-    haystack = normalize_search_text(f"{job.title} {job.description_normalized}")
-    matched: list[JobSearchDomain] = []
-    for domain, patterns in _DOMAIN_RULES:
-        if any(normalize_search_text(pattern) in haystack for pattern in patterns):
-            matched.append(domain)
-    return matched
-
-
 def infer_job_search_seniority(job: JobLeadSnapshot) -> list[JobSearchSeniority]:
     title = f" {normalize_search_text(job.title)} "
     matched: list[JobSearchSeniority] = []
     for level, patterns in _SENIORITY_RULES:
-        if any(normalize_search_text(pattern).strip() in title for pattern in patterns):
+        if any(f" {normalize_search_text(pattern).strip()} " in title for pattern in patterns):
             matched.append(level)
     if JobSearchSeniority.SENIOR_DIRECTOR in matched and JobSearchSeniority.DIRECTOR in matched:
         matched.remove(JobSearchSeniority.DIRECTOR)
@@ -417,7 +347,20 @@ def _contains_location(location: str, allowed_locations: list[str]) -> bool:
 
 def _canonical_remote_geography(value: str) -> str:
     normalized = normalize_search_text(value)
-    if normalized in {"us", "u s", "usa", "u s a", "united states", "united states of america"}:
+    if normalized in {
+        "us",
+        "u s",
+        "usa",
+        "u s a",
+        "united states",
+        "united states of america",
+        "remote us",
+        "us remote",
+        "us only",
+        "us only remote",
+        "united states remote",
+        "united states only",
+    }:
         return "united states"
     if normalized.startswith("remote "):
         return _canonical_remote_geography(normalized.removeprefix("remote "))

@@ -64,7 +64,7 @@ def _evaluation(
         id=new_uuid(),
         candidate_profile_id=new_uuid(),
         job_lead_id=new_uuid(),
-        scoring_version="candidate_evidence_v2",
+        scoring_version="candidate_evidence_v5",
         leadership_scope_score=80,
         technical_alignment_score=90,
         location_score=85,
@@ -174,6 +174,44 @@ def test_domain_matching_fails_when_no_domain_signal_is_present() -> None:
     assert result.criteria_matched is False
     assert "Job domain signals did not match the saved-search domains." in result.exclusion_reasons
     assert JobSearchExclusionReason.ROLE_FAMILY_MISMATCH in result.exclusion_reason_codes
+
+
+def test_cybersecurity_title_is_excluded_from_platform_domains() -> None:
+    result = evaluate_job_search_match(
+        _search_definition(title_include_patterns=[]),
+        _job(
+            title="Director of Cybersecurity Platform Engineering",
+            description="Lead platform engineering and cloud infrastructure for security teams.",
+        ),
+        _evaluation(),
+    )
+
+    assert result.criteria_matched is False
+    assert result.inferred_domains == []
+    assert JobSearchExclusionReason.ROLE_FAMILY_MISMATCH in result.exclusion_reason_codes
+
+
+def test_ci_cd_platform_text_uses_normalized_domain_variants() -> None:
+    result = evaluate_job_search_match(
+        _search_definition(
+            title_include_patterns=[],
+            target_domains=[
+                JobSearchDomain.PLATFORM_ENGINEERING,
+                JobSearchDomain.ENGINEERING_PRODUCTIVITY,
+            ],
+        ),
+        _job(
+            title="Senior Director, Delivery Engineering",
+            description="Lead CI/CD platform and CI/CD tooling for engineering teams.",
+        ),
+        _evaluation(),
+    )
+
+    assert result.criteria_matched is True
+    assert [domain.value for domain in result.inferred_domains] == [
+        "platform_engineering",
+        "engineering_productivity",
+    ]
 
 
 def test_seniority_matching_uses_normalized_title_signals() -> None:
