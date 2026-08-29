@@ -27,27 +27,91 @@ class CareerFactLifecycle(StrEnum):
 class EvidenceTag(StrEnum):
     PEOPLE_LEADERSHIP = "people_leadership"
     MANAGER_OF_MANAGERS = "manager_of_managers"
+    EXECUTIVE_LEADERSHIP = "executive_leadership"
+    TECHNICAL_STRATEGY = "technical_strategy"
+    ENGINEERING_STRATEGY = "engineering_strategy"
+    GLOBAL_OPERATIONS = "global_operations"
+    HIGH_SCALE = "high_scale"
+    CUSTOMER_IMPACT = "customer_impact"
+    P_AND_L = "p_and_l"
+    VENDOR_MANAGEMENT = "vendor_management"
+    COST_OPTIMIZATION = "cost_optimization"
     PLATFORM_ENGINEERING = "platform_engineering"
     DEVELOPER_EXPERIENCE = "developer_experience"
     DEVELOPER_PRODUCTIVITY = "developer_productivity"
     INFRASTRUCTURE = "infrastructure"
     SHARED_SERVICES = "shared_services"
-    AI_ENABLEMENT = "ai_enablement"
-    ML_PLATFORM = "ml_platform"
-    DATA_PLATFORM = "data_platform"
-    GLOBAL_OPERATIONS = "global_operations"
-    HIGH_SCALE = "high_scale"
-    REGULATED_ENVIRONMENT = "regulated_environment"
-    CUSTOMER_IMPACT = "customer_impact"
-    P_AND_L = "p_and_l"
-    VENDOR_MANAGEMENT = "vendor_management"
-    COST_OPTIMIZATION = "cost_optimization"
     RELIABILITY = "reliability"
-    SECURITY = "security"
     OBSERVABILITY = "observability"
+    SECURITY = "security"
     CI_CD = "ci_cd"
     CLOUD = "cloud"
     KUBERNETES = "kubernetes"
+    AI_ENABLEMENT = "ai_enablement"
+    AI_PLATFORM = "ai_platform"
+    AGENTIC_WORKFLOWS = "agentic_workflows"
+    AI_DEVELOPER_EXPERIENCE = "ai_developer_experience"
+    LLM_PLATFORM = "llm_platform"
+    AI_GOVERNANCE = "ai_governance"
+    ML_PLATFORM = "ml_platform"
+    DATA_PLATFORM = "data_platform"
+    REGULATED_ENVIRONMENT = "regulated_environment"
+
+    @property
+    def display_name(self) -> str:
+        return EVIDENCE_TAG_DISPLAY_NAMES[self]
+
+    @classmethod
+    def _missing_(cls, value: object) -> EvidenceTag | None:
+        if not isinstance(value, str):
+            return None
+        canonical_value = LEGACY_EVIDENCE_TAG_VALUES.get(value.casefold())
+        member = cls._value2member_map_.get(canonical_value) if canonical_value else None
+        return member if isinstance(member, cls) else None
+
+
+EVIDENCE_TAG_DISPLAY_NAMES: dict[EvidenceTag, str] = {
+    EvidenceTag.PEOPLE_LEADERSHIP: "People Leadership",
+    EvidenceTag.MANAGER_OF_MANAGERS: "Manager of Managers",
+    EvidenceTag.EXECUTIVE_LEADERSHIP: "Executive Leadership",
+    EvidenceTag.TECHNICAL_STRATEGY: "Technical Strategy",
+    EvidenceTag.ENGINEERING_STRATEGY: "Engineering Strategy",
+    EvidenceTag.GLOBAL_OPERATIONS: "Global Operations",
+    EvidenceTag.HIGH_SCALE: "High Scale",
+    EvidenceTag.CUSTOMER_IMPACT: "Customer Impact",
+    EvidenceTag.P_AND_L: "P&L",
+    EvidenceTag.VENDOR_MANAGEMENT: "Vendor Management",
+    EvidenceTag.COST_OPTIMIZATION: "Cost Optimization",
+    EvidenceTag.PLATFORM_ENGINEERING: "Platform Engineering",
+    EvidenceTag.DEVELOPER_EXPERIENCE: "Developer Experience",
+    EvidenceTag.DEVELOPER_PRODUCTIVITY: "Developer Productivity",
+    EvidenceTag.INFRASTRUCTURE: "Infrastructure",
+    EvidenceTag.SHARED_SERVICES: "Shared Services",
+    EvidenceTag.RELIABILITY: "Reliability",
+    EvidenceTag.OBSERVABILITY: "Observability",
+    EvidenceTag.SECURITY: "Security",
+    EvidenceTag.CI_CD: "CI/CD",
+    EvidenceTag.CLOUD: "Cloud",
+    EvidenceTag.KUBERNETES: "Kubernetes",
+    EvidenceTag.AI_ENABLEMENT: "AI Enablement",
+    EvidenceTag.AI_PLATFORM: "AI Platform",
+    EvidenceTag.AGENTIC_WORKFLOWS: "Agentic Workflows",
+    EvidenceTag.AI_DEVELOPER_EXPERIENCE: "AI Developer Experience",
+    EvidenceTag.LLM_PLATFORM: "LLM Platform",
+    EvidenceTag.AI_GOVERNANCE: "AI Governance",
+    EvidenceTag.ML_PLATFORM: "ML Platform",
+    EvidenceTag.DATA_PLATFORM: "Data Platform",
+    EvidenceTag.REGULATED_ENVIRONMENT: "Regulated Environment",
+}
+
+LEGACY_EVIDENCE_TAG_VALUES = {
+    "manager of managers": EvidenceTag.MANAGER_OF_MANAGERS.value,
+    "ml platform": EvidenceTag.ML_PLATFORM.value,
+    "p and l": EvidenceTag.P_AND_L.value,
+    "p&l": EvidenceTag.P_AND_L.value,
+    "ci cd": EvidenceTag.CI_CD.value,
+    "ci/cd": EvidenceTag.CI_CD.value,
+}
 
 
 class SourceDocumentType(StrEnum):

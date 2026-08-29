@@ -238,6 +238,56 @@ def test_fact_list_filters_and_archived_visibility(
     assert "Built a platform adopted by engineering." in tag_list.text
 
 
+def test_career_fact_ui_displays_canonical_evidence_tag_labels(
+    client: TestClient, session_factory: sessionmaker[Session]
+) -> None:
+    with session_factory() as session:
+        candidate_id, _ = _seed_candidate(session, verified=False)
+        create_career_fact(
+            session,
+            candidate_profile_id=candidate_id,
+            category=CareerFactCategory.PLATFORM.value,
+            source_organization="Example AI",
+            statement="Built governed AI developer platform capabilities.",
+            metric=None,
+            technologies=[],
+            leadership_scope=None,
+            business_outcome=None,
+            approved_wording="Built governed AI developer platform capabilities.",
+            evidence_tags=[
+                EvidenceTag.MANAGER_OF_MANAGERS.value,
+                EvidenceTag.P_AND_L.value,
+                EvidenceTag.CI_CD.value,
+                EvidenceTag.AI_PLATFORM.value,
+                EvidenceTag.AGENTIC_WORKFLOWS.value,
+                EvidenceTag.AI_DEVELOPER_EXPERIENCE.value,
+                EvidenceTag.LLM_PLATFORM.value,
+                EvidenceTag.AI_GOVERNANCE.value,
+                EvidenceTag.ML_PLATFORM.value,
+                EvidenceTag.DATA_PLATFORM.value,
+            ],
+            provenance_type=ProvenanceType.PROJECT_NOTES.value,
+            source_reference="review packet",
+        )
+
+    response = client.get("/career-facts")
+
+    assert response.status_code == 200
+    for label in [
+        "Manager of Managers",
+        "P&amp;L",
+        "CI/CD",
+        "AI Platform",
+        "Agentic Workflows",
+        "AI Developer Experience",
+        "LLM Platform",
+        "AI Governance",
+        "ML Platform",
+        "Data Platform",
+    ]:
+        assert label in response.text
+
+
 def test_lifecycle_htmx_actions_and_invalid_transition(
     client: TestClient, session_factory: sessionmaker[Session]
 ) -> None:

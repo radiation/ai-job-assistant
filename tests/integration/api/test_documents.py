@@ -22,6 +22,7 @@ from ai_job_finder.application.documents import (
 )
 from ai_job_finder.application.extraction import (
     CareerFactExtractionResult,
+    ExtractedCareerFactProposal,
     ExtractedDocument,
 )
 from ai_job_finder.application.services import create_candidate_profile
@@ -57,6 +58,32 @@ class ExplodingExtractor:
 
     def extract(self, document: ExtractedDocument) -> CareerFactExtractionResult:
         raise RuntimeError("provider boom")
+
+
+class LongLeadershipScopeExtractor:
+    provider = "fake"
+    model_id = "long-leadership-scope-extractor"
+    prompt_version = "career_fact_extraction_v1"
+    schema_version = "career_fact_extraction_v1"
+    temperature = 0.0
+
+    def extract(self, document: ExtractedDocument) -> CareerFactExtractionResult:
+        return CareerFactExtractionResult(
+            provider=self.provider,
+            model_id=self.model_id,
+            prompt_version=self.prompt_version,
+            schema_version=self.schema_version,
+            temperature=self.temperature,
+            proposals=[
+                ExtractedCareerFactProposal(
+                    statement="Led platform work",
+                    category="leadership",
+                    leadership_scope="x" * 270,
+                    supporting_excerpt="Led platform work with Kubernetes.",
+                    confidence=1.0,
+                )
+            ],
+        )
 
 
 class TrackingStorage(InMemoryDocumentStorage):
@@ -192,6 +219,21 @@ def test_document_upload_extraction_accept_and_reject_flow(
         reject = client.post(f"/api/v1/fact-proposals/{second_proposal_id}/reject")
         assert reject.status_code == 200
         assert reject.json()["review_status"] == "rejected"
+
+
+def test_extraction_persists_long_leadership_scope(
+    session_factory: sessionmaker[Session],
+) -> None:
+    with _document_client(session_factory, extractor=LongLeadershipScopeExtractor()) as client:
+        _create_candidate(client)
+        document = _upload_document(client)
+
+        extraction = client.post(f"/api/v1/documents/{document['id']}/extractions")
+
+        assert extraction.status_code == 200
+        proposals = client.get("/api/v1/fact-proposals")
+        assert proposals.status_code == 200
+        assert len(proposals.json()[0]["proposed_leadership_scope"]) == 270
 
 
 def test_extraction_disabled_returns_structured_error(

@@ -159,6 +159,60 @@ def test_excerpt_grounding_normalizes_conservative_punctuation() -> None:
     assert excerpt_is_grounded(text, 'Led "platform enablement" improving developer productivity')
 
 
+@pytest.mark.parametrize(
+    ("source_text", "excerpt"),
+    [
+        ("Led a team of 50 engineers across platform engineering.", "Led a team of 50 engineers"),
+        (
+            "Led a team of 50 engineers\nacross platform engineering.",
+            "Led a team of 50 engineers across platform engineering.",
+        ),
+        (
+            "Led a team\t of 50\n\nengineers across platform engineering.",
+            "Led a team of 50 engineers across platform engineering.",
+        ),
+        ("Led a team of 50\u00a0engineers.", "Led a team of 50 engineers."),
+        ("Led \u201cplatform enablement\u201d.", 'Led "platform enablement".'),
+        ("Led platform engineering \u2014 globally.", "Led platform engineering - globally."),
+        ("Caf\u00e9 platform leadership.", "Cafe\u0301 platform leadership."),
+        ("\u2022 Led platform engineering.", "Led platform engineering."),
+        (
+            "Auth & Policy . Guided platform engineering.",
+            "Auth & Policy.",
+        ),
+        (
+            "Guided large migrations without disrupting dependent teams.",
+            "...Guided large migrations without disrupting dependent teams.",
+        ),
+        (
+            "GitHub Actions, T eamCity, and SonarQube.",
+            "GitHub Actions, TeamCity, and SonarQube.",
+        ),
+    ],
+)
+def test_excerpt_grounding_normalizes_harmless_representation_differences(
+    source_text: str,
+    excerpt: str,
+) -> None:
+    assert excerpt_is_grounded(source_text, excerpt)
+
+
+@pytest.mark.parametrize(
+    ("source_text", "excerpt"),
+    [
+        ("Led a team of 30 engineers.", "Led a team of 50 engineers."),
+        ("Built platform workflows.", "Created a platform that improved workflows."),
+        ("Built platform workflows.", ""),
+        ("Built platform workflows.", "Managed a sales team."),
+    ],
+)
+def test_excerpt_grounding_remains_strict_for_unsupported_text(
+    source_text: str,
+    excerpt: str,
+) -> None:
+    assert not excerpt_is_grounded(source_text, excerpt)
+
+
 def test_excerpt_grounding_rejects_paraphrases_and_token_overlap_only() -> None:
     text = "Built platform workflows. Improved reliability with Kubernetes automation."
     assert not excerpt_is_grounded(text, "managed a sales team")

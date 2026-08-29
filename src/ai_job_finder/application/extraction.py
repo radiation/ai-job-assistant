@@ -20,6 +20,7 @@ PUNCTUATION_TRANSLATION_TABLE = str.maketrans(
         "\u2212": "-",
     }
 )
+PDF_CAMEL_CASE_TOKEN_SPLIT = re.compile(r"\b([A-Z])\s+([a-z]+[A-Z][A-Za-z]*)\b")
 
 
 @dataclass(frozen=True, slots=True)
@@ -102,9 +103,18 @@ def normalize_text_for_matching(value: str) -> str:
     return re.sub(r"\s+", " ", normalized).strip()
 
 
+def normalize_text_for_grounding(value: str) -> str:
+    normalized = unicodedata.normalize("NFKC", value)
+    normalized = normalized.translate(PUNCTUATION_TRANSLATION_TABLE)
+    normalized = re.sub(r"(?<!\S)\.{3,}|\.{3,}(?!\S)", "", normalized)
+    normalized = re.sub(r"\s+([.,;:!?])", r"\1", normalized)
+    normalized = PDF_CAMEL_CASE_TOKEN_SPLIT.sub(r"\1\2", normalized)
+    return normalize_text_for_matching(normalized)
+
+
 def excerpt_is_grounded(source_text: str, excerpt: str) -> bool:
-    normalized_source = normalize_text_for_matching(source_text)
-    normalized_excerpt = normalize_text_for_matching(excerpt)
+    normalized_source = normalize_text_for_grounding(source_text)
+    normalized_excerpt = normalize_text_for_grounding(excerpt)
     if not normalized_excerpt:
         return False
     return normalized_excerpt in normalized_source

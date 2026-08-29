@@ -509,6 +509,11 @@ def _supporting_tags(primary_tag: EvidenceTag) -> set[EvidenceTag]:
         },
         EvidenceTag.AI_ENABLEMENT: {
             EvidenceTag.AI_ENABLEMENT,
+            EvidenceTag.AI_PLATFORM,
+            EvidenceTag.AGENTIC_WORKFLOWS,
+            EvidenceTag.AI_DEVELOPER_EXPERIENCE,
+            EvidenceTag.LLM_PLATFORM,
+            EvidenceTag.AI_GOVERNANCE,
             EvidenceTag.ML_PLATFORM,
             EvidenceTag.DATA_PLATFORM,
         },
