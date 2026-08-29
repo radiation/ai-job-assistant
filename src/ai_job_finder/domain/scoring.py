@@ -15,6 +15,7 @@ from ai_job_finder.domain.evaluation import EvaluationResult, ScoreComponent
 from ai_job_finder.domain.job_lead import JobLeadSnapshot
 from ai_job_finder.domain.job_search_terminology import (
     is_excluded_target_function_title,
+    is_generic_data_title,
     normalize_job_search_text,
     target_function_matches,
 )
@@ -319,6 +320,12 @@ def _score_platform_ownership(
 ) -> tuple[int, tuple[list[str], list[str], list[str]]]:
     if is_excluded_target_function_title(job.title):
         return 10, ([], ["The title identifies a non-target technical or business function."], [])
+    if is_generic_data_title(job.title):
+        return 25, (
+            [],
+            ["The title identifies generic data leadership rather than platform ownership."],
+            [],
+        )
     description = _normalize(f"{job.title} {job.description_normalized}")
     phrases = {
         "platform": "Platform ownership is named directly.",

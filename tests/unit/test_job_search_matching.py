@@ -191,6 +191,74 @@ def test_cybersecurity_title_is_excluded_from_platform_domains() -> None:
     assert JobSearchExclusionReason.ROLE_FAMILY_MISMATCH in result.exclusion_reason_codes
 
 
+def test_hardware_and_revenue_systems_titles_are_role_family_mismatches() -> None:
+    for title in (
+        "Director, Silicon Logical Design",
+        "Director, ASIC Design",
+        "Director, Semiconductor Engineering",
+        "Director, Hardware Architecture",
+        "Director, Revenue Systems",
+        "Senior Director, Sales Systems",
+        "Director, GTM Systems",
+        "Director, CRM Systems",
+        "Director, Business Systems",
+    ):
+        result = evaluate_job_search_match(
+            _search_definition(title_include_patterns=[]),
+            _job(title=title, description="Lead platform engineering and developer productivity."),
+            _evaluation(),
+        )
+
+        assert result.matched is False
+        assert result.inferred_domains == []
+        assert JobSearchExclusionReason.ROLE_FAMILY_MISMATCH in result.exclusion_reason_codes
+
+
+def test_data_platform_retains_platform_credit_while_generic_data_does_not() -> None:
+    definition = _search_definition(
+        title_include_patterns=[],
+        target_domains=[JobSearchDomain.PLATFORM_ENGINEERING],
+        target_seniority_levels=[JobSearchSeniority.DIRECTOR],
+    )
+    data_platform = evaluate_job_search_match(
+        definition,
+        _job(title="Director, Data Platform", description="Lead data platform engineering."),
+        _evaluation(),
+    )
+    generic_data = evaluate_job_search_match(
+        definition,
+        _job(
+            title="Director of Engineering, Data",
+            description="Lead data platform engineering and data infrastructure.",
+        ),
+        _evaluation(),
+    )
+
+    assert data_platform.matched is True
+    assert JobSearchDomain.PLATFORM_ENGINEERING in data_platform.inferred_domains
+    assert generic_data.matched is False
+    assert generic_data.inferred_domains == [JobSearchDomain.DATA_PLATFORM]
+    assert JobSearchExclusionReason.ROLE_FAMILY_MISMATCH in generic_data.exclusion_reason_codes
+
+
+def test_cloud_reliability_remains_an_infrastructure_role_family_match() -> None:
+    result = evaluate_job_search_match(
+        _search_definition(
+            title_include_patterns=[],
+            target_domains=[JobSearchDomain.INFRASTRUCTURE],
+            target_seniority_levels=[JobSearchSeniority.DIRECTOR],
+        ),
+        _job(
+            title="Director of Engineering, Cloud & Reliability",
+            description="Lead cloud infrastructure and reliability engineering.",
+        ),
+        _evaluation(),
+    )
+
+    assert result.matched is True
+    assert JobSearchDomain.INFRASTRUCTURE in result.inferred_domains
+
+
 def test_ci_cd_platform_text_uses_normalized_domain_variants() -> None:
     result = evaluate_job_search_match(
         _search_definition(

@@ -429,7 +429,7 @@
             "expected_ordering_group": "ic",
             "rationale": "IC seniority and EU geography exclude this otherwise related function.",
             "expected_match": false,
-            "expected_domains": ["ai_platform"],
+            "expected_domains": ["platform_engineering", "ai_platform"],
             "expected_seniority": []
         },
         {
