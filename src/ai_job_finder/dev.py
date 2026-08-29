@@ -100,7 +100,7 @@ def tests_main() -> None:
             )
             raise SystemExit(1)
 
-            _run_or_exit(*pytest_command)
+    _run_or_exit(*pytest_command)
 
 
 def validate_main() -> None:

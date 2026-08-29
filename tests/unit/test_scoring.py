@@ -15,7 +15,11 @@ from ai_job_finder.domain.enums import (
     WorkplaceType,
 )
 from ai_job_finder.domain.job_lead import JobLeadSnapshot
-from ai_job_finder.domain.scoring import evaluate_job_fit
+from ai_job_finder.domain.scoring import (
+    evaluate_job_fit,
+    recommendation_for_score,
+    recommendation_minimum_score,
+)
 
 
 def build_candidate() -> CandidateProfileSnapshot:
@@ -102,6 +106,30 @@ def test_overall_score_and_recommendation_thresholds() -> None:
     assert evaluation.overall_score >= 80
     assert evaluation.recommendation is Recommendation.STRONG_RECOMMEND
     assert evaluation.scoring_version == "candidate_evidence_v2"
+
+
+def test_recommendation_minimum_score_is_the_evaluator_boundary() -> None:
+    actionable_threshold = recommendation_minimum_score(Recommendation.RECOMMEND)
+
+    assert recommendation_for_score(actionable_threshold) is Recommendation.RECOMMEND
+    assert recommendation_for_score(actionable_threshold - 0.01) is Recommendation.HOLD
+
+
+def test_score_components_reconcile_to_overall_score() -> None:
+    evaluation = evaluate_job_fit(build_candidate(), build_job(), [build_fact()])
+
+    assert [component.name for component in evaluation.score_components] == [
+        "level_alignment",
+        "target_function_alignment",
+        "location_alignment",
+        "platform_ownership",
+        "leadership_scope",
+        "technical_alignment",
+        "referral_priority",
+    ]
+    assert round(sum(component.weighted_score for component in evaluation.score_components), 2) == (
+        evaluation.overall_score
+    )
 
 
 def test_unverified_facts_do_not_count_as_usable() -> None:

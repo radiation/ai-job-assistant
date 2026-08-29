@@ -2,13 +2,16 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
+from enum import StrEnum
 from typing import Any
 
-from ai_job_finder.domain.enums import WorkplaceType
-from ai_job_finder.domain.evaluation import EvaluationResult
+from ai_job_finder.domain.enums import Recommendation, WorkplaceType
+from ai_job_finder.domain.evaluation import EvaluationResult, ScoreComponent
 from ai_job_finder.domain.job_lead import JobLeadSnapshot
 from ai_job_finder.domain.job_searches.enums import JobSearchDomain, JobSearchSeniority
 from ai_job_finder.domain.job_searches.models import JobSearchDefinitionSnapshot
+from ai_job_finder.domain.location_eligibility import JobLocationEligibilityResult
+from ai_job_finder.domain.scoring import recommendation_minimum_score
 
 _DOMAIN_RULES: tuple[tuple[JobSearchDomain, tuple[str, ...]], ...] = (
     (
@@ -93,6 +96,65 @@ class JobSearchLocationContext:
     metadata: dict[str, Any] = field(default_factory=dict)
 
 
+class JobSearchExclusionReason(StrEnum):
+    TITLE_INCLUDE_MISSING = "title_include_missing"
+    TITLE_EXCLUDED = "title_excluded"
+    ROLE_FAMILY_MISMATCH = "role_family_mismatch"
+    SENIORITY_MISMATCH = "seniority_mismatch"
+    WORKPLACE_TYPE_MISSING = "workplace_type_missing"
+    WORKPLACE_TYPE_MISMATCH = "workplace_type_mismatch"
+    REMOTE_GEOGRAPHY_MISMATCH = "remote_geography_mismatch"
+    LOCATION_MISMATCH = "location_mismatch"
+    EVALUATION_MISSING = "evaluation_missing"
+    BELOW_MATCH_THRESHOLD = "below_match_threshold"
+
+
+@dataclass(frozen=True, slots=True)
+class JobSearchDecisionExplanation:
+    outcome: str
+    criteria_matched: bool
+    above_threshold: bool
+    matched: bool
+    actionable: bool
+    score: float | None
+    match_threshold: float
+    actionable_threshold: float | None
+    score_components: tuple[ScoreComponent, ...]
+    exclusion_reason_codes: tuple[JobSearchExclusionReason, ...]
+    location_eligibility: JobLocationEligibilityResult | None
+
+    def to_payload(self) -> dict[str, Any]:
+        return {
+            "outcome": self.outcome,
+            "criteria_matched": self.criteria_matched,
+            "above_threshold": self.above_threshold,
+            "matched": self.matched,
+            "actionable": self.actionable,
+            "score": self.score,
+            "match_threshold": self.match_threshold,
+            "actionable_threshold": self.actionable_threshold,
+            "score_components": [
+                {
+                    "name": component.name,
+                    "score": component.score,
+                    "weight": component.weight,
+                    "weighted_score": component.weighted_score,
+                }
+                for component in self.score_components
+            ],
+            "exclusion_reason_codes": [reason.value for reason in self.exclusion_reason_codes],
+            "location_eligibility": (
+                {
+                    "status": self.location_eligibility.status.value,
+                    "reason_codes": [reason.value for reason in self.location_eligibility.reasons],
+                    "summary": self.location_eligibility.summary,
+                }
+                if self.location_eligibility is not None
+                else None
+            ),
+        }
+
+
 @dataclass(frozen=True, slots=True)
 class JobSearchMatchResult:
     matched: bool
@@ -100,8 +162,10 @@ class JobSearchMatchResult:
     above_threshold: bool
     matched_criteria: dict[str, list[str]]
     exclusion_reasons: list[str]
+    exclusion_reason_codes: list[JobSearchExclusionReason]
     inferred_domains: list[JobSearchDomain]
     inferred_seniority_levels: list[JobSearchSeniority]
+    explanation: JobSearchDecisionExplanation
 
 
 def normalize_search_text(value: str | None) -> str:
@@ -114,6 +178,7 @@ def evaluate_job_search_match(
     evaluation: EvaluationResult | None,
     *,
     location_context: JobSearchLocationContext | None = None,
+    location_eligibility: JobLocationEligibilityResult | None = None,
 ) -> JobSearchMatchResult:
     title_text = normalize_search_text(job.title)
     title_include = _matching_patterns(title_text, definition.title_include_patterns)
@@ -132,14 +197,17 @@ def evaluate_job_search_match(
 
     matched_criteria: dict[str, list[str]] = {}
     exclusion_reasons: list[str] = []
+    exclusion_reason_codes: list[JobSearchExclusionReason] = []
 
     if definition.title_include_patterns:
         if title_include:
             matched_criteria["title_include_patterns"] = title_include
         else:
             exclusion_reasons.append("Job title did not match any saved-search include pattern.")
+            exclusion_reason_codes.append(JobSearchExclusionReason.TITLE_INCLUDE_MISSING)
     if title_exclude:
         exclusion_reasons.append("Job title matched an exclude pattern.")
+        exclusion_reason_codes.append(JobSearchExclusionReason.TITLE_EXCLUDED)
         matched_criteria["title_exclude_patterns"] = title_exclude
 
     if definition.target_domains:
@@ -150,6 +218,7 @@ def evaluate_job_search_match(
             matched_criteria["target_domains"] = domain_hits
         else:
             exclusion_reasons.append("Job domain signals did not match the saved-search domains.")
+            exclusion_reason_codes.append(JobSearchExclusionReason.ROLE_FAMILY_MISMATCH)
 
     if definition.target_seniority_levels:
         seniority_hits = [
@@ -161,15 +230,18 @@ def evaluate_job_search_match(
             matched_criteria["target_seniority_levels"] = seniority_hits
         else:
             exclusion_reasons.append("Job title did not match the saved-search seniority levels.")
+            exclusion_reason_codes.append(JobSearchExclusionReason.SENIORITY_MISMATCH)
 
     if location_match and location_hits:
         matched_criteria["location"] = location_hits
     elif location_reasons:
         exclusion_reasons.extend(location_reasons)
+        exclusion_reason_codes.extend(_location_exclusion_codes(location_reasons))
 
     if evaluation is None:
         above_threshold = False
         exclusion_reasons.append("Job has no evaluation for saved-search threshold comparison.")
+        exclusion_reason_codes.append(JobSearchExclusionReason.EVALUATION_MISSING)
     else:
         above_threshold = evaluation.overall_score >= definition.minimum_score_threshold
         if above_threshold:
@@ -180,6 +252,7 @@ def evaluate_job_search_match(
             exclusion_reasons.append(
                 "Job evaluation score is below the saved-search minimum threshold."
             )
+            exclusion_reason_codes.append(JobSearchExclusionReason.BELOW_MATCH_THRESHOLD)
 
     criteria_matched = not exclusion_reasons or all(
         reason == "Job evaluation score is below the saved-search minimum threshold."
@@ -197,14 +270,39 @@ def evaluate_job_search_match(
     if definition.target_seniority_levels and "target_seniority_levels" not in matched_criteria:
         criteria_matched = False
 
+    matched = criteria_matched and above_threshold
+    actionable = evaluation is not None and evaluation.recommendation in {
+        Recommendation.STRONG_RECOMMEND,
+        Recommendation.RECOMMEND,
+    }
+    reason_codes = _dedupe_enums(exclusion_reason_codes)
+    explanation = JobSearchDecisionExplanation(
+        outcome="matched" if matched else "excluded",
+        criteria_matched=criteria_matched,
+        above_threshold=above_threshold,
+        matched=matched,
+        actionable=actionable,
+        score=evaluation.overall_score if evaluation is not None else None,
+        match_threshold=definition.minimum_score_threshold,
+        actionable_threshold=(
+            recommendation_minimum_score(Recommendation.RECOMMEND)
+            if evaluation is not None
+            else None
+        ),
+        score_components=evaluation.score_components if evaluation is not None else (),
+        exclusion_reason_codes=tuple(reason_codes),
+        location_eligibility=location_eligibility,
+    )
     return JobSearchMatchResult(
-        matched=criteria_matched and above_threshold,
+        matched=matched,
         criteria_matched=criteria_matched,
         above_threshold=above_threshold,
         matched_criteria=matched_criteria,
         exclusion_reasons=_dedupe(exclusion_reasons),
+        exclusion_reason_codes=reason_codes,
         inferred_domains=inferred_domains,
         inferred_seniority_levels=inferred_seniority,
+        explanation=explanation,
     )
 
 
@@ -330,9 +428,29 @@ def _threshold_label(score: float, threshold: float) -> str:
     return f"score {score:.2f} >= threshold {threshold:.2f}"
 
 
+def _location_exclusion_codes(reasons: list[str]) -> list[JobSearchExclusionReason]:
+    codes: list[JobSearchExclusionReason] = []
+    for reason in reasons:
+        if reason == "Job workplace type is missing for this saved search.":
+            codes.append(JobSearchExclusionReason.WORKPLACE_TYPE_MISSING)
+        elif reason == "Job workplace type is not included in this saved search.":
+            codes.append(JobSearchExclusionReason.WORKPLACE_TYPE_MISMATCH)
+        elif reason == "Remote role geography does not match the saved search.":
+            codes.append(JobSearchExclusionReason.REMOTE_GEOGRAPHY_MISMATCH)
+        elif reason == "Job location does not match the saved search.":
+            codes.append(JobSearchExclusionReason.LOCATION_MISMATCH)
+    return codes
+
+
 def _dedupe(values: list[str]) -> list[str]:
     deduped: list[str] = []
     for value in values:
         if value not in deduped:
             deduped.append(value)
     return deduped
+
+
+def _dedupe_enums(
+    values: list[JobSearchExclusionReason],
+) -> list[JobSearchExclusionReason]:
+    return list(dict.fromkeys(values))

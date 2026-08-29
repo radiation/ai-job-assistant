@@ -223,6 +223,14 @@ def test_manual_run_persists_matches_and_historical_reruns(
         assert first_run.above_threshold_count == 1
         assert len(first_matches) == 2
         assert sum(record.match.matched for record in first_matches) == 1
+        matched = next(record.match for record in first_matches if record.match.matched)
+        excluded = next(record.match for record in first_matches if not record.match.matched)
+        assert matched.decision_explanation["outcome"] == "matched"
+        assert sum(
+            component["weighted_score"]
+            for component in matched.decision_explanation["score_components"]
+        ) == pytest.approx(matched.score_at_match_time)
+        assert "title_include_missing" in excluded.exclusion_reason_codes
         assert len(runs) == 2
         assert first_run.id != second_run.id
 

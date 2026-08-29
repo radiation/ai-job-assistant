@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Annotated
+from typing import Annotated, Any
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -388,6 +388,8 @@ class JobSearchMatchResponse(BaseModel):
     matched: bool
     matched_criteria: dict[str, list[str]]
     exclusion_reasons: list[str]
+    exclusion_reason_codes: list[str]
+    decision_explanation: dict[str, Any]
     inferred_domains: list[JobSearchDomain]
     inferred_seniority_levels: list[JobSearchSeniority]
     created_at: datetime
@@ -577,6 +579,8 @@ class JobDiscoveryDetailObservationResponse(BaseModel):
     exclusion_reason: str | None
     matched: bool | None
     score_at_match_time: float | None
+    exclusion_reason_codes: list[str] | None
+    decision_explanation: dict[str, Any] | None
 
 
 class JobDiscoveryImportResponse(BaseModel):
@@ -608,6 +612,7 @@ class JobDiscoveryMatchingSummaryResponse(BaseModel):
     saved_search_match_count: int
     actionable_match_count: int
     surfaced_in_discover_count: int
+    exclusion_reason_counts: dict[str, int]
 
 
 class JobDiscoveryMatchedJobResponse(BaseModel):

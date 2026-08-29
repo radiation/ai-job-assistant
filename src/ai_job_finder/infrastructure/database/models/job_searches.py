@@ -194,6 +194,8 @@ class JobSearchMatchModel(Base):
     matched: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     matched_criteria: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
     exclusion_reasons: Mapped[list[str]] = mapped_column(JSON, default=list)
+    exclusion_reason_codes: Mapped[list[str]] = mapped_column(JSON, default=list)
+    decision_explanation: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
     inferred_domains: Mapped[list[str]] = mapped_column(JSON, default=list)
     inferred_seniority_levels: Mapped[list[str]] = mapped_column(JSON, default=list)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)

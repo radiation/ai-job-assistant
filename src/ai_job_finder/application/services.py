@@ -451,6 +451,15 @@ def create_job_evaluation(
         recommendation=evaluation.recommendation.value,
         explanation=evaluation.explanation,
         evaluated_at=evaluation.evaluated_at,
+        score_components=[
+            {
+                "name": component.name,
+                "score": component.score,
+                "weight": component.weight,
+                "weighted_score": component.weighted_score,
+            }
+            for component in evaluation.score_components
+        ],
     )
     session.add(evaluation_model)
     try:
