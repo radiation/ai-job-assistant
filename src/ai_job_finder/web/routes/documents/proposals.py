@@ -196,7 +196,7 @@ def proposal_accept(request: Request, proposal_id: UUID, session: DbSession) -> 
             status_code=409,
         )
     return RedirectResponse(
-        url=f"/fact-proposals/{proposal_id}?flash=proposal-accepted",
+        url="/fact-proposals?flash=proposal-accepted",
         status_code=status.HTTP_303_SEE_OTHER,
     )
 
@@ -213,7 +213,7 @@ def proposal_reject(request: Request, proposal_id: UUID, session: DbSession) -> 
             status_code=409,
         )
     return RedirectResponse(
-        url=f"/fact-proposals/{proposal_id}?flash=proposal-rejected",
+        url="/fact-proposals?flash=proposal-rejected",
         status_code=status.HTTP_303_SEE_OTHER,
     )
 
@@ -237,7 +237,7 @@ async def proposal_merge(request: Request, proposal_id: UUID, session: DbSession
             status_code=409,
         )
     return RedirectResponse(
-        url=f"/fact-proposals/{proposal_id}?flash=proposal-merged",
+        url="/fact-proposals?flash=proposal-merged",
         status_code=status.HTTP_303_SEE_OTHER,
     )
 
@@ -246,6 +246,7 @@ async def proposal_merge(request: Request, proposal_id: UUID, session: DbSession
 def proposals_list(
     request: Request,
     session: DbSession,
+    flash: str | None = None,
     review_status: str | None = None,
     document_id: UUID | None = None,
     category: str | None = None,
@@ -255,14 +256,16 @@ def proposals_list(
     candidate = get_primary_candidate_profile(session)
     if candidate is None:
         return RedirectResponse(url="/candidate", status_code=status.HTTP_303_SEE_OTHER)
-    selected_status = None
+    selected_status: CareerFactProposalReviewStatus | None = CareerFactProposalReviewStatus.PENDING
     selected_category = None
     selected_tag = None
-    if review_status:
+    if review_status == "all":
+        selected_status = None
+    elif review_status:
         try:
             selected_status = CareerFactProposalReviewStatus(review_status)
         except ValueError:
-            selected_status = None
+            pass
     if category:
         try:
             selected_category = CareerFactCategory(category)
@@ -283,13 +286,6 @@ def proposals_list(
         evidence_tag=selected_tag.value if selected_tag else None,
     )
     documents = list_source_documents(session, candidate.id)
-    organizations = sorted(
-        {
-            proposal.proposed_source_organization
-            for proposal in proposals
-            if proposal.proposed_source_organization
-        }
-    )
     return render_template(
         request,
         "proposals/list.html",
@@ -300,9 +296,9 @@ def proposals_list(
             "review_status_options": list(CareerFactProposalReviewStatus),
             "category_options": list(CareerFactCategory),
             "evidence_tag_options": list(EvidenceTag),
-            "organization_options": organizations,
+            "flash_messages": _flash_messages(flash),
             "selected_filters": {
-                "review_status": selected_status.value if selected_status else "",
+                "review_status": selected_status.value if selected_status else "all",
                 "document_id": str(document_id) if document_id else "",
                 "category": selected_category.value if selected_category else "",
                 "source_organization": optional_str(source_organization) or "",

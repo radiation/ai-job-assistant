@@ -76,12 +76,12 @@ class CareerFactCreateRequest(BaseModel):
     statement: str = Field(min_length=1)
     metric: str | None = Field(default=None, max_length=200)
     technologies: list[str] = Field(default_factory=list)
-    leadership_scope: str | None = Field(default=None, max_length=200)
-    business_outcome: str | None = Field(default=None, max_length=500)
+    leadership_scope: str | None = None
+    business_outcome: str | None = None
     approved_wording: str = Field(min_length=1)
     evidence_tags: list[EvidenceTag] = Field(default_factory=list)
     provenance_type: ProvenanceType
-    source_reference: str = Field(min_length=1, max_length=500)
+    source_reference: str = Field(min_length=1)
 
 
 class CareerFactUpdateRequest(BaseModel):
@@ -90,12 +90,12 @@ class CareerFactUpdateRequest(BaseModel):
     statement: str = Field(min_length=1)
     metric: str | None = Field(default=None, max_length=200)
     technologies: list[str] = Field(default_factory=list)
-    leadership_scope: str | None = Field(default=None, max_length=200)
-    business_outcome: str | None = Field(default=None, max_length=500)
+    leadership_scope: str | None = None
+    business_outcome: str | None = None
     approved_wording: str = Field(min_length=1)
     evidence_tags: list[EvidenceTag] = Field(default_factory=list)
     provenance_type: ProvenanceType
-    source_reference: str = Field(min_length=1, max_length=500)
+    source_reference: str = Field(min_length=1)
 
 
 class CareerFactTransitionRequest(BaseModel):
@@ -763,8 +763,8 @@ class CareerFactProposalUpdateRequest(BaseModel):
     proposed_statement: str = Field(min_length=1)
     proposed_metric: str | None = Field(default=None, max_length=200)
     proposed_technologies: list[str] = Field(default_factory=list)
-    proposed_leadership_scope: str | None = Field(default=None, max_length=200)
-    proposed_business_outcome: str | None = Field(default=None, max_length=500)
+    proposed_leadership_scope: str | None = None
+    proposed_business_outcome: str | None = None
     proposed_approved_wording: str | None = None
     proposed_evidence_tags: list[EvidenceTag] = Field(default_factory=list)
     supporting_excerpt: str = Field(min_length=1)

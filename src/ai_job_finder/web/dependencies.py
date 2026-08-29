@@ -11,6 +11,7 @@ from fastapi.templating import Jinja2Templates
 from sqlalchemy.orm import Session
 
 from ai_job_finder.api.dependencies import db_session_dependency
+from ai_job_finder.domain.enums import EvidenceTag
 from ai_job_finder.infrastructure.database.models import JobEvaluationModel
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -21,6 +22,10 @@ templates.env.auto_reload = True
 
 
 def _humanize(value: str) -> str:
+    try:
+        return EvidenceTag(value).display_name
+    except ValueError:
+        pass
     return value.replace("_", " ").title()
 
 

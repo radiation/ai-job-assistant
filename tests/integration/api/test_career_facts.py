@@ -34,6 +34,7 @@ def _create_fact(
     statement: str = "Built platform",
     evidence_tags: list[str] | None = None,
     provenance_type: str = "project_notes",
+    source_reference: str = "scorecard",
 ) -> dict[str, Any]:
     response = client.post(
         "/api/v1/career-facts",
@@ -48,7 +49,7 @@ def _create_fact(
             "approved_wording": "Built platform with measurable impact",
             "evidence_tags": evidence_tags or ["platform_engineering", "cloud"],
             "provenance_type": provenance_type,
-            "source_reference": "scorecard",
+            "source_reference": source_reference,
         },
     )
     assert response.status_code == 201
@@ -170,6 +171,61 @@ def test_career_fact_list_filters_and_verified_edit_behavior(client: TestClient)
     assert update_response.status_code == 200
     assert update_response.json()["lifecycle_status"] == "draft"
     assert update_response.json()["verified_at"] is None
+
+
+def test_career_fact_accepts_and_filters_specific_ai_tags(client: TestClient) -> None:
+    _create_candidate(client)
+    fact = _create_fact(
+        client,
+        statement="Built governed AI platform workflows for developers",
+        evidence_tags=[
+            "ai_platform",
+            "agentic_workflows",
+            "ai_developer_experience",
+            "llm_platform",
+            "ai_governance",
+            "ml_platform",
+            "data_platform",
+        ],
+    )
+
+    assert fact["evidence_tags"] == [
+        "ai_platform",
+        "agentic_workflows",
+        "ai_developer_experience",
+        "llm_platform",
+        "ai_governance",
+        "ml_platform",
+        "data_platform",
+    ]
+    filtered = client.get("/api/v1/career-facts?evidence_tag=ai_platform")
+    assert filtered.status_code == 200
+    assert [item["id"] for item in filtered.json()] == [fact["id"]]
+
+
+def test_career_fact_normalizes_legacy_evidence_tag_labels(client: TestClient) -> None:
+    _create_candidate(client)
+    fact = _create_fact(
+        client,
+        statement="Led an engineering organization with financial accountability",
+        evidence_tags=["Manager Of Managers", "Ml Platform", "P And L", "Ci Cd"],
+    )
+
+    assert fact["evidence_tags"] == [
+        "manager_of_managers",
+        "ml_platform",
+        "p_and_l",
+        "ci_cd",
+    ]
+
+
+def test_career_fact_round_trips_long_source_reference(client: TestClient) -> None:
+    _create_candidate(client)
+    source_reference = " ".join(["reviewed evidence reference"] * 30)
+
+    fact = _create_fact(client, source_reference=source_reference)
+
+    assert fact["source_reference"] == source_reference
 
 
 def test_invalid_lifecycle_transition_returns_conflict(client: TestClient) -> None:
