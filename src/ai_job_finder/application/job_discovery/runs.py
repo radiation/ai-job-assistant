@@ -47,6 +47,7 @@ from ai_job_finder.domain.job_discovery import (
 )
 from ai_job_finder.domain.job_discovery.targeting import (
     discovery_excluded_aggregator_domain,
+    discovery_result_index_reason,
     parse_supported_ats_url,
 )
 from ai_job_finder.domain.job_sources import JobSourceConnector
@@ -350,6 +351,18 @@ def _process_observation(
     search_job_lead_ids: set[UUID],
 ) -> None:
     try:
+        index_reason = discovery_result_index_reason(
+            observation.normalized_url,
+            title_hint=observation.title_hint,
+        )
+        if index_reason is not None:
+            counters.unsupported_count += 1
+            observation.processing_status = JobDiscoveryObservationStatus.UNSUPPORTED.value
+            observation.exclusion_reason = index_reason
+            session.add(observation)
+            session.commit()
+            return
+
         excluded_domain = discovery_excluded_aggregator_domain(observation.normalized_url)
         if excluded_domain is not None:
             counters.unsupported_count += 1

@@ -136,6 +136,15 @@ DISCOVERY_EXCLUDED_AGGREGATOR_DOMAINS = (
     "ziprecruiter.com",
 )
 
+DISCOVERY_BROAD_QUERY_EXCLUDED_DOMAINS = (
+    *DISCOVERY_EXCLUDED_AGGREGATOR_DOMAINS,
+    "builtin.com",
+    "wellfound.com",
+    "theladders.com",
+    "virtualvocations.com",
+    "dice.com",
+)
+
 
 def discovery_excluded_aggregator_domain(url: str) -> str | None:
     host = (urlsplit(url).hostname or "").casefold().rstrip(".")
@@ -144,4 +153,22 @@ def discovery_excluded_aggregator_domain(url: str) -> str | None:
     for domain in DISCOVERY_EXCLUDED_AGGREGATOR_DOMAINS:
         if host == domain or host.endswith(f".{domain}"):
             return domain
+    return None
+
+
+def discovery_result_index_reason(url: str, *, title_hint: str | None) -> str | None:
+    """Return a reason only for result shapes that cannot represent one job posting."""
+    if parse_supported_ats_url(url) is not None:
+        return None
+
+    parts = urlsplit(url)
+    path = parts.path.casefold().rstrip("/")
+    if path == "/search" or path.startswith("/search/"):
+        return "Excluded generic search result before source detection."
+    if path.startswith("/jobs/search") or path.startswith("/job-search"):
+        return "Excluded generic job-search result before source detection."
+
+    normalized_title = " ".join((title_hint or "").casefold().split())
+    if normalized_title.startswith("best ") and " jobs" in normalized_title:
+        return "Excluded generic jobs-list result before source detection."
     return None

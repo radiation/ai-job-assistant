@@ -7,7 +7,7 @@ from ai_job_finder.domain.enums import WorkplaceType
 from ai_job_finder.domain.errors import JobDiscoveryQueryGenerationError
 from ai_job_finder.domain.job_discovery import JobDiscoveryQuery
 from ai_job_finder.domain.job_discovery.targeting import (
-    DISCOVERY_EXCLUDED_AGGREGATOR_DOMAINS,
+    DISCOVERY_BROAD_QUERY_EXCLUDED_DOMAINS,
 )
 from ai_job_finder.domain.job_searches import (
     JobSearchDefinitionSnapshot,
@@ -40,7 +40,7 @@ SENIORITY_LABELS: dict[JobSearchSeniority, str] = {
     JobSearchSeniority.DIRECTOR: "Director",
     JobSearchSeniority.SENIOR_DIRECTOR: "Senior Director",
     JobSearchSeniority.VICE_PRESIDENT: "VP",
-    JobSearchSeniority.HEAD: "Head",
+    JobSearchSeniority.HEAD: "Head of",
     JobSearchSeniority.PRINCIPAL: "Principal",
     JobSearchSeniority.STAFF: "Staff",
     JobSearchSeniority.EXECUTIVE: "Executive",
@@ -51,6 +51,18 @@ SENIORITY_LABELS: dict[JobSearchSeniority, str] = {
 class _LogicalTarget:
     title_phrase: str
     location_term: str | None
+
+
+_TECHNICAL_DISCOVERY_DOMAINS = frozenset(
+    {
+        JobSearchDomain.PLATFORM_ENGINEERING,
+        JobSearchDomain.DEVELOPER_EXPERIENCE,
+        JobSearchDomain.INFRASTRUCTURE,
+        JobSearchDomain.ENGINEERING_PRODUCTIVITY,
+        JobSearchDomain.AI_PLATFORM,
+        JobSearchDomain.DATA_PLATFORM,
+    }
+)
 
 
 def generate_job_discovery_queries(
@@ -68,6 +80,8 @@ def generate_job_discovery_queries(
     rendered_queries = _render_queries(
         _logical_targets(title_phrases, location_terms),
         max_queries=max_queries,
+        broad_context=_broad_context(definition),
+        title_exclusions=_unique_preserving_order(definition.title_exclude_patterns),
     )
 
     deduped: list[tuple[str, str, str | None, str | None]] = []
@@ -177,10 +191,21 @@ def _logical_targets(title_phrases: list[str], location_terms: list[str]) -> lis
     ]
 
 
+def _broad_context(definition: JobSearchDefinitionSnapshot) -> tuple[str, ...]:
+    context: list[str] = []
+    if set(definition.target_domains) & _TECHNICAL_DISCOVERY_DOMAINS:
+        context.append('"software engineering"')
+    if JobSearchDomain.SHARED_SERVICES not in definition.target_domains:
+        context.append('-"shared services"')
+    return tuple(context)
+
+
 def _render_queries(
     targets: list[_LogicalTarget],
     *,
     max_queries: int,
+    broad_context: tuple[str, ...],
+    title_exclusions: list[str],
 ) -> list[tuple[str, str, str | None, str | None]]:
     """Give each target one balanced variant before allocating another to any target."""
     rendered_queries: list[tuple[str, str, str | None, str | None]] = []
@@ -191,7 +216,12 @@ def _render_queries(
                 (target_index + variant_offset) % len(_QUERY_VARIANT_CYCLE)
             ]
             rendered_query = (
-                _render_broad_query(target.title_phrase, target.location_term)
+                _render_broad_query(
+                    target.title_phrase,
+                    target.location_term,
+                    broad_context=broad_context,
+                    title_exclusions=title_exclusions,
+                )
                 if target_host is None
                 else _render_targeted_query(target.title_phrase, target.location_term, target_host)
             )
@@ -217,10 +247,19 @@ def _render_targeted_query(title_phrase: str, location_term: str | None, target_
     return f"{_render_base_query(title_phrase, location_term)} site:{target_host}".strip()
 
 
-def _render_broad_query(title_phrase: str, location_term: str | None) -> str:
+def _render_broad_query(
+    title_phrase: str,
+    location_term: str | None,
+    *,
+    broad_context: tuple[str, ...],
+    title_exclusions: list[str],
+) -> str:
     base_query = _render_base_query(title_phrase, location_term)
-    exclusions = " ".join(f"-site:{domain}" for domain in DISCOVERY_EXCLUDED_AGGREGATOR_DOMAINS)
-    return f"{base_query} {exclusions}".strip()
+    exclusions = [
+        *(f'-"{phrase}"' for phrase in title_exclusions),
+        *(f"-site:{domain}" for domain in DISCOVERY_BROAD_QUERY_EXCLUDED_DOMAINS),
+    ]
+    return " ".join((base_query, *broad_context, *exclusions)).strip()
 
 
 def _normalize_phrase(value: str) -> str:
