@@ -6,8 +6,10 @@ from typing import Any
 from uuid import UUID
 
 import pytest
+from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
+from ai_job_finder.application.documents import accept_career_fact_proposal
 from ai_job_finder.application.job_searches import (
     create_job_search_definition,
     list_job_search_matches,
@@ -23,15 +25,21 @@ from ai_job_finder.application.job_sources import (
 from ai_job_finder.application.services import (
     create_candidate_profile,
     create_career_fact,
+    get_current_candidate_profile,
+    retrieve_verified_evidence,
     transition_career_fact,
 )
+from ai_job_finder.domain.common import new_uuid, utc_now
 from ai_job_finder.domain.enums import (
     CareerFactCategory,
     CareerFactLifecycle,
+    CareerFactProposalReviewStatus,
     EvidenceTag,
+    ExtractionRunStatus,
     JobSourceProvider,
     ProvenanceType,
     RemotePreference,
+    SourceDocumentType,
     WorkplaceType,
 )
 from ai_job_finder.domain.errors import JobSearchDefinitionDisabledError
@@ -39,7 +47,14 @@ from ai_job_finder.domain.job_searches import JobSearchRunStatus
 from ai_job_finder.domain.job_sources import NormalizedJobPosting
 from ai_job_finder.domain.scoring import DEFAULT_SCORING_VERSION
 from ai_job_finder.infrastructure.database.base import Base
-from ai_job_finder.infrastructure.database.models import JobEvaluationModel, JobSearchMatchModel
+from ai_job_finder.infrastructure.database.models import (
+    CareerFactProposalModel,
+    ExtractionRunModel,
+    JobEvaluationModel,
+    JobLeadModel,
+    JobSearchMatchModel,
+    SourceDocumentModel,
+)
 from ai_job_finder.infrastructure.database.session import create_engine_from_url
 from ai_job_finder.infrastructure.job_sources.fake import FakeJobSourceConnector
 
@@ -151,6 +166,73 @@ def _create_source(session: Session) -> UUID:
         source_url="https://boards.greenhouse.io/acme",
     )
     return source.id
+
+
+def _seed_pending_ai_proposal(session: Session, *, candidate_profile_id: UUID) -> UUID:
+    now = utc_now()
+    document = SourceDocumentModel(
+        id=new_uuid(),
+        candidate_profile_id=candidate_profile_id,
+        original_filename="resume.txt",
+        content_type="text/plain",
+        byte_size=32,
+        checksum_sha256="a" * 64,
+        source_type=SourceDocumentType.RESUME.value,
+        storage_key="documents/resume.txt",
+        extracted_text="Established AI platform governance.",
+        extraction_error=None,
+        upload_note=None,
+        uploaded_at=now,
+        processed_at=now,
+        created_at=now,
+        updated_at=now,
+    )
+    extraction_run = ExtractionRunModel(
+        id=new_uuid(),
+        source_document_id=document.id,
+        provider="fake",
+        model_id="test-extractor",
+        prompt_version="test",
+        schema_version="test",
+        status=ExtractionRunStatus.SUCCEEDED.value,
+        started_at=now,
+        completed_at=now,
+        input_character_count=32,
+        input_token_count=None,
+        output_token_count=None,
+        chunk_count=1,
+        temperature=0.0,
+        raw_response=None,
+        error_message=None,
+        created_at=now,
+    )
+    proposal = CareerFactProposalModel(
+        id=new_uuid(),
+        source_document_id=document.id,
+        extraction_run_id=extraction_run.id,
+        candidate_profile_id=candidate_profile_id,
+        proposed_category=CareerFactCategory.TRANSFORMATION.value,
+        proposed_source_organization="Example Cloud",
+        proposed_statement="Established AI platform governance.",
+        proposed_metric=None,
+        proposed_technologies=["Python"],
+        proposed_leadership_scope=None,
+        proposed_business_outcome="Reliable AI delivery",
+        proposed_approved_wording="Established AI platform governance.",
+        proposed_evidence_tags=[EvidenceTag.AI_ENABLEMENT.value],
+        supporting_excerpt="Established AI platform governance.",
+        source_location=None,
+        confidence=1.0,
+        review_status=CareerFactProposalReviewStatus.PENDING.value,
+        duplicate_candidate_fact_id=None,
+        accepted_career_fact_id=None,
+        reviewed_at=None,
+        created_at=now,
+        updated_at=now,
+    )
+    session.add_all([document, extraction_run, proposal])
+    session.commit()
+    return proposal.id
 
 
 def test_saved_search_crud_enable_disable_and_update(
@@ -390,6 +472,155 @@ def test_reused_evaluation_is_not_recreated_when_inputs_are_current(
         assert first_run.evaluated_count == second_run.evaluated_count == 2
         assert session.query(JobEvaluationModel).count() == evaluations_after_first_run
         assert latest_versions == {DEFAULT_SCORING_VERSION}
+
+
+def test_verified_evidence_removal_refreshes_saved_search_evaluations(
+    session_factory: sessionmaker[Session],
+) -> None:
+    with session_factory() as session:
+        _seed_candidate(session)
+        _seed_imported_jobs(session)
+        search = create_job_search_definition(
+            session,
+            name="Platform roles",
+            title_include_patterns=["platform engineering"],
+            title_exclude_patterns=[],
+            target_domains=[],
+            target_seniority_levels=[],
+            allowed_locations=[],
+            allowed_remote_geographies=["United States"],
+            allowed_workplace_types=["remote"],
+            minimum_score_threshold=0,
+        )
+        first_run = run_job_search(session, search_definition_id=search.id)
+        evaluations_before = session.query(JobEvaluationModel).count()
+        candidate = get_current_candidate_profile(session)
+        assert candidate is not None
+        verified_fact = retrieve_verified_evidence(
+            session,
+            candidate_profile_id=candidate.id,
+        )[0]
+
+        transition_career_fact(
+            session,
+            fact_id=verified_fact.id,
+            lifecycle_status=CareerFactLifecycle.DRAFT.value,
+        )
+        second_run = run_job_search(session, search_definition_id=search.id)
+
+        assert first_run.evaluated_count == second_run.evaluated_count == 2
+        assert session.query(JobEvaluationModel).count() == evaluations_before + 2
+
+
+def test_verified_evidence_addition_refreshes_saved_search_evaluations(
+    session_factory: sessionmaker[Session],
+) -> None:
+    with session_factory() as session:
+        _seed_candidate(session)
+        _seed_imported_jobs(session)
+        candidate = get_current_candidate_profile(session)
+        assert candidate is not None
+        draft_fact = create_career_fact(
+            session,
+            candidate_profile_id=candidate.id,
+            category=CareerFactCategory.TRANSFORMATION.value,
+            source_organization="Example Cloud",
+            statement="Established AI platform governance.",
+            metric=None,
+            technologies=["Python"],
+            leadership_scope=None,
+            business_outcome="Reliable AI delivery",
+            approved_wording="Established AI platform governance.",
+            evidence_tags=[EvidenceTag.AI_ENABLEMENT.value],
+            provenance_type=ProvenanceType.PROJECT_NOTES.value,
+            source_reference="review packet",
+        )
+        search = create_job_search_definition(
+            session,
+            name="Platform roles",
+            title_include_patterns=["platform engineering"],
+            title_exclude_patterns=[],
+            target_domains=[],
+            target_seniority_levels=[],
+            allowed_locations=[],
+            allowed_remote_geographies=["United States"],
+            allowed_workplace_types=["remote"],
+            minimum_score_threshold=0,
+        )
+        first_run = run_job_search(session, search_definition_id=search.id)
+        evaluations_before = session.query(JobEvaluationModel).count()
+
+        transition_career_fact(
+            session,
+            fact_id=draft_fact.id,
+            lifecycle_status=CareerFactLifecycle.VERIFIED.value,
+        )
+        second_run = run_job_search(session, search_definition_id=search.id)
+
+        assert first_run.evaluated_count == second_run.evaluated_count == 2
+        assert session.query(JobEvaluationModel).count() == evaluations_before + 2
+
+
+def test_accepted_proposal_refreshes_saved_search_with_verified_evidence(
+    session_factory: sessionmaker[Session],
+) -> None:
+    with session_factory() as session:
+        _seed_candidate(session)
+        _seed_imported_jobs(session)
+        candidate = get_current_candidate_profile(session)
+        assert candidate is not None
+        strong_job = session.scalar(
+            select(JobLeadModel).where(JobLeadModel.title == "Director, Platform Engineering")
+        )
+        assert strong_job is not None
+        strong_job.description_normalized = (
+            "Lead platform engineering with AI platform, Kubernetes, and cloud reliability."
+        )
+        strong_job.description_raw = strong_job.description_normalized
+        session.commit()
+        proposal_id = _seed_pending_ai_proposal(session, candidate_profile_id=candidate.id)
+        search = create_job_search_definition(
+            session,
+            name="Platform roles",
+            title_include_patterns=["platform engineering"],
+            title_exclude_patterns=[],
+            target_domains=[],
+            target_seniority_levels=[],
+            allowed_locations=[],
+            allowed_remote_geographies=["United States"],
+            allowed_workplace_types=["remote"],
+            minimum_score_threshold=0,
+        )
+        first_run = run_job_search(session, search_definition_id=search.id)
+        first_evaluation = session.scalar(
+            select(JobEvaluationModel)
+            .where(JobEvaluationModel.job_lead_id == strong_job.id)
+            .order_by(JobEvaluationModel.evaluated_at.desc())
+        )
+        assert first_evaluation is not None
+        evaluations_before = session.query(JobEvaluationModel).count()
+
+        accepted = accept_career_fact_proposal(session, proposal_id=proposal_id)
+        accepted_fact_id = accepted.accepted_career_fact_id
+        assert accepted_fact_id is not None
+        assert any(
+            fact.id == accepted_fact_id
+            for fact in retrieve_verified_evidence(session, candidate_profile_id=candidate.id)
+        )
+        second_run = run_job_search(session, search_definition_id=search.id)
+        second_evaluation = session.scalar(
+            select(JobEvaluationModel)
+            .where(JobEvaluationModel.job_lead_id == strong_job.id)
+            .order_by(JobEvaluationModel.evaluated_at.desc())
+        )
+        assert second_evaluation is not None
+
+        assert first_run.evaluated_count == second_run.evaluated_count == 2
+        assert session.query(JobEvaluationModel).count() == evaluations_before + 2
+        assert (
+            second_evaluation.technical_alignment_score > first_evaluation.technical_alignment_score
+        )
+        assert "Established AI platform governance." in second_evaluation.explanation
 
 
 def test_manual_run_marks_partial_on_per_job_failure(

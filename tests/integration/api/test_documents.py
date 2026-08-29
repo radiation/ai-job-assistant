@@ -25,9 +25,22 @@ from ai_job_finder.application.extraction import (
     ExtractedCareerFactProposal,
     ExtractedDocument,
 )
-from ai_job_finder.application.services import create_candidate_profile
+from ai_job_finder.application.services import (
+    create_candidate_profile,
+    create_career_fact,
+    get_candidate_profile,
+    retrieve_verified_evidence,
+    transition_career_fact,
+)
+from ai_job_finder.domain.enums import (
+    CareerFactCategory,
+    CareerFactLifecycle,
+    EvidenceTag,
+    ProvenanceType,
+)
 from ai_job_finder.infrastructure.database.base import Base
 from ai_job_finder.infrastructure.database.models import (
+    CareerFactModel,
     CareerFactProposalModel,
     ExtractionRunModel,
     SourceDocumentModel,
@@ -186,7 +199,7 @@ def test_document_upload_extraction_accept_and_reject_flow(
     session_factory: sessionmaker[Session],
 ) -> None:
     with _document_client(session_factory) as client:
-        _create_candidate(client)
+        candidate_id = _create_candidate(client)
         document = _upload_document(client)
 
         duplicate = client.post(
@@ -208,13 +221,21 @@ def test_document_upload_extraction_accept_and_reject_flow(
         assert proposals.status_code == 200
         proposal_id = proposals.json()[0]["id"]
         assert proposals.json()[0]["review_status"] == "pending"
+        assert client.get("/api/v1/career-facts").json() == []
 
         accept = client.post(f"/api/v1/fact-proposals/{proposal_id}/accept")
         assert accept.status_code == 200
         assert accept.json()["review_status"] == "accepted"
         facts = client.get("/api/v1/career-facts")
         assert facts.status_code == 200
-        assert facts.json()[0]["lifecycle_status"] == "draft"
+        assert facts.json()[0]["lifecycle_status"] == "verified"
+        assert facts.json()[0]["verified_at"] is not None
+        with session_factory() as session:
+            verified_facts = retrieve_verified_evidence(
+                session,
+                candidate_profile_id=UUID(candidate_id),
+            )
+            assert len(verified_facts) == 1
 
         second_document = _upload_document(client, b"Led another platform initiative.")
         second_extraction = client.post(f"/api/v1/documents/{second_document['id']}/extractions")
@@ -224,6 +245,7 @@ def test_document_upload_extraction_accept_and_reject_flow(
         reject = client.post(f"/api/v1/fact-proposals/{second_proposal_id}/reject")
         assert reject.status_code == 200
         assert reject.json()["review_status"] == "rejected"
+        assert len(client.get("/api/v1/career-facts").json()) == 1
 
 
 def test_accepting_long_proposal_persists_all_prose_fields_transactionally(
@@ -253,13 +275,78 @@ def test_accepting_long_proposal_persists_all_prose_fields_transactionally(
         assert facts.status_code == 200
         fact = facts.json()[0]
         assert fact["id"] == accepted.json()["accepted_career_fact_id"]
-        assert fact["lifecycle_status"] == "draft"
+        assert fact["lifecycle_status"] == "verified"
+        assert fact["verified_at"] is not None
         assert fact["category"] == "leadership"
         assert fact["provenance_type"] == "resume"
         assert fact["leadership_scope"] == proposal["proposed_leadership_scope"]
         assert fact["statement"] == proposal["proposed_statement"]
         assert fact["business_outcome"] == proposal["proposed_business_outcome"]
         assert fact["approved_wording"] == proposal["proposed_approved_wording"]
+
+
+@pytest.mark.parametrize("target_lifecycle", ["draft", "verified"])
+def test_accepting_duplicate_proposal_reuses_and_verifies_target(
+    session_factory: sessionmaker[Session],
+    target_lifecycle: str,
+) -> None:
+    with _document_client(session_factory) as client:
+        candidate_id = UUID(_create_candidate(client))
+        document = _upload_document(client)
+        extraction = client.post(f"/api/v1/documents/{document['id']}/extractions")
+        assert extraction.status_code == 200
+        proposal_id = UUID(client.get("/api/v1/fact-proposals").json()[0]["id"])
+
+        with session_factory() as session:
+            target = create_career_fact(
+                session,
+                candidate_profile_id=candidate_id,
+                category=CareerFactCategory.PLATFORM.value,
+                source_organization=None,
+                statement="Existing platform evidence.",
+                metric=None,
+                technologies=[],
+                leadership_scope=None,
+                business_outcome=None,
+                approved_wording="Existing platform evidence.",
+                evidence_tags=[EvidenceTag.PLATFORM_ENGINEERING.value],
+                provenance_type=ProvenanceType.PROJECT_NOTES.value,
+                source_reference="existing-review",
+            )
+            if target_lifecycle == CareerFactLifecycle.VERIFIED.value:
+                target = transition_career_fact(
+                    session,
+                    fact_id=target.id,
+                    lifecycle_status=CareerFactLifecycle.VERIFIED.value,
+                )
+            proposal = session.get(CareerFactProposalModel, proposal_id)
+            assert proposal is not None
+            proposal.duplicate_candidate_fact_id = target.id
+            proposal.proposed_evidence_tags = [
+                EvidenceTag.PLATFORM_ENGINEERING.value,
+                EvidenceTag.CLOUD.value,
+            ]
+            session.add(proposal)
+            session.commit()
+            candidate_before_accept = get_candidate_profile(session, candidate_id).updated_at
+
+        accepted = client.post(f"/api/v1/fact-proposals/{proposal_id}/accept")
+
+        assert accepted.status_code == 200
+        assert accepted.json()["accepted_career_fact_id"] == str(target.id)
+        with session_factory() as session:
+            facts = client.get("/api/v1/career-facts").json()
+            target_after_accept = session.get(CareerFactModel, target.id)
+            candidate_after_accept = get_candidate_profile(session, candidate_id)
+
+            assert len(facts) == 1
+            assert target_after_accept is not None
+            assert target_after_accept.lifecycle_status == CareerFactLifecycle.VERIFIED.value
+            assert target_after_accept.verified_at is not None
+            if target_lifecycle == CareerFactLifecycle.VERIFIED.value:
+                assert target_after_accept.verified_at == target.verified_at
+            assert EvidenceTag.CLOUD.value in target_after_accept.evidence_tags
+            assert candidate_after_accept.updated_at > candidate_before_accept
 
 
 def test_acceptance_commit_failure_leaves_proposal_pending_and_creates_no_fact(

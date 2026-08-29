@@ -40,6 +40,16 @@ def _normalize_optional_str(value: str | None) -> str | None:
     return normalized or None
 
 
+def _mark_candidate_evidence_changed(
+    session: Session,
+    *,
+    candidate_profile_id: UUID,
+) -> None:
+    candidate = get_candidate_profile(session, candidate_profile_id)
+    candidate.updated_at = utc_now()
+    session.add(candidate)
+
+
 def _ensure_single_active_candidate(session: Session) -> None:
     existing = get_current_candidate_profile(session)
     if existing is not None:
@@ -268,6 +278,10 @@ def update_career_fact(
         fact.lifecycle_status = CareerFactLifecycle.DRAFT.value
         fact.verified_at = None
         fact.archived_at = None
+        _mark_candidate_evidence_changed(
+            session,
+            candidate_profile_id=fact.candidate_profile_id,
+        )
 
     session.add(fact)
     session.commit()
@@ -283,8 +297,9 @@ def transition_career_fact(
 ) -> CareerFactModel:
     fact = get_career_fact(session, fact_id)
     target_status = CareerFactLifecycle(lifecycle_status)
+    current_status = CareerFactLifecycle(fact.lifecycle_status)
     verified_at, archived_at = transition_metadata(
-        CareerFactLifecycle(fact.lifecycle_status),
+        current_status,
         target_status,
         changed_at=utc_now(),
         existing_verified_at=fact.verified_at,
@@ -292,6 +307,14 @@ def transition_career_fact(
     fact.lifecycle_status = target_status.value
     fact.verified_at = verified_at
     fact.archived_at = archived_at
+    if (
+        current_status is CareerFactLifecycle.VERIFIED
+        or target_status is CareerFactLifecycle.VERIFIED
+    ):
+        _mark_candidate_evidence_changed(
+            session,
+            candidate_profile_id=fact.candidate_profile_id,
+        )
     session.add(fact)
     session.commit()
     session.refresh(fact)
