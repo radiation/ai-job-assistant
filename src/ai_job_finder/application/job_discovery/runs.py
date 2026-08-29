@@ -722,7 +722,9 @@ def _finalize_imported_observation(
     raw_evidence = dict(observation.raw_evidence)
     raw_evidence["stale_seed_board_expansion"] = {
         "originating_observation_id": str(observation.id),
-        "shortlisted_job_lead_ids": [str(job_lead_id) for job_lead_id in expanded_job_lead_ids],
+        "shortlisted_job_lead_ids": [
+            str(job_lead_id) for job_lead_id in sorted(expanded_job_lead_ids, key=str)
+        ],
     }
     observation.raw_evidence = raw_evidence
     search_job_lead_ids.update(expanded_job_lead_ids)
@@ -755,20 +757,23 @@ def _stale_seed_board_expansion_job_lead_ids(
             JobSourceObservationModel.source_configuration_id == source_configuration_id,
             JobSourceObservationModel.active.is_(True),
             JobLeadModel.source_posting_status == "open",
-            JobLeadModel.posting_status.not_in(("rejected", "closed")),
+            JobLeadModel.posting_status.not_in(
+                (PostingStatus.REJECTED.value, PostingStatus.CLOSED.value)
+            ),
         )
         .order_by(JobLeadModel.created_at.asc(), JobLeadModel.id.asc())
     )
-    return {
-        job.id
-        for job in jobs
+    shortlisted_job_lead_ids: set[UUID] = set()
+    for job in jobs:
+        job_snapshot = job.to_snapshot()
         if _is_stale_seed_equivalent(
             seed_domains=seed_domains,
-            job_domains=set(infer_job_search_domain_values(job.to_snapshot())),
-            job_seniority=set(infer_job_search_seniority(job.to_snapshot())),
+            job_domains=set(infer_job_search_domain_values(job_snapshot)),
+            job_seniority=set(infer_job_search_seniority(job_snapshot)),
             target_seniority=target_seniority,
-        )
-    }
+        ):
+            shortlisted_job_lead_ids.add(job.id)
+    return shortlisted_job_lead_ids
 
 
 def _seed_snapshot(observation: JobDiscoveryObservationModel) -> JobLeadSnapshot:
