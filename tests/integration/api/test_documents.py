@@ -68,6 +68,9 @@ class LongLeadershipScopeExtractor:
     temperature = 0.0
 
     def extract(self, document: ExtractedDocument) -> CareerFactExtractionResult:
+        long_statement = "Led platform work. " * 40
+        long_business_outcome = "Improved engineering delivery. " * 30
+        long_approved_wording = "Built durable platform capabilities. " * 25
         return CareerFactExtractionResult(
             provider=self.provider,
             model_id=self.model_id,
@@ -76,9 +79,11 @@ class LongLeadershipScopeExtractor:
             temperature=self.temperature,
             proposals=[
                 ExtractedCareerFactProposal(
-                    statement="Led platform work",
+                    statement=long_statement,
                     category="leadership",
                     leadership_scope="x" * 270,
+                    business_outcome=long_business_outcome,
+                    approved_wording=long_approved_wording,
                     supporting_excerpt="Led platform work with Kubernetes.",
                     confidence=1.0,
                 )
@@ -221,7 +226,7 @@ def test_document_upload_extraction_accept_and_reject_flow(
         assert reject.json()["review_status"] == "rejected"
 
 
-def test_extraction_persists_long_leadership_scope(
+def test_accepting_long_proposal_persists_all_prose_fields_transactionally(
     session_factory: sessionmaker[Session],
 ) -> None:
     with _document_client(session_factory, extractor=LongLeadershipScopeExtractor()) as client:
@@ -233,7 +238,67 @@ def test_extraction_persists_long_leadership_scope(
         assert extraction.status_code == 200
         proposals = client.get("/api/v1/fact-proposals")
         assert proposals.status_code == 200
-        assert len(proposals.json()[0]["proposed_leadership_scope"]) == 270
+        proposal = proposals.json()[0]
+        assert len(proposal["proposed_leadership_scope"]) == 270
+        assert len(proposal["proposed_statement"]) > 500
+        assert len(proposal["proposed_business_outcome"]) > 500
+        assert len(proposal["proposed_approved_wording"]) > 500
+
+        accepted = client.post(f"/api/v1/fact-proposals/{proposal['id']}/accept")
+
+        assert accepted.status_code == 200
+        assert accepted.json()["review_status"] == "accepted"
+        assert accepted.json()["accepted_career_fact_id"] is not None
+        facts = client.get("/api/v1/career-facts")
+        assert facts.status_code == 200
+        fact = facts.json()[0]
+        assert fact["id"] == accepted.json()["accepted_career_fact_id"]
+        assert fact["lifecycle_status"] == "draft"
+        assert fact["category"] == "leadership"
+        assert fact["provenance_type"] == "resume"
+        assert fact["leadership_scope"] == proposal["proposed_leadership_scope"]
+        assert fact["statement"] == proposal["proposed_statement"]
+        assert fact["business_outcome"] == proposal["proposed_business_outcome"]
+        assert fact["approved_wording"] == proposal["proposed_approved_wording"]
+
+
+def test_acceptance_commit_failure_leaves_proposal_pending_and_creates_no_fact(
+    session_factory: sessionmaker[Session],
+) -> None:
+    class CommitFailingSession(Session):
+        fail_commit = False
+
+        def commit(self) -> None:
+            if self.fail_commit:
+                raise RuntimeError("acceptance commit boom")
+            super().commit()
+
+    engine = session_factory.kw["bind"]
+    assert engine is not None
+    failing_session_factory = sessionmaker(
+        bind=engine,
+        autoflush=False,
+        expire_on_commit=False,
+        class_=CommitFailingSession,
+    )
+    with _document_client(
+        cast(sessionmaker[Session], failing_session_factory),
+        extractor=LongLeadershipScopeExtractor(),
+        raise_server_exceptions=False,
+    ) as client:
+        _create_candidate(client)
+        document = _upload_document(client)
+        extraction = client.post(f"/api/v1/documents/{document['id']}/extractions")
+        assert extraction.status_code == 200
+        proposal = client.get("/api/v1/fact-proposals").json()[0]
+
+        CommitFailingSession.fail_commit = True
+        failed_acceptance = client.post(f"/api/v1/fact-proposals/{proposal['id']}/accept")
+        CommitFailingSession.fail_commit = False
+
+        assert failed_acceptance.status_code == 500
+        assert client.get("/api/v1/fact-proposals").json()[0]["review_status"] == "pending"
+        assert client.get("/api/v1/career-facts").json() == []
 
 
 def test_extraction_disabled_returns_structured_error(

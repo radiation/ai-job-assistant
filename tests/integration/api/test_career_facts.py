@@ -34,6 +34,7 @@ def _create_fact(
     statement: str = "Built platform",
     evidence_tags: list[str] | None = None,
     provenance_type: str = "project_notes",
+    source_reference: str = "scorecard",
 ) -> dict[str, Any]:
     response = client.post(
         "/api/v1/career-facts",
@@ -48,7 +49,7 @@ def _create_fact(
             "approved_wording": "Built platform with measurable impact",
             "evidence_tags": evidence_tags or ["platform_engineering", "cloud"],
             "provenance_type": provenance_type,
-            "source_reference": "scorecard",
+            "source_reference": source_reference,
         },
     )
     assert response.status_code == 201
@@ -216,6 +217,15 @@ def test_career_fact_normalizes_legacy_evidence_tag_labels(client: TestClient) -
         "p_and_l",
         "ci_cd",
     ]
+
+
+def test_career_fact_round_trips_long_source_reference(client: TestClient) -> None:
+    _create_candidate(client)
+    source_reference = " ".join(["reviewed evidence reference"] * 30)
+
+    fact = _create_fact(client, source_reference=source_reference)
+
+    assert fact["source_reference"] == source_reference
 
 
 def test_invalid_lifecycle_transition_returns_conflict(client: TestClient) -> None:
