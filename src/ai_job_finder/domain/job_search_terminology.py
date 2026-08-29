@@ -152,7 +152,9 @@ def infer_job_search_domain_values(job: JobLeadSnapshot) -> list[str]:
     if is_generic_data_title(job.title):
         return (
             ["data_platform"]
-            if "data platform" in normalize_job_search_text(job.description_normalized)
+            if _has_domain_signal(
+                normalize_job_search_text(job.description_normalized), "data_platform"
+            )
             else []
         )
     haystack = normalize_job_search_text(f"{job.title} {job.description_normalized}")
@@ -196,6 +198,15 @@ def _target_domains(targets: list[str]) -> set[str]:
         if any(target in patterns or target == domain.replace("_", " ") for target in targets):
             domains.add(domain)
     return domains
+
+
+def _has_domain_signal(text: str, domain: str) -> bool:
+    return any(
+        pattern in text
+        for configured_domain, patterns in _DOMAIN_RULES
+        if configured_domain == domain
+        for pattern in patterns
+    )
 
 
 def _matches_any_phrase(text: str, phrases: tuple[str, ...]) -> bool:

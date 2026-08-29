@@ -225,20 +225,22 @@ def test_data_platform_retains_platform_credit_while_generic_data_does_not() -> 
         _job(title="Director, Data Platform", description="Lead data platform engineering."),
         _evaluation(),
     )
-    generic_data = evaluate_job_search_match(
-        definition,
-        _job(
-            title="Director of Engineering, Data",
-            description="Lead data platform engineering and data infrastructure.",
-        ),
-        _evaluation(),
-    )
-
     assert data_platform.matched is True
     assert JobSearchDomain.PLATFORM_ENGINEERING in data_platform.inferred_domains
-    assert generic_data.matched is False
-    assert generic_data.inferred_domains == [JobSearchDomain.DATA_PLATFORM]
-    assert JobSearchExclusionReason.ROLE_FAMILY_MISMATCH in generic_data.exclusion_reason_codes
+    for description in (
+        "Lead data platform engineering and data infrastructure.",
+        "Lead data infrastructure engineering and data governance.",
+        "Lead analytics platform engineering and data governance.",
+    ):
+        generic_data = evaluate_job_search_match(
+            definition,
+            _job(title="Director of Engineering, Data", description=description),
+            _evaluation(),
+        )
+
+        assert generic_data.matched is False
+        assert generic_data.inferred_domains == [JobSearchDomain.DATA_PLATFORM]
+        assert JobSearchExclusionReason.ROLE_FAMILY_MISMATCH in generic_data.exclusion_reason_codes
 
 
 def test_data_and_ml_platform_remain_adjacent_while_ai_platform_is_a_direct_target() -> None:

@@ -49,6 +49,15 @@ class ScoringConfig:
 
 
 DEFAULT_SCORING_CONFIG: Final[ScoringConfig] = ScoringConfig()
+_DIRECT_DATA_ML_PLATFORM_TARGETS: Final[frozenset[str]] = frozenset(
+    {
+        "ai platform",
+        "data platform",
+        "data infrastructure",
+        "ml platform",
+        "machine learning platform",
+    }
+)
 
 
 def evaluate_job_fit(
@@ -243,7 +252,11 @@ def _score_function(
         description=job.description_normalized,
     )
 
-    if is_data_or_ml_platform_title(job.title):
+    if (
+        targets
+        and is_data_or_ml_platform_title(job.title)
+        and not any(target in _DIRECT_DATA_ML_PLATFORM_TARGETS for target in targets)
+    ):
         return 35, (
             [],
             ["Data or ML platform leadership is adjacent to the target function."],

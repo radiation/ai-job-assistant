@@ -109,6 +109,26 @@ def test_overall_score_and_recommendation_thresholds() -> None:
     assert evaluation.scoring_version == "candidate_evidence_v6"
 
 
+def test_explicit_ai_platform_target_receives_direct_ml_platform_title_credit() -> None:
+    candidate = replace(build_candidate(), target_functions=["AI Platform"])
+    job = replace(build_job(), title="Director, ML Platform")
+
+    evaluation = evaluate_job_fit(candidate, job, [build_fact()])
+
+    assert evaluation.score_components[1].score == 100
+    assert "Job title maps directly to the candidate's target function." in evaluation.explanation
+
+
+def test_missing_target_functions_retain_missing_configuration_score() -> None:
+    candidate = replace(build_candidate(), target_functions=[])
+    job = replace(build_job(), title="Director, Data Platform")
+
+    evaluation = evaluate_job_fit(candidate, job, [build_fact()])
+
+    assert evaluation.score_components[1].score == 50
+    assert "Candidate target functions are missing." in evaluation.explanation
+
+
 def test_level_target_aliases_are_normalized_and_token_bounded() -> None:
     assert _level_target_matches_title("head", "Head, Platform Engineering")
     assert _level_target_matches_title("vice president", "SVP, Engineering")
