@@ -94,7 +94,7 @@ def test_scoring_outputs_components_and_explanation() -> None:
     assert evaluation.platform_ownership_score >= 45
     assert evaluation.leadership_scope_score >= 60
     assert evaluation.technical_alignment_score >= 60
-    assert "Scoring version: candidate_evidence_v5" in evaluation.explanation
+    assert "Scoring version: candidate_evidence_v6" in evaluation.explanation
     assert "Matched verified evidence:" in evaluation.explanation
     assert "Positive signals:" in evaluation.explanation
     assert "Concerns:" in evaluation.explanation
@@ -106,7 +106,7 @@ def test_overall_score_and_recommendation_thresholds() -> None:
 
     assert evaluation.overall_score >= 80
     assert evaluation.recommendation is Recommendation.STRONG_RECOMMEND
-    assert evaluation.scoring_version == "candidate_evidence_v5"
+    assert evaluation.scoring_version == "candidate_evidence_v6"
 
 
 def test_level_target_aliases_are_normalized_and_token_bounded() -> None:

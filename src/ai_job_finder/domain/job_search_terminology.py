@@ -106,6 +106,20 @@ _DATA_PLATFORM_TITLE_TERMS = (
     "ml platform",
     "machine learning platform",
 )
+_HARDWARE_TITLE_TERMS = (
+    "hardware",
+    "hardware architecture",
+    "firmware",
+    "embedded",
+    "electrical",
+    "mechanical",
+    "silicon",
+    "asic",
+    "semiconductor",
+    "rtl",
+    "logical design",
+    "chip design",
+)
 
 
 def normalize_job_search_text(value: str | None) -> str:
@@ -122,6 +136,14 @@ def is_generic_data_title(title: str | None) -> bool:
     return _matches_any_phrase(
         normalized_title, _GENERIC_DATA_TITLE_TERMS
     ) and not _matches_any_phrase(normalized_title, _DATA_PLATFORM_TITLE_TERMS)
+
+
+def is_data_or_ml_platform_title(title: str | None) -> bool:
+    return _matches_any_phrase(normalize_job_search_text(title), _DATA_PLATFORM_TITLE_TERMS)
+
+
+def is_hardware_role_title(title: str | None) -> bool:
+    return _matches_any_phrase(normalize_job_search_text(title), _HARDWARE_TITLE_TERMS)
 
 
 def infer_job_search_domain_values(job: JobLeadSnapshot) -> list[str]:

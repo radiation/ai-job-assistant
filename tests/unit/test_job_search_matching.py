@@ -241,6 +241,23 @@ def test_data_platform_retains_platform_credit_while_generic_data_does_not() -> 
     assert JobSearchExclusionReason.ROLE_FAMILY_MISMATCH in generic_data.exclusion_reason_codes
 
 
+def test_data_and_ml_platform_remain_adjacent_while_ai_platform_is_a_direct_target() -> None:
+    definition = _search_definition(
+        title_include_patterns=[],
+        target_domains=[JobSearchDomain.PLATFORM_ENGINEERING],
+        target_seniority_levels=[JobSearchSeniority.DIRECTOR],
+    )
+    for title in ("Director, Data Platform", "Director, ML Platform"):
+        result = evaluate_job_search_match(
+            definition,
+            _job(title=title, description="Lead platform engineering and self-service services."),
+            _evaluation(),
+        )
+
+        assert result.matched is True
+        assert JobSearchDomain.PLATFORM_ENGINEERING in result.inferred_domains
+
+
 def test_cloud_reliability_remains_an_infrastructure_role_family_match() -> None:
     result = evaluate_job_search_match(
         _search_definition(

@@ -258,24 +258,48 @@ def test_role_family_calibration_corpus_has_expected_outcomes_and_ordering() -> 
             evaluation.overall_score
         )
 
-    assert (
-        results["director-data-platform"][0].overall_score
-        > results["director-engineering-data"][0].overall_score
-    )
-    core_platform = evaluate_job_fit(
-        subject.candidate,
-        _job_from_case(load_golden_set().cases[0]),
-        list(subject.verified_facts),
-    )
-    for case_id in (
-        "director-silicon-logical-design",
-        "director-asic-design",
-        "director-semiconductor-engineering",
-        "director-hardware-architecture",
-        "director-revenue-systems",
-        "senior-director-sales-systems",
-        "director-gtm-systems",
-        "director-crm-systems",
-        "director-business-systems",
-    ):
-        assert core_platform.overall_score > results[case_id][0].overall_score
+    core_scores = [
+        results[case_id][0].overall_score
+        for case_id in (
+            "senior-director-platform-engineering",
+            "director-developer-experience-core",
+            "director-ai-platform",
+        )
+    ]
+    infrastructure_scores = [
+        results[case_id][0].overall_score
+        for case_id in ("director-cloud-reliability", "director-sre")
+    ]
+    data_platform_scores = [
+        results[case_id][0].overall_score
+        for case_id in (
+            "director-data-platform",
+            "director-data-infrastructure",
+            "director-ml-platform",
+        )
+    ]
+    business_system_scores = [
+        results[case_id][0].overall_score
+        for case_id in (
+            "director-revenue-systems",
+            "senior-director-sales-systems",
+            "director-gtm-systems",
+            "director-crm-systems",
+            "director-business-systems",
+        )
+    ]
+    hardware_scores = [
+        results[case_id][0].overall_score
+        for case_id in (
+            "director-silicon-logical-design",
+            "director-asic-design",
+            "director-semiconductor-engineering",
+            "director-hardware-architecture",
+        )
+    ]
+
+    assert min(core_scores) > max(infrastructure_scores)
+    assert min(infrastructure_scores) > max(data_platform_scores)
+    assert min(data_platform_scores) > results["director-engineering-data"][0].overall_score
+    assert results["director-engineering-data"][0].overall_score > max(business_system_scores)
+    assert min(business_system_scores) > max(hardware_scores)
