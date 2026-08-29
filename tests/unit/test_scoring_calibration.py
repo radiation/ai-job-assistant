@@ -6,13 +6,21 @@ from ai_job_finder.application.job_searches.calibration import (
     EXPECTED_CANDIDATE_PROFILE,
     EXPECTED_FIXTURE_KIND,
     EXPECTED_FIXTURE_VERSION,
+    _job_from_case,
     build_synthetic_calibration_subject,
     format_calibration_report,
     load_golden_set,
     parse_explanation_sections,
     run_scoring_calibration,
 )
-from ai_job_finder.domain.scoring import DEFAULT_SCORING_VERSION
+from ai_job_finder.domain.enums import WorkplaceType
+from ai_job_finder.domain.job_searches import (
+    JobSearchDefinitionSnapshot,
+    JobSearchDomain,
+    JobSearchSeniority,
+    evaluate_job_search_match,
+)
+from ai_job_finder.domain.scoring import DEFAULT_SCORING_VERSION, evaluate_job_fit
 
 
 def test_golden_set_loads_from_version_controlled_fixture() -> None:
@@ -23,6 +31,7 @@ def test_golden_set_loads_from_version_controlled_fixture() -> None:
     assert fixture.metadata.candidate_profile == EXPECTED_CANDIDATE_PROFILE
     assert fixture.cases
     assert fixture.cases[0].case_id == "strong-platform-remote"
+    assert fixture.cases[0].expected_match is True
 
 
 def test_golden_set_case_ids_are_unique_and_stable() -> None:
@@ -31,12 +40,9 @@ def test_golden_set_case_ids_are_unique_and_stable() -> None:
     case_ids = [case.case_id for case in fixture.cases]
 
     assert len(case_ids) == len(set(case_ids))
-    assert case_ids == [
-        "strong-platform-remote",
-        "plausible-infra-hybrid",
-        "weak-platform-onsite",
-        "reject-finance-ops",
-    ]
+    assert len(case_ids) == 29
+    assert "hardware-ai-infrastructure-director" in case_ids
+    assert "eu-platform-director" in case_ids
 
 
 def test_calibration_facts_belong_to_the_calibration_candidate() -> None:
@@ -109,7 +115,7 @@ def test_calibration_failure_messages_are_readable(tmp_path: Path) -> None:
         """
 {
     "version": "v1",
-    "fixture_kind": "synthetic_smoke",
+    "fixture_kind": "discovery_match_calibration",
     "candidate_profile": "synthetic",
     "purpose": "Intentional mismatch fixture",
     "cases": [
@@ -136,3 +142,66 @@ def test_calibration_failure_messages_are_readable(tmp_path: Path) -> None:
 
     assert report.passed is False
     assert "Case bad-case expected bucket strong_fit" in text
+
+
+def test_discovery_match_calibration_corpus_has_expected_outcomes_and_ordering() -> None:
+    fixture = load_golden_set()
+    subject = build_synthetic_calibration_subject()
+    definition = JobSearchDefinitionSnapshot(
+        id=subject.candidate.id,
+        name="Director+ Platform / DevEx",
+        enabled=True,
+        target_domains=[
+            JobSearchDomain.PLATFORM_ENGINEERING,
+            JobSearchDomain.DEVELOPER_EXPERIENCE,
+            JobSearchDomain.INFRASTRUCTURE,
+            JobSearchDomain.ENGINEERING_PRODUCTIVITY,
+            JobSearchDomain.AI_PLATFORM,
+            JobSearchDomain.SHARED_SERVICES,
+        ],
+        target_seniority_levels=[
+            JobSearchSeniority.DIRECTOR,
+            JobSearchSeniority.SENIOR_DIRECTOR,
+            JobSearchSeniority.VICE_PRESIDENT,
+            JobSearchSeniority.HEAD,
+            JobSearchSeniority.EXECUTIVE,
+        ],
+        allowed_remote_geographies=["United States"],
+        allowed_workplace_types=[
+            WorkplaceType.REMOTE,
+            WorkplaceType.HYBRID,
+            WorkplaceType.ONSITE,
+        ],
+        minimum_score_threshold=65,
+    )
+    results = {}
+    for case in fixture.cases:
+        job = _job_from_case(case)
+        evaluation = evaluate_job_fit(subject.candidate, job, list(subject.verified_facts))
+        result = evaluate_job_search_match(definition, job, evaluation)
+        results[case.case_id] = (evaluation, result)
+        assert [domain.value for domain in result.inferred_domains] == case.expected_domains
+        assert [
+            level.value for level in result.inferred_seniority_levels
+        ] == case.expected_seniority
+        assert result.matched is case.expected_match
+        assert (
+            round(
+                sum(component.weighted_score for component in result.explanation.score_components),
+                2,
+            )
+            == result.explanation.score
+        )
+
+    assert (
+        results["director-cloud-platform"][0].overall_score
+        > results["hardware-ai-infrastructure-director"][0].overall_score
+    )
+    assert (
+        results["director-developer-experience"][0].overall_score
+        > results["senior-platform-engineer"][0].overall_score
+    )
+    assert (
+        results["vp-software-platform"][0].overall_score
+        > results["sales-enablement-director"][0].overall_score
+    )

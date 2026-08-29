@@ -64,7 +64,7 @@ def _evaluation(
         id=new_uuid(),
         candidate_profile_id=new_uuid(),
         job_lead_id=new_uuid(),
-        scoring_version="candidate_evidence_v2",
+        scoring_version="candidate_evidence_v4",
         leadership_scope_score=80,
         technical_alignment_score=90,
         location_score=85,

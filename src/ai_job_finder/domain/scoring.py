@@ -13,8 +13,13 @@ from ai_job_finder.domain.enums import (
 )
 from ai_job_finder.domain.evaluation import EvaluationResult, ScoreComponent
 from ai_job_finder.domain.job_lead import JobLeadSnapshot
+from ai_job_finder.domain.job_search_terminology import (
+    is_excluded_target_function_title,
+    normalize_job_search_text,
+    target_function_matches,
+)
 
-DEFAULT_SCORING_VERSION: Final[str] = "candidate_evidence_v2"
+DEFAULT_SCORING_VERSION: Final[str] = "candidate_evidence_v4"
 _RECOMMENDATION_THRESHOLDS: Final[tuple[tuple[Recommendation, float], ...]] = (
     (Recommendation.STRONG_RECOMMEND, 80.0),
     (Recommendation.RECOMMEND, 65.0),
@@ -25,12 +30,12 @@ _RECOMMENDATION_THRESHOLDS: Final[tuple[tuple[Recommendation, float], ...]] = (
 
 @dataclass(frozen=True, slots=True)
 class ScoringWeights:
-    level_alignment: float = 0.20
-    target_function_alignment: float = 0.15
+    level_alignment: float = 0.40
+    target_function_alignment: float = 0.20
     location_alignment: float = 0.10
     platform_ownership: float = 0.15
-    leadership_scope: float = 0.20
-    technical_alignment: float = 0.20
+    leadership_scope: float = 0.10
+    technical_alignment: float = 0.05
     referral_priority: float = 0.0
 
 
@@ -166,6 +171,18 @@ def _normalize(text: str | None) -> str:
     return (text or "").casefold()
 
 
+def _level_target_matches_title(target: str, title: str) -> bool:
+    aliases = {
+        "vice president": ("vice president", " vp ", "svp", "avp"),
+        "senior director": ("senior director",),
+        "director": ("director",),
+        "head": ("head of", "head,"),
+        "senior manager": ("senior manager",),
+        "manager": ("manager",),
+    }
+    return any(alias in f" {title} " for alias in aliases.get(target, (target,)))
+
+
 def _dedupe_preserving_order(values: list[str]) -> list[str]:
     seen: set[str] = set()
     deduped: list[str] = []
@@ -181,10 +198,19 @@ def _score_level(
     candidate: CandidateProfileSnapshot,
     job: JobLeadSnapshot,
 ) -> tuple[int, tuple[list[str], list[str], list[str]]]:
-    haystack = f"{job.title} {job.description_normalized}"
-    normalized_haystack = _normalize(haystack)
+    if is_excluded_target_function_title(job.title):
+        return 0, (
+            [],
+            ["The title identifies a non-target technical or business function."],
+            [],
+        )
+    normalized_title = normalize_job_search_text(job.title)
     normalized_targets = [_normalize(value) for value in candidate.target_levels]
-    matches = [value for value in normalized_targets if value and value in normalized_haystack]
+    matches = [
+        value
+        for value in normalized_targets
+        if value and _level_target_matches_title(value, normalized_title)
+    ]
 
     if matches:
         return 100, ([f"Job level aligns with target level(s): {', '.join(matches)}."], [], [])
@@ -197,22 +223,28 @@ def _score_function(
     candidate: CandidateProfileSnapshot,
     job: JobLeadSnapshot,
 ) -> tuple[int, tuple[list[str], list[str], list[str]]]:
-    title = _normalize(job.title)
-    description = _normalize(job.description_normalized)
     targets = [_normalize(value) for value in candidate.target_functions]
+    if is_excluded_target_function_title(job.title):
+        return 0, (
+            [],
+            ["The title identifies a non-target technical or business function."],
+            [],
+        )
+    title_match, description_match = target_function_matches(
+        targets,
+        title=job.title,
+        description=job.description_normalized,
+    )
 
-    title_matches = [value for value in targets if value and value in title]
-    description_matches = [value for value in targets if value and value in description]
-
-    if title_matches:
+    if title_match:
         return 100, (
-            [f"Job title maps directly to target function(s): {', '.join(title_matches)}."],
+            ["Job title maps directly to the candidate's target function."],
             [],
             [],
         )
-    if description_matches:
+    if description_match:
         return 80, (
-            [f"Job description reinforces target function(s): {', '.join(description_matches)}."],
+            ["Job description reinforces the candidate's target function."],
             [],
             [],
         )
@@ -281,7 +313,9 @@ def _score_location(
 def _score_platform_ownership(
     job: JobLeadSnapshot,
 ) -> tuple[int, tuple[list[str], list[str], list[str]]]:
-    description = _normalize(job.description_normalized)
+    if is_excluded_target_function_title(job.title):
+        return 10, ([], ["The title identifies a non-target technical or business function."], [])
+    description = _normalize(f"{job.title} {job.description_normalized}")
     phrases = {
         "platform": "Platform ownership is named directly.",
         "developer platform": "Developer platform responsibility is explicit.",
@@ -361,6 +395,13 @@ def _score_technical_alignment(
     job: JobLeadSnapshot,
     facts: list[CareerFactSnapshot],
 ) -> tuple[int, tuple[list[str], list[str], list[str], list[str]]]:
+    if is_excluded_target_function_title(job.title):
+        return 15, (
+            [],
+            ["The title identifies a non-target technical or business function."],
+            [],
+            [],
+        )
     text = _normalize(f"{job.title} {job.description_normalized}")
     evidence_index = _evidence_index(facts)
     signal_rules = [
