@@ -3,7 +3,7 @@ from __future__ import annotations
 import pytest
 
 from ai_job_finder.application.extraction import ExtractedCareerFactProposal
-from ai_job_finder.domain.enums import EvidenceTag
+from ai_job_finder.domain.enums import EVIDENCE_TAG_DISPLAY_NAMES, EvidenceTag
 
 
 @pytest.mark.parametrize(
@@ -12,7 +12,9 @@ from ai_job_finder.domain.enums import EvidenceTag
         ("Manager Of Managers", EvidenceTag.MANAGER_OF_MANAGERS, "Manager of Managers"),
         ("Ml Platform", EvidenceTag.ML_PLATFORM, "ML Platform"),
         ("P And L", EvidenceTag.P_AND_L, "P&L"),
+        ("P&L", EvidenceTag.P_AND_L, "P&L"),
         ("Ci Cd", EvidenceTag.CI_CD, "CI/CD"),
+        ("CI/CD", EvidenceTag.CI_CD, "CI/CD"),
     ],
 )
 def test_evidence_tag_normalizes_legacy_labels(
@@ -22,6 +24,14 @@ def test_evidence_tag_normalizes_legacy_labels(
 ) -> None:
     assert EvidenceTag(legacy_label) is canonical_tag
     assert canonical_tag.display_name == display_name
+
+
+def test_evidence_tag_display_name_falls_back_when_mapping_is_missing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delitem(EVIDENCE_TAG_DISPLAY_NAMES, EvidenceTag.AI_PLATFORM)
+
+    assert EvidenceTag.AI_PLATFORM.display_name == "Ai Platform"
 
 
 def test_extraction_accepts_multiple_specific_ai_capabilities() -> None:

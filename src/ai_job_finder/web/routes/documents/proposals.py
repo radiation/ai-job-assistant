@@ -286,13 +286,6 @@ def proposals_list(
         evidence_tag=selected_tag.value if selected_tag else None,
     )
     documents = list_source_documents(session, candidate.id)
-    organizations = sorted(
-        {
-            proposal.proposed_source_organization
-            for proposal in proposals
-            if proposal.proposed_source_organization
-        }
-    )
     return render_template(
         request,
         "proposals/list.html",
@@ -303,7 +296,6 @@ def proposals_list(
             "review_status_options": list(CareerFactProposalReviewStatus),
             "category_options": list(CareerFactCategory),
             "evidence_tag_options": list(EvidenceTag),
-            "organization_options": organizations,
             "flash_messages": _flash_messages(flash),
             "selected_filters": {
                 "review_status": selected_status.value if selected_status else "all",

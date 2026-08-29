@@ -59,7 +59,7 @@ class EvidenceTag(StrEnum):
 
     @property
     def display_name(self) -> str:
-        return EVIDENCE_TAG_DISPLAY_NAMES[self]
+        return EVIDENCE_TAG_DISPLAY_NAMES.get(self, self.value.replace("_", " ").title())
 
     @classmethod
     def _missing_(cls, value: object) -> EvidenceTag | None:

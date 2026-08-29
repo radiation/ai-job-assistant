@@ -37,7 +37,9 @@ def _normalize_tags(table_name: str, column_name: str) -> None:
                         WHEN 'Manager Of Managers' THEN 'manager_of_managers'
                         WHEN 'Ml Platform' THEN 'ml_platform'
                         WHEN 'P And L' THEN 'p_and_l'
+                        WHEN 'P&L' THEN 'p_and_l'
                         WHEN 'Ci Cd' THEN 'ci_cd'
+                        WHEN 'CI/CD' THEN 'ci_cd'
                         ELSE value
                     END AS normalized_value,
                     MIN(position) AS first_position
@@ -49,6 +51,8 @@ def _normalize_tags(table_name: str, column_name: str) -> None:
         WHERE {column_name}::text LIKE '%Manager Of Managers%'
            OR {column_name}::text LIKE '%Ml Platform%'
            OR {column_name}::text LIKE '%P And L%'
+           OR {column_name}::text LIKE '%P&L%'
            OR {column_name}::text LIKE '%Ci Cd%'
+           OR {column_name}::text LIKE '%CI/CD%'
         """
     )
