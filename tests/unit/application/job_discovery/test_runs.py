@@ -760,6 +760,57 @@ def test_run_job_discovery_recovers_third_party_link_and_imports_canonical_board
         )
 
 
+def test_run_job_discovery_filters_index_results_before_source_detection(
+    session_factory: sessionmaker[Session],
+) -> None:
+    with session_factory() as session:
+        _seed_candidate(session)
+        search_id = _search(session)
+        query = generate_job_discovery_queries(
+            get_job_search_definition(session, search_id).to_snapshot(),
+            max_queries=4,
+            result_limit=5,
+        )[0]
+        index_url = "https://jobs.example.com/search?query=platform"
+        fetcher = CountingFetcher({})
+
+        run = run_job_discovery(
+            session,
+            search_definition_id=search_id,
+            provider_name="fake",
+            provider=FakeJobDiscoveryProvider(
+                results_by_query={
+                    query.rendered_query: [
+                        DiscoveredJobCandidate(
+                            discovered_url=index_url,
+                            provider_name="fake",
+                            query_identifier=query.stable_query_id,
+                            rank=1,
+                            title_hint="Search platform engineering jobs",
+                        )
+                    ]
+                }
+            ),
+            fetcher=fetcher,
+            board_validator=FakeValidator({}),
+            connector=FakeJobSourceConnector(),
+            config=_config(),
+        )
+
+        observation = list_job_discovery_observations(session, discovery_run_id=run.id)[0]
+        assert run.provider_result_count == 1
+        assert run.unique_url_count == 1
+        assert run.unsupported_count == 1
+        assert fetcher.calls == []
+        assert (
+            observation.observation.processing_status
+            == JobDiscoveryObservationStatus.UNSUPPORTED.value
+        )
+        assert observation.observation.exclusion_reason == (
+            "Excluded generic search result before source detection."
+        )
+
+
 def test_run_job_discovery_reconciles_application_link_before_other_board_links(
     session_factory: sessionmaker[Session],
 ) -> None:

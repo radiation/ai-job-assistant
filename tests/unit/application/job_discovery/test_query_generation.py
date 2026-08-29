@@ -71,21 +71,27 @@ def test_query_generation_is_deterministic_deduplicated_and_capped() -> None:
     assert [query.rendered_query for query in first] == [
         "Director Platform Engineering New York site:boards.greenhouse.io",
         (
-            "Director Developer Experience remote United States "
-            "-site:indeed.com -site:linkedin.com -site:glassdoor.com -site:ziprecruiter.com"
+            'Director Developer Experience remote United States "software engineering" '
+            '-"shared services" -"finance" -site:indeed.com -site:linkedin.com '
+            "-site:glassdoor.com -site:ziprecruiter.com -site:builtin.com -site:wellfound.com "
+            "-site:theladders.com -site:virtualvocations.com -site:dice.com"
         ),
         "Senior Director Platform Engineering New York site:jobs.ashbyhq.com",
         (
-            "Senior Director Developer Experience remote United States "
-            "-site:indeed.com -site:linkedin.com -site:glassdoor.com -site:ziprecruiter.com"
+            'Senior Director Developer Experience remote United States "software engineering" '
+            '-"shared services" -"finance" -site:indeed.com -site:linkedin.com '
+            "-site:glassdoor.com -site:ziprecruiter.com -site:builtin.com -site:wellfound.com "
+            "-site:theladders.com -site:virtualvocations.com -site:dice.com"
         ),
     ]
     assert [query.stable_query_id for query in first] == [query.stable_query_id for query in second]
     assert len({query.rendered_query for query in first}) == len(first)
     assert all(query.result_limit == 5 for query in first)
-    assert all('"' not in query.rendered_query for query in first)
     assert any("site:boards.greenhouse.io" in query.rendered_query for query in first)
     assert any("-site:indeed.com" in query.rendered_query for query in first)
+    assert any('"software engineering"' in query.rendered_query for query in first)
+    assert any('-"shared services"' in query.rendered_query for query in first)
+    assert any("-site:dice.com" in query.rendered_query for query in first)
     assert [query.target_domain for query in first] == [
         "boards.greenhouse.io",
         None,
@@ -116,8 +122,10 @@ def test_query_generation_uses_seniority_and_domain_fallbacks() -> None:
     assert [query.rendered_query for query in queries] == [
         "Senior Director Developer Experience site:boards.greenhouse.io",
         (
-            "Senior Director Developer Experience "
-            "-site:indeed.com -site:linkedin.com -site:glassdoor.com -site:ziprecruiter.com"
+            'Senior Director Developer Experience "software engineering" '
+            '-"shared services" -site:indeed.com -site:linkedin.com -site:glassdoor.com '
+            "-site:ziprecruiter.com -site:builtin.com -site:wellfound.com -site:theladders.com "
+            "-site:virtualvocations.com -site:dice.com"
         ),
         "Senior Director Developer Experience site:jobs.ashbyhq.com",
         "Senior Director Developer Experience site:jobs.lever.co",
@@ -143,4 +151,5 @@ def test_query_generation_covers_expanded_saved_search_intent() -> None:
     assert any(query.target_domain == "jobs.lever.co" for query in queries)
     assert any(query.target_domain is None for query in queries)
     assert "NYC" not in {query.location_or_workplace_term for query in queries}
-    assert all('"' not in query.rendered_query for query in queries)
+    assert any(query.title_phrase.startswith("Head of ") for query in queries)
+    assert all(len(query.rendered_query) <= 300 for query in queries)
