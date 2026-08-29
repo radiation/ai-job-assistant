@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Any
 from uuid import UUID
 
 from sqlalchemy import Select, and_, func, select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 from sqlalchemy.sql import over
 
 from ai_job_finder.application.job_searches.definitions import get_job_search_definition
@@ -35,6 +36,14 @@ class RankedDiscoveredLead:
     saved_search_matches: tuple[JobSearchMatchModel, ...]
 
 
+def _match_sort_key(match: JobSearchMatchModel) -> tuple[float, datetime, str]:
+    return (
+        match.score_at_match_time or -1.0,
+        match.created_at,
+        str(match.id),
+    )
+
+
 def _location_signals_for_observation(
     job: JobLeadModel,
     observation: JobSourceObservationModel,
@@ -59,7 +68,10 @@ def _latest_evaluation_subquery() -> Select[tuple[UUID, Any]]:
     ).group_by(JobEvaluationModel.job_lead_id)
 
 
-def _current_saved_search_matches_subquery() -> Select[tuple[Any, ...]]:
+def _current_saved_search_matches_subquery(
+    *,
+    search_definition_id: UUID | None = None,
+) -> Select[tuple[Any, ...]]:
     ranked_matches = (
         select(
             JobSearchMatchModel.id.label("match_id"),
@@ -86,9 +98,13 @@ def _current_saved_search_matches_subquery() -> Select[tuple[Any, ...]]:
             JobSearchRunModel.status.in_(("completed", "partial")),
             JobSearchDefinitionModel.enabled.is_(True),
         )
-        .subquery()
     )
-    return select(ranked_matches.c.match_id).where(ranked_matches.c.match_rank == 1)
+    if search_definition_id is not None:
+        ranked_matches = ranked_matches.where(
+            JobSearchMatchModel.search_definition_id == search_definition_id
+        )
+    ranked_match_rows = ranked_matches.subquery()
+    return select(ranked_match_rows.c.match_id).where(ranked_match_rows.c.match_rank == 1)
 
 
 def list_ranked_discovered_leads(
@@ -111,9 +127,12 @@ def list_ranked_discovered_leads(
     if search_definition_id is not None:
         get_job_search_definition(session, search_definition_id)
     latest = _latest_evaluation_subquery().subquery()
-    current_match_ids = _current_saved_search_matches_subquery().subquery()
+    current_match_ids = _current_saved_search_matches_subquery(
+        search_definition_id=search_definition_id
+    ).subquery()
     query = (
         select(JobSourceObservationModel, JobLeadModel, JobEvaluationModel, JobSearchMatchModel)
+        .options(joinedload(JobSearchMatchModel.search_definition))
         .join(JobLeadModel, JobLeadModel.id == JobSourceObservationModel.job_lead_id)
         .outerjoin(
             latest,
@@ -156,9 +175,10 @@ def list_ranked_discovered_leads(
     rows = session.execute(query).all()
     matches_by_job_id: dict[UUID, list[JobSearchMatchModel]] = {}
     observations_by_job_id: dict[UUID, JobSourceObservationModel] = {}
-    evaluations_by_job_id: dict[UUID, JobEvaluationModel] = {}
+    evaluations_by_match_id: dict[UUID, JobEvaluationModel] = {}
     for observation, job, evaluation, match in rows:
         matches_by_job_id.setdefault(job.id, []).append(match)
+        evaluations_by_match_id[match.id] = evaluation
         current_observation = observations_by_job_id.get(job.id)
         if current_observation is None or (
             observation.source_updated_at or observation.last_seen_at,
@@ -170,13 +190,13 @@ def list_ranked_discovered_leads(
             str(current_observation.id),
         ):
             observations_by_job_id[job.id] = observation
-        evaluations_by_job_id[job.id] = evaluation
 
     items: list[RankedDiscoveredLead] = []
     for job_id, matches in matches_by_job_id.items():
         observation = observations_by_job_id[job_id]
         job = observation.job_lead
-        evaluation = evaluations_by_job_id[job_id]
+        sorted_matches = tuple(sorted(matches, key=_match_sort_key, reverse=True))
+        evaluation = evaluations_by_match_id[sorted_matches[0].id]
         eligibility = classify_job_location_eligibility(
             candidate_snapshot,
             _location_signals_for_observation(job, observation),
@@ -195,17 +215,7 @@ def list_ranked_discovered_leads(
                 observation=observation,
                 latest_evaluation=evaluation,
                 location_eligibility=eligibility,
-                saved_search_matches=tuple(
-                    sorted(
-                        matches,
-                        key=lambda match: (
-                            match.score_at_match_time or -1.0,
-                            match.created_at,
-                            str(match.id),
-                        ),
-                        reverse=True,
-                    )
-                ),
+                saved_search_matches=sorted_matches,
             )
         )
     return sorted(

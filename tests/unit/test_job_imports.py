@@ -435,9 +435,16 @@ def test_discover_queue_deduplicates_current_matches_and_uses_persisted_explanat
         )
         first_search_id = _run_actionable_search(session)
         _run_actionable_search(session, first_search_id)
-        _run_actionable_search(session, name="Second actionable platform roles")
+        second_search_id = _run_actionable_search(
+            session,
+            name="Second actionable platform roles",
+        )
 
         queue = list_ranked_discovered_leads(session)
+        filtered_queue = list_ranked_discovered_leads(
+            session,
+            search_definition_id=first_search_id,
+        )
 
         assert len(queue) == 2
         assert len({item.job.id for item in queue}) == 2
@@ -452,6 +459,12 @@ def test_discover_queue_deduplicates_current_matches_and_uses_persisted_explanat
             item.saved_search_matches[0].decision_explanation["outcome"] == "matched"
             for item in queue
         )
+        assert len(filtered_queue) == 2
+        assert all(
+            {match.search_definition_id for match in item.saved_search_matches} == {first_search_id}
+            for item in filtered_queue
+        )
+        assert first_search_id != second_search_id
 
 
 def test_discover_queue_suppresses_resolved_and_inactive_matches(
