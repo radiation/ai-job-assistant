@@ -27,6 +27,7 @@ from ai_job_finder.domain.common import new_uuid, utc_now
 from ai_job_finder.domain.enums import (
     JobImportRunStatus,
     JobLocationEligibilityStatus,
+    PostingStatus,
     Recommendation,
     SourceDetectionRunStatus,
     WorkplaceType,
@@ -50,6 +51,13 @@ from ai_job_finder.domain.job_discovery.targeting import (
     discovery_result_index_reason,
     parse_supported_ats_url,
 )
+from ai_job_finder.domain.job_lead import JobLeadSnapshot
+from ai_job_finder.domain.job_search_terminology import (
+    infer_job_search_domain_values,
+    is_excluded_target_function_title,
+)
+from ai_job_finder.domain.job_searches.enums import JobSearchSeniority
+from ai_job_finder.domain.job_searches.matching import infer_job_search_seniority
 from ai_job_finder.domain.job_sources import JobSourceConnector
 from ai_job_finder.domain.location_eligibility import (
     JobLocationSignals,
@@ -67,6 +75,7 @@ from ai_job_finder.infrastructure.database.models import (
     JobEvaluationModel,
     JobImportRunModel,
     JobLeadModel,
+    JobSearchDefinitionModel,
     JobSearchMatchModel,
     JobSourceConfigurationModel,
     JobSourceObservationModel,
@@ -79,6 +88,15 @@ ACTIONABLE_RECOMMENDATIONS = {
     Recommendation.STRONG_RECOMMEND.value,
     Recommendation.RECOMMEND.value,
 }
+_STALE_SEED_ADJACENT_DOMAIN_GROUP = frozenset(
+    {
+        "platform_engineering",
+        "developer_experience",
+        "engineering_productivity",
+        "ai_platform",
+        "infrastructure",
+    }
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -295,6 +313,7 @@ def run_job_discovery(
                 board_validator=board_validator,
                 connector=connector,
                 config=config,
+                definition=definition,
                 counters=counters,
                 source_imports=source_imports,
                 search_job_lead_ids=search_job_lead_ids,
@@ -347,6 +366,7 @@ def _process_observation(
     board_validator: JobSourceBoardValidator,
     connector: JobSourceConnector,
     config: JobDiscoveryConfig,
+    definition: JobSearchDefinitionModel,
     counters: _RunCounters,
     source_imports: dict[UUID, _CachedImportOutcome],
     search_job_lead_ids: set[UUID],
@@ -387,6 +407,7 @@ def _process_observation(
                 source_configuration_id=reused_resolution.source_configuration_id,
                 connector=connector,
                 config=config,
+                definition=definition,
                 counters=counters,
                 source_imports=source_imports,
                 fanout_surfaced_jobs=False,
@@ -428,6 +449,7 @@ def _process_observation(
                 source_configuration_id=approval.source.id,
                 connector=connector,
                 config=config,
+                definition=definition,
                 counters=counters,
                 source_imports=source_imports,
                 fanout_surfaced_jobs=not approval.existing_source,
@@ -596,6 +618,7 @@ def _import_detected_source(
     source_configuration_id: UUID,
     connector: JobSourceConnector,
     config: JobDiscoveryConfig,
+    definition: JobSearchDefinitionModel,
     counters: _RunCounters,
     source_imports: dict[UUID, _CachedImportOutcome],
     fanout_surfaced_jobs: bool,
@@ -648,6 +671,7 @@ def _import_detected_source(
         observation=observation,
         source_configuration_id=source_configuration_id,
         import_status=import_outcome.import_status,
+        definition=definition,
         counters=counters,
         search_job_lead_ids=search_job_lead_ids,
     )
@@ -659,6 +683,7 @@ def _finalize_imported_observation(
     observation: JobDiscoveryObservationModel,
     source_configuration_id: UUID,
     import_status: str | None,
+    definition: JobSearchDefinitionModel,
     counters: _RunCounters,
     search_job_lead_ids: set[UUID],
 ) -> None:
@@ -687,6 +712,99 @@ def _finalize_imported_observation(
     observation.processing_status = JobDiscoveryObservationStatus.DETECTED_SUPPORTED.value
     observation.exclusion_reason = (
         "Source import completed, but the seed did not reconcile to a currently imported lead."
+    )
+    expanded_job_lead_ids = _stale_seed_board_expansion_job_lead_ids(
+        session,
+        observation=observation,
+        definition=definition,
+        source_configuration_id=source_configuration_id,
+    )
+    raw_evidence = dict(observation.raw_evidence)
+    raw_evidence["stale_seed_board_expansion"] = {
+        "originating_observation_id": str(observation.id),
+        "shortlisted_job_lead_ids": [str(job_lead_id) for job_lead_id in expanded_job_lead_ids],
+    }
+    observation.raw_evidence = raw_evidence
+    search_job_lead_ids.update(expanded_job_lead_ids)
+
+
+def _stale_seed_board_expansion_job_lead_ids(
+    session: Session,
+    *,
+    observation: JobDiscoveryObservationModel,
+    definition: JobSearchDefinitionModel,
+    source_configuration_id: UUID,
+) -> set[UUID]:
+    definition_snapshot = definition.to_snapshot()
+    seed = _seed_snapshot(observation)
+    seed_domains = set(infer_job_search_domain_values(seed))
+    target_domains = {domain.value for domain in definition_snapshot.target_domains}
+    seed_seniority = set(infer_job_search_seniority(seed))
+    target_seniority = set(definition_snapshot.target_seniority_levels)
+    if (
+        is_excluded_target_function_title(observation.title_hint)
+        or (target_domains and not seed_domains.intersection(target_domains))
+        or (target_seniority and not seed_seniority.intersection(target_seniority))
+    ):
+        return set()
+
+    jobs = session.scalars(
+        select(JobLeadModel)
+        .join(JobSourceObservationModel)
+        .where(
+            JobSourceObservationModel.source_configuration_id == source_configuration_id,
+            JobSourceObservationModel.active.is_(True),
+            JobLeadModel.source_posting_status == "open",
+            JobLeadModel.posting_status.not_in(("rejected", "closed")),
+        )
+        .order_by(JobLeadModel.created_at.asc(), JobLeadModel.id.asc())
+    )
+    return {
+        job.id
+        for job in jobs
+        if _is_stale_seed_equivalent(
+            seed_domains=seed_domains,
+            job_domains=set(infer_job_search_domain_values(job.to_snapshot())),
+            job_seniority=set(infer_job_search_seniority(job.to_snapshot())),
+            target_seniority=target_seniority,
+        )
+    }
+
+
+def _seed_snapshot(observation: JobDiscoveryObservationModel) -> JobLeadSnapshot:
+    return JobLeadSnapshot(
+        id=observation.id,
+        source=observation.provider,
+        source_url=observation.normalized_url,
+        external_id=observation.provider_result_id,
+        company_name=observation.company_hint or "Unknown",
+        title=observation.title_hint or "",
+        location_text=observation.location_hint,
+        workplace_type=None,
+        description_raw=observation.evidence_snippet or "",
+        description_normalized=observation.evidence_snippet or "",
+        compensation_text=None,
+        discovered_at=observation.discovered_at or observation.created_at,
+        posting_status=PostingStatus.DISCOVERED,
+        created_at=observation.created_at,
+        updated_at=observation.updated_at,
+    )
+
+
+def _is_stale_seed_equivalent(
+    *,
+    seed_domains: set[str],
+    job_domains: set[str],
+    job_seniority: set[JobSearchSeniority],
+    target_seniority: set[JobSearchSeniority],
+) -> bool:
+    if not job_domains or (target_seniority and not job_seniority.intersection(target_seniority)):
+        return False
+    if seed_domains.intersection(job_domains):
+        return True
+    return bool(
+        seed_domains.intersection(_STALE_SEED_ADJACENT_DOMAIN_GROUP)
+        and job_domains.intersection(_STALE_SEED_ADJACENT_DOMAIN_GROUP)
     )
 
 

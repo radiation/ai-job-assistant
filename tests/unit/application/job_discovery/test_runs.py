@@ -23,7 +23,10 @@ from ai_job_finder.application.job_searches import (
     create_job_search_definition,
     get_job_search_definition,
 )
-from ai_job_finder.application.job_sources import create_job_source_configuration
+from ai_job_finder.application.job_sources import (
+    create_job_source_configuration,
+    run_job_source_import,
+)
 from ai_job_finder.application.services import (
     create_candidate_profile,
     create_career_fact,
@@ -992,6 +995,271 @@ def test_run_job_discovery_evaluates_new_board_jobs_when_seed_is_stale(
         assert len(list(session.scalars(select(JobLeadModel)))) == 3
         assert len(list(session.scalars(select(JobEvaluationModel)))) == 3
         assert second_matches == []
+
+
+@pytest.mark.parametrize(
+    ("seed_title", "current_title", "expected_shortlist_count"),
+    [
+        (
+            "Director, Platform Engineering",
+            "Director, Platform Engineering",
+            1,
+        ),
+        (
+            "Director, Platform Engineering",
+            "Finance Operations Manager",
+            0,
+        ),
+        (
+            "Director of Finance",
+            "Director, Platform Engineering",
+            0,
+        ),
+        (
+            "Director, Platform Engineering",
+            "Staff Platform Engineering",
+            0,
+        ),
+        (
+            "Director, Platform Engineering",
+            "Director, Developer Experience",
+            1,
+        ),
+    ],
+    ids=(
+        "equivalent",
+        "no-plausible-job",
+        "irrelevant-seed",
+        "incompatible-seniority",
+        "adjacent-family",
+    ),
+)
+def test_run_job_discovery_expands_relevant_stale_seed_on_known_board(
+    session_factory: sessionmaker[Session],
+    seed_title: str,
+    current_title: str,
+    expected_shortlist_count: int,
+) -> None:
+    with session_factory() as session:
+        _seed_candidate(session)
+        search_id = _search(session)
+        stale_url = "https://boards.greenhouse.io/beta/jobs/expired-role"
+        connector = BoardAwareConnector(
+            jobs_by_token={
+                "beta": [
+                    _posting_for_board("beta", "Beta", "current-role", current_title),
+                ]
+            }
+        )
+        source = create_job_source_configuration(
+            session,
+            provider=JobSourceProvider.GREENHOUSE.value,
+            display_name="Beta Greenhouse",
+            company_name="Beta",
+            board_token="beta",
+            source_url="https://boards.greenhouse.io/beta",
+        )
+        run_job_source_import(
+            session,
+            source_id=source.id,
+            connector=connector,
+            retain_raw_payload=True,
+            close_on_empty=False,
+            stale_after_seconds=3600,
+        )
+        evaluation_count_before_discovery = len(list(session.scalars(select(JobEvaluationModel))))
+        query = generate_job_discovery_queries(
+            get_job_search_definition(session, search_id).to_snapshot(),
+            max_queries=4,
+            result_limit=5,
+        )[0]
+
+        run = run_job_discovery(
+            session,
+            search_definition_id=search_id,
+            provider_name="fake",
+            provider=FakeJobDiscoveryProvider(
+                results_by_query={
+                    query.rendered_query: [
+                        DiscoveredJobCandidate(
+                            discovered_url=stale_url,
+                            provider_name="fake",
+                            query_identifier=query.stable_query_id,
+                            rank=1,
+                            title_hint=seed_title,
+                            company_hint="Beta",
+                        )
+                    ]
+                }
+            ),
+            fetcher=FakeFetcher({}),
+            board_validator=connector,
+            connector=connector,
+            config=_config(),
+        )
+
+        observation = list_job_discovery_observations(session, discovery_run_id=run.id)[0]
+        expansion = observation.observation.raw_evidence["stale_seed_board_expansion"]
+        matches = list(
+            session.scalars(
+                select(JobSearchMatchModel).where(
+                    JobSearchMatchModel.search_run_id == run.saved_search_run_id
+                )
+            )
+        )
+
+        assert expansion["originating_observation_id"] == str(observation.observation.id)
+        assert len(expansion["shortlisted_job_lead_ids"]) == expected_shortlist_count
+        assert len(matches) == expected_shortlist_count
+        assert (
+            len(list(session.scalars(select(JobEvaluationModel))))
+            == evaluation_count_before_discovery
+        )
+
+
+def test_run_job_discovery_reuses_current_evaluation_for_repeated_stale_expansion(
+    session_factory: sessionmaker[Session],
+) -> None:
+    with session_factory() as session:
+        _seed_candidate(session)
+        search_id = _search(session)
+        stale_url = "https://boards.greenhouse.io/beta/jobs/expired-role"
+        connector = BoardAwareConnector(
+            jobs_by_token={
+                "beta": [
+                    _posting_for_board(
+                        "beta", "Beta", "current-role", "Director, Platform Engineering"
+                    )
+                ]
+            }
+        )
+        source = create_job_source_configuration(
+            session,
+            provider=JobSourceProvider.GREENHOUSE.value,
+            display_name="Beta Greenhouse",
+            company_name="Beta",
+            board_token="beta",
+            source_url="https://boards.greenhouse.io/beta",
+        )
+        run_job_source_import(
+            session,
+            source_id=source.id,
+            connector=connector,
+            retain_raw_payload=True,
+            close_on_empty=False,
+            stale_after_seconds=3600,
+        )
+        query = generate_job_discovery_queries(
+            get_job_search_definition(session, search_id).to_snapshot(),
+            max_queries=4,
+            result_limit=5,
+        )[0]
+        provider = FakeJobDiscoveryProvider(
+            results_by_query={
+                query.rendered_query: [
+                    DiscoveredJobCandidate(
+                        discovered_url=stale_url,
+                        provider_name="fake",
+                        query_identifier=query.stable_query_id,
+                        rank=1,
+                        title_hint="Director, Platform Engineering",
+                        company_hint="Beta",
+                    )
+                ]
+            }
+        )
+
+        run_job_discovery(
+            session,
+            search_definition_id=search_id,
+            provider_name="fake",
+            provider=provider,
+            fetcher=FakeFetcher({}),
+            board_validator=connector,
+            connector=connector,
+            config=_config(),
+        )
+        rerun = run_job_discovery(
+            session,
+            search_definition_id=search_id,
+            provider_name="fake",
+            provider=provider,
+            fetcher=FakeFetcher({}),
+            board_validator=connector,
+            connector=connector,
+            config=_config(),
+        )
+
+        assert len(list(session.scalars(select(JobEvaluationModel)))) == 1
+        assert rerun.evaluated_count == 1
+
+
+def test_run_job_discovery_evaluates_new_equivalent_job_on_known_board_stale_seed(
+    session_factory: sessionmaker[Session],
+) -> None:
+    with session_factory() as session:
+        _seed_candidate(session)
+        search_id = _search(session)
+        stale_url = "https://boards.greenhouse.io/beta/jobs/expired-role"
+        connector = BoardAwareConnector(jobs_by_token={"beta": []})
+        source = create_job_source_configuration(
+            session,
+            provider=JobSourceProvider.GREENHOUSE.value,
+            display_name="Beta Greenhouse",
+            company_name="Beta",
+            board_token="beta",
+            source_url="https://boards.greenhouse.io/beta",
+        )
+        run_job_source_import(
+            session,
+            source_id=source.id,
+            connector=connector,
+            retain_raw_payload=True,
+            close_on_empty=False,
+            stale_after_seconds=3600,
+        )
+        connector.jobs_by_token["beta"] = [
+            _posting_for_board("beta", "Beta", "new-equivalent", "Director, Platform Engineering")
+        ]
+        query = generate_job_discovery_queries(
+            get_job_search_definition(session, search_id).to_snapshot(),
+            max_queries=4,
+            result_limit=5,
+        )[0]
+
+        run = run_job_discovery(
+            session,
+            search_definition_id=search_id,
+            provider_name="fake",
+            provider=FakeJobDiscoveryProvider(
+                results_by_query={
+                    query.rendered_query: [
+                        DiscoveredJobCandidate(
+                            discovered_url=stale_url,
+                            provider_name="fake",
+                            query_identifier=query.stable_query_id,
+                            rank=1,
+                            title_hint="Director, Platform Engineering",
+                            company_hint="Beta",
+                        )
+                    ]
+                }
+            ),
+            fetcher=FakeFetcher({}),
+            board_validator=connector,
+            connector=connector,
+            config=_config(),
+        )
+
+        matches = list(
+            session.scalars(
+                select(JobSearchMatchModel).where(
+                    JobSearchMatchModel.search_run_id == run.saved_search_run_id
+                )
+            )
+        )
+        assert len(matches) == 1
+        assert len(list(session.scalars(select(JobEvaluationModel)))) == 1
 
 
 def test_discovery_detail_distinguishes_seed_and_new_board_evaluations(
