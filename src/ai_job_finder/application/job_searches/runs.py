@@ -444,7 +444,13 @@ def list_job_search_matches(
     *,
     search_run_id: UUID,
     matched_only: bool = False,
+    limit: int | None = None,
+    offset: int = 0,
 ) -> list[JobSearchRunMatchRecord]:
+    if limit is not None and limit < 1:
+        raise ValueError("Match record limit must be at least one.")
+    if offset < 0:
+        raise ValueError("Match record offset must not be negative.")
     get_job_search_run(session, search_run_id)
     query = (
         select(JobSearchMatchModel)
@@ -461,6 +467,10 @@ def list_job_search_matches(
     )
     if matched_only:
         query = query.where(JobSearchMatchModel.matched.is_(True))
+    if limit is not None:
+        query = query.limit(limit)
+    if offset:
+        query = query.offset(offset)
     rows = list(session.scalars(query))
     return [
         JobSearchRunMatchRecord(

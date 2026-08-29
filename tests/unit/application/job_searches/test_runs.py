@@ -235,6 +235,39 @@ def test_manual_run_persists_matches_and_historical_reruns(
         assert first_run.id != second_run.id
 
 
+def test_list_job_search_matches_applies_limit_and_offset(
+    session_factory: sessionmaker[Session],
+) -> None:
+    with session_factory() as session:
+        _seed_candidate(session)
+        _seed_imported_jobs(session)
+        search = create_job_search_definition(
+            session,
+            name="Platform roles",
+            title_include_patterns=["platform engineering"],
+            title_exclude_patterns=["finance"],
+            target_domains=["platform_engineering"],
+            target_seniority_levels=["director"],
+            allowed_locations=[],
+            allowed_remote_geographies=["United States"],
+            allowed_workplace_types=["remote"],
+            minimum_score_threshold=70,
+        )
+        run = run_job_search(session, search_definition_id=search.id)
+
+        first_page = list_job_search_matches(session, search_run_id=run.id, limit=1)
+        second_page = list_job_search_matches(session, search_run_id=run.id, limit=1, offset=1)
+
+        assert len(first_page) == 1
+        assert len(second_page) == 1
+        assert first_page[0].match.id != second_page[0].match.id
+        first_score = first_page[0].match.score_at_match_time
+        second_score = second_page[0].match.score_at_match_time
+        assert first_score is not None
+        assert second_score is not None
+        assert first_score >= second_score
+
+
 def test_manual_run_reuses_existing_evaluations(session_factory: sessionmaker[Session]) -> None:
     with session_factory() as session:
         _seed_candidate(session)
