@@ -93,7 +93,7 @@ def _flash_messages(flash: str | None) -> list[dict[str, str]]:
         "text-extracted": "Document text extracted.",
         "facts-extracted": "Fact proposals extracted.",
         "proposal-updated": "Proposal updated.",
-        "proposal-accepted": "Proposal accepted as a draft career fact.",
+        "proposal-accepted": "Proposal accepted as verified career evidence.",
         "proposal-rejected": "Proposal rejected.",
         "proposal-merged": "Proposal merged into the selected career fact.",
     }

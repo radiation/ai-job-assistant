@@ -16,7 +16,7 @@ The candidate knowledge base needs less manual data entry, but this single-user 
 - Store versioned prompts in source control and persist prompt/schema versions on every extraction run.
 - Persist source documents, extraction runs, and career-fact proposals as separate entities.
 - Require human review before AI output can create or enrich canonical career facts.
-- Accepted proposals create draft career facts; existing verification rules remain the only path to verified evidence.
+- Extracted proposals remain untrusted until human review. ADR 0006 defines the accepted-proposal verification lifecycle.
 - Store uploaded files in local filesystem storage first, behind a small storage interface that can be replaced by cloud storage later.
 - Do not introduce an agent framework, autonomous tool use, embeddings, vector search, OCR, GCS, or a background worker system in this slice.
 

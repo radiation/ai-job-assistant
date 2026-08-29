@@ -35,7 +35,7 @@ pending -> rejected
 pending -> merged
 ```
 
-Terminal states are immutable except for audit metadata. Accepting creates a draft fact. Merging performs explicit narrow enrichment. Proposals are never verified automatically.
+Terminal states are immutable except for audit metadata. Human acceptance creates verified candidate evidence, or promotes an advisory duplicate target to verified without creating a duplicate fact. Merging performs explicit narrow enrichment. Extraction alone never verifies a proposal or fact.
 
 ## Job Lead Workflow Status
 

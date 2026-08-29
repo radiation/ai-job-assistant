@@ -25,6 +25,7 @@ from ai_job_finder.domain.errors import (
     NotFoundError,
 )
 from ai_job_finder.infrastructure.database.models import (
+    CandidateProfileModel,
     CareerFactModel,
     CareerFactProposalModel,
     ExtractionRunModel,
@@ -40,6 +41,48 @@ def _jaccard(left: set[str], right: set[str]) -> float:
     if not left or not right:
         return 0.0
     return len(left & right) / len(left | right)
+
+
+def _mark_candidate_evidence_changed(session: Session, *, candidate_profile_id: UUID) -> None:
+    candidate = session.get(CandidateProfileModel, candidate_profile_id)
+    if candidate is not None:
+        candidate.updated_at = utc_now()
+        session.add(candidate)
+
+
+def _merge_proposal_into_fact(
+    fact: CareerFactModel,
+    proposal: CareerFactProposalModel,
+    *,
+    replace_statement: bool,
+    replace_approved_wording: bool,
+) -> bool:
+    changed = False
+    technologies = _normalize_list([*fact.technologies, *proposal.proposed_technologies])
+    if technologies != fact.technologies:
+        fact.technologies = technologies
+        changed = True
+    evidence_tags = _normalize_list([*fact.evidence_tags, *proposal.proposed_evidence_tags])
+    if evidence_tags != fact.evidence_tags:
+        fact.evidence_tags = evidence_tags
+        changed = True
+    for field_name in ("metric", "leadership_scope", "business_outcome"):
+        if getattr(fact, field_name) is None:
+            value = getattr(proposal, f"proposed_{field_name}")
+            if value is not None:
+                setattr(fact, field_name, value)
+                changed = True
+    if replace_statement and fact.statement != proposal.proposed_statement:
+        fact.statement = proposal.proposed_statement
+        changed = True
+    if (
+        replace_approved_wording
+        and proposal.proposed_approved_wording
+        and fact.approved_wording != proposal.proposed_approved_wording
+    ):
+        fact.approved_wording = proposal.proposed_approved_wording
+        changed = True
+    return changed
 
 
 def _find_duplicate_fact(
@@ -218,26 +261,60 @@ def accept_career_fact_proposal(session: Session, *, proposal_id: UUID) -> Caree
         CareerFactProposalReviewStatus(proposal.review_status),
         CareerFactProposalReviewStatus.ACCEPTED,
     )
-    fact = CareerFactModel(
-        id=new_uuid(),
-        candidate_profile_id=proposal.candidate_profile_id,
-        category=proposal.proposed_category,
-        source_organization=proposal.proposed_source_organization,
-        statement=proposal.proposed_statement,
-        metric=proposal.proposed_metric,
-        technologies=list(proposal.proposed_technologies),
-        leadership_scope=proposal.proposed_leadership_scope,
-        business_outcome=proposal.proposed_business_outcome,
-        approved_wording=proposal.proposed_approved_wording or proposal.proposed_statement,
-        lifecycle_status=CareerFactLifecycle.DRAFT.value,
-        evidence_tags=list(proposal.proposed_evidence_tags),
-        provenance_type=_source_type_to_provenance(proposal.source_document.source_type),
-        source_reference=f"source_document:{proposal.source_document_id} proposal:{proposal.id}",
-        verified_at=None,
-        archived_at=None,
-        created_at=utc_now(),
-        updated_at=utc_now(),
+    now = utc_now()
+    fact = (
+        session.get(CareerFactModel, proposal.duplicate_candidate_fact_id)
+        if proposal.duplicate_candidate_fact_id is not None
+        else None
     )
+    evidence_changed = False
+    if fact is None:
+        fact = CareerFactModel(
+            id=new_uuid(),
+            candidate_profile_id=proposal.candidate_profile_id,
+            category=proposal.proposed_category,
+            source_organization=proposal.proposed_source_organization,
+            statement=proposal.proposed_statement,
+            metric=proposal.proposed_metric,
+            technologies=list(proposal.proposed_technologies),
+            leadership_scope=proposal.proposed_leadership_scope,
+            business_outcome=proposal.proposed_business_outcome,
+            approved_wording=proposal.proposed_approved_wording or proposal.proposed_statement,
+            lifecycle_status=CareerFactLifecycle.VERIFIED.value,
+            evidence_tags=list(proposal.proposed_evidence_tags),
+            provenance_type=_source_type_to_provenance(proposal.source_document.source_type),
+            source_reference=(
+                f"source_document:{proposal.source_document_id} proposal:{proposal.id}"
+            ),
+            verified_at=now,
+            archived_at=None,
+            created_at=now,
+            updated_at=now,
+        )
+        evidence_changed = True
+    else:
+        if fact.candidate_profile_id != proposal.candidate_profile_id:
+            msg = "Merge target belongs to a different candidate profile."
+            raise MergeTargetMismatchError(msg)
+        was_verified = fact.lifecycle_status == CareerFactLifecycle.VERIFIED.value
+        evidence_changed = _merge_proposal_into_fact(
+            fact,
+            proposal,
+            replace_statement=False,
+            replace_approved_wording=False,
+        )
+        if not was_verified:
+            fact.lifecycle_status = CareerFactLifecycle.VERIFIED.value
+            fact.verified_at = now
+            fact.archived_at = None
+            evidence_changed = True
+        if evidence_changed:
+            fact.updated_at = now
+    if evidence_changed:
+        _mark_candidate_evidence_changed(
+            session,
+            candidate_profile_id=fact.candidate_profile_id,
+        )
     proposal.review_status = CareerFactProposalReviewStatus.ACCEPTED.value
     proposal.accepted_career_fact_id = fact.id
     proposal.reviewed_at = utc_now()
@@ -281,22 +358,20 @@ def merge_career_fact_proposal(
     if fact.candidate_profile_id != proposal.candidate_profile_id:
         msg = "Merge target belongs to a different candidate profile."
         raise MergeTargetMismatchError(msg)
-    fact.technologies = _normalize_list([*fact.technologies, *proposal.proposed_technologies])
-    fact.evidence_tags = _normalize_list([*fact.evidence_tags, *proposal.proposed_evidence_tags])
-    if fact.metric is None:
-        fact.metric = proposal.proposed_metric
-    if fact.leadership_scope is None:
-        fact.leadership_scope = proposal.proposed_leadership_scope
-    if fact.business_outcome is None:
-        fact.business_outcome = proposal.proposed_business_outcome
-    if replace_statement:
-        fact.statement = proposal.proposed_statement
-    if replace_approved_wording and proposal.proposed_approved_wording:
-        fact.approved_wording = proposal.proposed_approved_wording
+    _merge_proposal_into_fact(
+        fact,
+        proposal,
+        replace_statement=replace_statement,
+        replace_approved_wording=replace_approved_wording,
+    )
     if fact.lifecycle_status == CareerFactLifecycle.VERIFIED.value:
         fact.lifecycle_status = CareerFactLifecycle.DRAFT.value
         fact.verified_at = None
         fact.archived_at = None
+        _mark_candidate_evidence_changed(
+            session,
+            candidate_profile_id=fact.candidate_profile_id,
+        )
     fact.updated_at = utc_now()
     proposal.review_status = CareerFactProposalReviewStatus.MERGED.value
     proposal.accepted_career_fact_id = fact.id

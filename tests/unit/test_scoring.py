@@ -94,7 +94,7 @@ def test_scoring_outputs_components_and_explanation() -> None:
     assert evaluation.platform_ownership_score >= 45
     assert evaluation.leadership_scope_score >= 60
     assert evaluation.technical_alignment_score >= 60
-    assert "Scoring version: candidate_evidence_v5" in evaluation.explanation
+    assert "Scoring version: candidate_evidence_v6" in evaluation.explanation
     assert "Matched verified evidence:" in evaluation.explanation
     assert "Positive signals:" in evaluation.explanation
     assert "Concerns:" in evaluation.explanation
@@ -106,7 +106,27 @@ def test_overall_score_and_recommendation_thresholds() -> None:
 
     assert evaluation.overall_score >= 80
     assert evaluation.recommendation is Recommendation.STRONG_RECOMMEND
-    assert evaluation.scoring_version == "candidate_evidence_v5"
+    assert evaluation.scoring_version == "candidate_evidence_v6"
+
+
+def test_explicit_ai_platform_target_receives_direct_ml_platform_title_credit() -> None:
+    candidate = replace(build_candidate(), target_functions=["AI Platform"])
+    job = replace(build_job(), title="Director, ML Platform")
+
+    evaluation = evaluate_job_fit(candidate, job, [build_fact()])
+
+    assert evaluation.score_components[1].score == 100
+    assert "Job title maps directly to the candidate's target function." in evaluation.explanation
+
+
+def test_missing_target_functions_retain_missing_configuration_score() -> None:
+    candidate = replace(build_candidate(), target_functions=[])
+    job = replace(build_job(), title="Director, Data Platform")
+
+    evaluation = evaluate_job_fit(candidate, job, [build_fact()])
+
+    assert evaluation.score_components[1].score == 50
+    assert "Candidate target functions are missing." in evaluation.explanation
 
 
 def test_level_target_aliases_are_normalized_and_token_bounded() -> None:

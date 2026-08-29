@@ -22,6 +22,8 @@ from ai_job_finder.domain.job_searches import (
 )
 from ai_job_finder.domain.scoring import DEFAULT_SCORING_VERSION, evaluate_job_fit
 
+ROLE_FAMILY_CALIBRATION_PATH = Path("tests/fixtures/scoring/role_family_calibration_v1.json")
+
 
 def test_golden_set_loads_from_version_controlled_fixture() -> None:
     fixture = load_golden_set()
@@ -205,3 +207,99 @@ def test_discovery_match_calibration_corpus_has_expected_outcomes_and_ordering()
         results["vp-software-platform"][0].overall_score
         > results["sales-enablement-director"][0].overall_score
     )
+
+
+def test_role_family_calibration_corpus_has_expected_outcomes_and_ordering() -> None:
+    fixture = load_golden_set(ROLE_FAMILY_CALIBRATION_PATH)
+    subject = build_synthetic_calibration_subject()
+    definition = JobSearchDefinitionSnapshot(
+        id=subject.candidate.id,
+        name="Director+ Platform / DevEx",
+        enabled=True,
+        target_domains=[
+            JobSearchDomain.PLATFORM_ENGINEERING,
+            JobSearchDomain.DEVELOPER_EXPERIENCE,
+            JobSearchDomain.INFRASTRUCTURE,
+            JobSearchDomain.ENGINEERING_PRODUCTIVITY,
+            JobSearchDomain.AI_PLATFORM,
+            JobSearchDomain.SHARED_SERVICES,
+        ],
+        target_seniority_levels=[
+            JobSearchSeniority.DIRECTOR,
+            JobSearchSeniority.SENIOR_DIRECTOR,
+            JobSearchSeniority.VICE_PRESIDENT,
+            JobSearchSeniority.HEAD,
+            JobSearchSeniority.EXECUTIVE,
+        ],
+        allowed_remote_geographies=["United States"],
+        allowed_workplace_types=[
+            WorkplaceType.REMOTE,
+            WorkplaceType.HYBRID,
+            WorkplaceType.ONSITE,
+        ],
+        minimum_score_threshold=65,
+    )
+
+    results = {}
+    for case in fixture.cases:
+        job = _job_from_case(case)
+        evaluation = evaluate_job_fit(subject.candidate, job, list(subject.verified_facts))
+        result = evaluate_job_search_match(definition, job, evaluation)
+        results[case.case_id] = (evaluation, result)
+        assert case.expected_min_score is not None
+        assert case.expected_max_score is not None
+        assert case.expected_min_score <= evaluation.overall_score <= case.expected_max_score
+        assert [domain.value for domain in result.inferred_domains] == case.expected_domains
+        assert [level.value for level in result.inferred_seniority_levels] == (
+            case.expected_seniority
+        )
+        assert result.matched is case.expected_match
+        assert round(sum(item.weighted_score for item in evaluation.score_components), 2) == (
+            evaluation.overall_score
+        )
+
+    core_scores = [
+        results[case_id][0].overall_score
+        for case_id in (
+            "senior-director-platform-engineering",
+            "director-developer-experience-core",
+            "director-ai-platform",
+        )
+    ]
+    infrastructure_scores = [
+        results[case_id][0].overall_score
+        for case_id in ("director-cloud-reliability", "director-sre")
+    ]
+    data_platform_scores = [
+        results[case_id][0].overall_score
+        for case_id in (
+            "director-data-platform",
+            "director-data-infrastructure",
+            "director-ml-platform",
+        )
+    ]
+    business_system_scores = [
+        results[case_id][0].overall_score
+        for case_id in (
+            "director-revenue-systems",
+            "senior-director-sales-systems",
+            "director-gtm-systems",
+            "director-crm-systems",
+            "director-business-systems",
+        )
+    ]
+    hardware_scores = [
+        results[case_id][0].overall_score
+        for case_id in (
+            "director-silicon-logical-design",
+            "director-asic-design",
+            "director-semiconductor-engineering",
+            "director-hardware-architecture",
+        )
+    ]
+
+    assert min(core_scores) > max(infrastructure_scores)
+    assert min(infrastructure_scores) > max(data_platform_scores)
+    assert min(data_platform_scores) > results["director-engineering-data"][0].overall_score
+    assert results["director-engineering-data"][0].overall_score > max(business_system_scores)
+    assert min(business_system_scores) > max(hardware_scores)

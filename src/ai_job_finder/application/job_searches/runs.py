@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Collection
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import cast
 from uuid import UUID
 
@@ -135,13 +135,23 @@ def _should_create_new_evaluation(
         return True
     if not latest_evaluation.score_components:
         return True
-    if latest_evaluation.evaluated_at < candidate_updated_at:
+    if _is_older_than(latest_evaluation.evaluated_at, candidate_updated_at):
         return True
-    if latest_evaluation.evaluated_at < job_updated_at:
+    if _is_older_than(latest_evaluation.evaluated_at, job_updated_at):
         return True
-    if fact_updated_at is not None and latest_evaluation.evaluated_at < fact_updated_at:
+    if fact_updated_at is not None and _is_older_than(
+        latest_evaluation.evaluated_at, fact_updated_at
+    ):
         return True
     return False
+
+
+def _is_older_than(left: datetime, right: datetime) -> bool:
+    return _as_utc(left) < _as_utc(right)
+
+
+def _as_utc(value: datetime) -> datetime:
+    return value.replace(tzinfo=UTC) if value.tzinfo is None else value.astimezone(UTC)
 
 
 def _materialize_evaluation(

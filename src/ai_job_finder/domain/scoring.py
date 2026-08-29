@@ -14,12 +14,15 @@ from ai_job_finder.domain.enums import (
 from ai_job_finder.domain.evaluation import EvaluationResult, ScoreComponent
 from ai_job_finder.domain.job_lead import JobLeadSnapshot
 from ai_job_finder.domain.job_search_terminology import (
+    is_data_or_ml_platform_title,
     is_excluded_target_function_title,
+    is_generic_data_title,
+    is_hardware_role_title,
     normalize_job_search_text,
     target_function_matches,
 )
 
-DEFAULT_SCORING_VERSION: Final[str] = "candidate_evidence_v5"
+DEFAULT_SCORING_VERSION: Final[str] = "candidate_evidence_v6"
 _RECOMMENDATION_THRESHOLDS: Final[tuple[tuple[Recommendation, float], ...]] = (
     (Recommendation.STRONG_RECOMMEND, 80.0),
     (Recommendation.RECOMMEND, 65.0),
@@ -46,6 +49,15 @@ class ScoringConfig:
 
 
 DEFAULT_SCORING_CONFIG: Final[ScoringConfig] = ScoringConfig()
+_DIRECT_DATA_ML_PLATFORM_TARGETS: Final[frozenset[str]] = frozenset(
+    {
+        "ai platform",
+        "data platform",
+        "data infrastructure",
+        "ml platform",
+        "machine learning platform",
+    }
+)
 
 
 def evaluate_job_fit(
@@ -240,6 +252,16 @@ def _score_function(
         description=job.description_normalized,
     )
 
+    if (
+        targets
+        and is_data_or_ml_platform_title(job.title)
+        and not any(target in _DIRECT_DATA_ML_PLATFORM_TARGETS for target in targets)
+    ):
+        return 35, (
+            [],
+            ["Data or ML platform leadership is adjacent to the target function."],
+            [],
+        )
     if title_match:
         return 100, (
             ["Job title maps directly to the candidate's target function."],
@@ -317,8 +339,16 @@ def _score_location(
 def _score_platform_ownership(
     job: JobLeadSnapshot,
 ) -> tuple[int, tuple[list[str], list[str], list[str]]]:
+    if is_hardware_role_title(job.title):
+        return 0, ([], ["The title identifies a non-target hardware or silicon function."], [])
     if is_excluded_target_function_title(job.title):
         return 10, ([], ["The title identifies a non-target technical or business function."], [])
+    if is_generic_data_title(job.title):
+        return 25, (
+            [],
+            ["The title identifies generic data leadership rather than platform ownership."],
+            [],
+        )
     description = _normalize(f"{job.title} {job.description_normalized}")
     phrases = {
         "platform": "Platform ownership is named directly.",
@@ -339,6 +369,13 @@ def _score_leadership_scope(
     job: JobLeadSnapshot,
     facts: list[CareerFactSnapshot],
 ) -> tuple[int, tuple[list[str], list[str], list[str], list[str]]]:
+    if is_hardware_role_title(job.title):
+        return 0, (
+            [],
+            ["The title identifies a non-target hardware or silicon function."],
+            [],
+            [],
+        )
     text = _normalize(f"{job.title} {job.description_normalized}")
     evidence_index = _evidence_index(facts)
     signal_rules = [
@@ -399,6 +436,13 @@ def _score_technical_alignment(
     job: JobLeadSnapshot,
     facts: list[CareerFactSnapshot],
 ) -> tuple[int, tuple[list[str], list[str], list[str], list[str]]]:
+    if is_hardware_role_title(job.title):
+        return 0, (
+            [],
+            ["The title identifies a non-target hardware or silicon function."],
+            [],
+            [],
+        )
     if is_excluded_target_function_title(job.title):
         return 15, (
             [],
