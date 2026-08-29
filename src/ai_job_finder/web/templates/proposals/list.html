@@ -13,7 +13,7 @@
   <div class="field-group">
     <label for="review_status">Status</label>
     <select id="review_status" name="review_status">
-      <option value="">Any</option>
+      <option value="all" {% if selected_filters.review_status == 'all' %}selected{% endif %}>All</option>
       {% for option in review_status_options %}<option value="{{ option.value }}" {% if selected_filters.review_status == option.value %}selected{% endif %}>{{ option.value | humanize }}</option>{% endfor %}
     </select>
   </div>
@@ -27,6 +27,10 @@
   <div class="field-group">
     <label for="category">Category</label>
     <select id="category" name="category"><option value="">Any</option>{% for option in category_options %}<option value="{{ option.value }}" {% if selected_filters.category == option.value %}selected{% endif %}>{{ option.value | humanize }}</option>{% endfor %}</select>
+  </div>
+  <div class="field-group">
+    <label for="source_organization">Organization</label>
+    <input id="source_organization" name="source_organization" value="{{ selected_filters.source_organization }}" />
   </div>
   <div class="field-group">
     <label for="evidence_tag">Tag</label>
