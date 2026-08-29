@@ -128,6 +128,7 @@
                 <div class="discovery-primary">
                   <p class="discovery-company">{{ item.job.company_name }}</p>
                   <h3>{{ item.job.title }}</h3>
+                  <p class="muted">{{ item.saved_search_matches|map(attribute='search_definition.name')|join(', ') }}</p>
                 </div>
                 <div class="discovery-summary-meta" aria-label="Job metadata" title="{{ workplace_label }} · {{ full_location }}">
                   <p class="discovery-inline-meta" aria-label="{{ workplace_label }} in {{ full_location }}">
@@ -171,6 +172,9 @@
                 </article>
                 <aside class="discovery-expanded-side">
                   <dl class="detail-list compact-detail-list discovery-expanded-meta">
+                    <div><dt>Saved-search match</dt><dd>{{ item.saved_search_matches[0].search_definition.name }}</dd></div>
+                    <div><dt>Recommendation</dt><dd>{{ item.saved_search_matches[0].recommendation_at_match_time|humanize }}</dd></div>
+                    <div><dt>Match diagnostics</dt><dd>{{ item.saved_search_matches[0].decision_explanation.get('outcome', 'matched')|humanize }}{% if item.saved_search_matches[0].matched_criteria %}: {{ item.saved_search_matches[0].matched_criteria.values()|map('join', ', ')|join('; ') }}{% endif %}</dd></div>
                     <div><dt>Eligibility summary</dt><dd>{{ item.location_eligibility.summary }}</dd></div>
                     <div><dt>Source status</dt><dd>{{ item.job.source_posting_status|humanize }}</dd></div>
                     <div><dt>Observed</dt><dd>{{ item.observation.first_seen_at|datetime }}</dd></div>

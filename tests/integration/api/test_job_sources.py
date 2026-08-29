@@ -189,6 +189,25 @@ def test_job_source_crud_sync_and_ranked_discovery(client: TestClient) -> None:
     assert second_import.json()["jobs_unchanged"] == 2
     assert second_import.json()["evaluations_created"] == 0
 
+    search_response = client.post(
+        "/api/v1/job-searches",
+        json={
+            "name": "All imported roles",
+            "enabled": True,
+            "title_include_patterns": [],
+            "title_exclude_patterns": [],
+            "target_domains": [],
+            "target_seniority_levels": [],
+            "allowed_locations": [],
+            "allowed_remote_geographies": [],
+            "allowed_workplace_types": [],
+            "minimum_score_threshold": 0,
+        },
+    )
+    assert search_response.status_code == 201
+    search_run = client.post(f"/api/v1/job-searches/{search_response.json()['id']}/runs")
+    assert search_run.status_code == 201
+
     queue_response = client.get("/api/v1/discovered-leads")
     assert queue_response.status_code == 200
     leads = queue_response.json()
