@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from typing import Protocol
 from uuid import UUID
 
 from sqlalchemy import select, update
@@ -13,6 +14,7 @@ from ai_job_finder.application.job_searches import (
     get_job_search_definition,
     list_job_search_matches,
 )
+from ai_job_finder.application.job_searches.runs import JobSearchRunMatchRecord
 from ai_job_finder.domain.common import new_uuid, utc_now
 from ai_job_finder.domain.enums import Recommendation
 from ai_job_finder.domain.job_discovery import JobDiscoveryRunStatus
@@ -29,7 +31,21 @@ _ACTIONABLE_RECOMMENDATIONS = (
 )
 
 ScheduledDiscoveryRunner = Callable[[UUID], JobDiscoveryRunModel]
-InAppNotificationDelivery = Callable[[JobSearchActionableNotificationModel], None]
+
+
+@dataclass(frozen=True, slots=True)
+class ActionableMatchEmail:
+    recipient_address: str
+    subject: str
+    plain_text_body: str
+
+
+class EmailNotificationDelivery(Protocol):
+    def deliver(
+        self,
+        notification: JobSearchActionableNotificationModel,
+        email: ActionableMatchEmail,
+    ) -> None: ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -86,7 +102,9 @@ def run_due_scheduled_discoveries(
     session: Session,
     *,
     run_discovery: ScheduledDiscoveryRunner,
-    deliver_in_app_notification: InAppNotificationDelivery | None = None,
+    deliver_email_notification: EmailNotificationDelivery | None = None,
+    email_recipient_address: str | None = None,
+    public_application_base_url: str = "http://127.0.0.1:8000",
     now: datetime | None = None,
 ) -> list[ScheduledDiscoveryResult]:
     attempted_at = _as_utc(now or utc_now())
@@ -114,7 +132,9 @@ def run_due_scheduled_discoveries(
             notification_count = deliver_newly_actionable_notifications(
                 session,
                 search_run_id=run.saved_search_run_id,
-                deliver_in_app_notification=deliver_in_app_notification,
+                deliver_email_notification=deliver_email_notification,
+                email_recipient_address=email_recipient_address,
+                public_application_base_url=public_application_base_url,
             )
         results.append(
             ScheduledDiscoveryResult(
@@ -130,9 +150,18 @@ def deliver_newly_actionable_notifications(
     session: Session,
     *,
     search_run_id: UUID,
-    deliver_in_app_notification: InAppNotificationDelivery | None = None,
+    deliver_email_notification: EmailNotificationDelivery | None = None,
+    email_recipient_address: str | None = None,
+    public_application_base_url: str = "http://127.0.0.1:8000",
 ) -> int:
-    delivered_count = 0
+    if (
+        deliver_email_notification is None
+        or not email_recipient_address
+        or not email_recipient_address.strip()
+    ):
+        return 0
+
+    notification_count = 0
     for record in list_job_search_matches(session, search_run_id=search_run_id, matched_only=True):
         match = record.match
         if match.recommendation_at_match_time not in _ACTIONABLE_RECOMMENDATIONS:
@@ -142,7 +171,7 @@ def deliver_newly_actionable_notifications(
             search_definition_id=match.search_definition_id,
             job_lead_id=match.job_lead_id,
             job_search_match_id=match.id,
-            channel="in_app",
+            channel="email",
             delivery_status="pending",
         )
         session.add(notification)
@@ -152,13 +181,18 @@ def deliver_newly_actionable_notifications(
             session.rollback()
             continue
         session.refresh(notification)
-        _deliver_in_app_notification(
+        _deliver_email_notification(
             session,
             notification=notification,
-            delivery=deliver_in_app_notification,
+            email=_compose_actionable_match_email(
+                record,
+                recipient_address=email_recipient_address,
+                public_application_base_url=public_application_base_url,
+            ),
+            delivery=deliver_email_notification,
         )
-        delivered_count += 1
-    return delivered_count
+        notification_count += 1
+    return notification_count
 
 
 def list_actionable_notifications(
@@ -223,16 +257,16 @@ def _record_scheduled_completion(
     session.commit()
 
 
-def _deliver_in_app_notification(
+def _deliver_email_notification(
     session: Session,
     *,
     notification: JobSearchActionableNotificationModel,
-    delivery: InAppNotificationDelivery | None,
+    email: ActionableMatchEmail,
+    delivery: EmailNotificationDelivery,
 ) -> None:
     notification.attempted_at = utc_now()
     try:
-        if delivery is not None:
-            delivery(notification)
+        delivery.deliver(notification, email)
     except Exception as exc:
         notification.delivery_status = "failed"
         notification.failure_message = str(exc)[:1000]
@@ -243,6 +277,50 @@ def _deliver_in_app_notification(
         notification.sent_at = notification.attempted_at
     session.add(notification)
     session.commit()
+
+
+def _compose_actionable_match_email(
+    record: JobSearchRunMatchRecord,
+    *,
+    recipient_address: str,
+    public_application_base_url: str,
+) -> ActionableMatchEmail:
+    match_record = record
+    match = match_record.match
+    job = match_record.job_lead
+    score = (
+        f"{match.score_at_match_time:.1f}"
+        if match.score_at_match_time is not None
+        else "Not available"
+    )
+    recommendation = (match.recommendation_at_match_time or "Not available").replace("_", " ")
+    rationale = (
+        match_record.evaluation.explanation
+        if match_record.evaluation is not None
+        else str(match.decision_explanation.get("summary", "No rationale available."))
+    )
+    source_url = job.source_url or "Not available"
+    application_url = f"{public_application_base_url.rstrip('/')}/jobs/{job.id}"
+    body = "\n".join(
+        (
+            "A saved search found a new actionable job match.",
+            "",
+            f"Company: {job.company_name}",
+            f"Title: {job.title}",
+            f"Location: {job.location_text or 'Not available'}",
+            f"Compensation: {job.compensation_text or 'Not available'}",
+            f"Match score: {score}",
+            f"Recommendation: {recommendation}",
+            f"Rationale: {rationale[:500]}",
+            f"Source job: {source_url}",
+            f"Review in AI Job Finder: {application_url}",
+        )
+    )
+    return ActionableMatchEmail(
+        recipient_address=recipient_address,
+        subject=f"New job match: {job.company_name} - {job.title}",
+        plain_text_body=body,
+    )
 
 
 def _as_utc(value: datetime) -> datetime:

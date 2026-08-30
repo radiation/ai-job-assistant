@@ -106,4 +106,6 @@ Every manual run is persisted before evaluation begins. Historical runs remain. 
 
 One persisted match record exists per job lead per run. Matches retain score-at-run-time, matched criteria, exclusion reasons, inferred domain and seniority, and threshold outcome.
 
-An actionable canonical job may create one in-app alert per saved search. The alert is deduplicated by saved search and canonical job lead, rather than discovery run; therefore, an existing actionable job can alert once on the first scheduled run after scheduling is enabled if no prior alert exists.
+An actionable canonical job may create one email notification per saved search. The notification is committed before SMTP delivery is attempted and is deduplicated by saved search and canonical job lead, rather than discovery run; therefore, an existing actionable job can email once on the first scheduled run after scheduling is enabled if no prior notification exists.
+
+Disabled or incomplete email configuration creates no notification, leaving an actionable match eligible for a future configured send. Once SMTP delivery is attempted, confirmed delivery marks the durable notification `succeeded`; SMTP failures mark it `failed` with a bounded failure message. Failed notifications are not retried automatically and rediscovery does not create or send another notification. SMTP delivery is at-least-once at the external-system boundary: a process can fail after SMTP accepts a message but before PostgreSQL records success, so exactly-once email delivery is not claimed.

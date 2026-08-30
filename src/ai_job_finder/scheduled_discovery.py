@@ -13,11 +13,13 @@ from ai_job_finder.application.job_discovery import (
 )
 from ai_job_finder.application.source_detection import SourceDetectionConfig
 from ai_job_finder.infrastructure.database.session import get_db_session
+from ai_job_finder.infrastructure.notifications import smtp_email_notification_delivery
 from ai_job_finder.settings import get_settings
 
 
 def main() -> int:
     settings = get_settings()
+    email_delivery = smtp_email_notification_delivery(settings)
     provider = job_discovery_provider_dependency(settings)
     fetcher = public_page_fetcher_dependency(settings)
     board_validator = job_source_board_validator_dependency(settings)
@@ -48,6 +50,9 @@ def main() -> int:
                 connector=connector,
                 config=config,
             ),
+            deliver_email_notification=email_delivery,
+            email_recipient_address=settings.email_alert_recipient,
+            public_application_base_url=settings.public_application_base_url,
         )
     print(f"Scheduled discovery completed for {len(results)} saved search(es).")
     return 0

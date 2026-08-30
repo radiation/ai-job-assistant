@@ -2,8 +2,9 @@ from __future__ import annotations
 
 from functools import lru_cache
 from pathlib import Path
+from typing import Literal
 
-from pydantic import field_validator
+from pydantic import SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from sqlalchemy.engine import URL
 
@@ -104,6 +105,16 @@ class Settings(BaseSettings):
     job_discovery_transient_retry_count: int = 1
     job_discovery_brave_api_base_url: str = "https://api.search.brave.com/res/v1/web/search"
     job_discovery_brave_api_key: str | None = None
+    email_alerts_enabled: bool = False
+    smtp_host: str | None = None
+    smtp_port: int = 587
+    smtp_tls_mode: Literal["starttls", "implicit", "none"] = "starttls"
+    smtp_username: str | None = None
+    smtp_password: SecretStr | None = None
+    email_alert_sender: str | None = None
+    email_alert_recipient: str | None = None
+    public_application_base_url: str = "http://127.0.0.1:8000"
+    smtp_timeout_seconds: float = 10.0
 
     @field_validator("job_discovery_fake_fixture_path", mode="before")
     @classmethod

@@ -13,6 +13,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
 from ai_job_finder.application.job_discovery import (
+    ActionableMatchEmail,
     JobDiscoveryConfig,
     configure_scheduled_discovery,
     deliver_newly_actionable_notifications,
@@ -70,6 +71,7 @@ from ai_job_finder.infrastructure.database.models import (
     JobSearchActionableNotificationModel,
     JobSearchDefinitionModel,
     JobSearchMatchModel,
+    JobSearchRunModel,
     JobSourceConfigurationModel,
 )
 from ai_job_finder.infrastructure.database.session import create_engine_from_url
@@ -2535,12 +2537,37 @@ def test_scheduled_discovery_delivers_new_actionable_matches_once(
                 config=_config(),
             )
 
-        first_results = run_due_scheduled_discoveries(session, now=now, run_discovery=runner)
+        sent_emails: list[ActionableMatchEmail] = []
+
+        class CapturingEmailDelivery:
+            def deliver(
+                self,
+                notification: JobSearchActionableNotificationModel,
+                email: ActionableMatchEmail,
+            ) -> None:
+                sent_emails.append(email)
+
+        first_results = run_due_scheduled_discoveries(
+            session,
+            now=now,
+            run_discovery=runner,
+            deliver_email_notification=CapturingEmailDelivery(),
+            email_recipient_address="alerts@example.test",
+            public_application_base_url="https://jobs.example.test",
+        )
         notifications = list(session.scalars(select(JobSearchActionableNotificationModel)))
 
         assert first_results[0].notification_count == 2
         assert len(notifications) == 2
         assert {notification.delivery_status for notification in notifications} == {"succeeded"}
+        assert {notification.channel for notification in notifications} == {"email"}
+        assert len(sent_emails) == 2
+        assert all(email.recipient_address == "alerts@example.test" for email in sent_emails)
+        assert all("Company: Acme" in email.plain_text_body for email in sent_emails)
+        assert all("Match score:" in email.plain_text_body for email in sent_emails)
+        assert all(
+            "https://jobs.example.test/jobs/" in email.plain_text_body for email in sent_emails
+        )
         repeated_run = session.get(JobDiscoveryRunModel, first_results[0].discovery_run_id)
         assert repeated_run is not None
         repeated_results = run_due_scheduled_discoveries(
@@ -2564,12 +2591,20 @@ def test_scheduled_discovery_delivers_new_actionable_matches_once(
             minimum_score_threshold=70,
         )
         alternate_run = run_job_search(session, search_definition_id=alternate_search.id)
+
+        class FailingEmailDelivery:
+            def deliver(
+                self,
+                notification: JobSearchActionableNotificationModel,
+                email: ActionableMatchEmail,
+            ) -> None:
+                raise RuntimeError("delivery down")
+
         failure_count = deliver_newly_actionable_notifications(
             session,
             search_run_id=alternate_run.id,
-            deliver_in_app_notification=lambda _: (_ for _ in ()).throw(
-                RuntimeError("delivery down")
-            ),
+            deliver_email_notification=FailingEmailDelivery(),
+            email_recipient_address="alerts@example.test",
         )
         failed_notifications = list(
             session.scalars(
@@ -2605,3 +2640,138 @@ def test_scheduled_discovery_delivers_new_actionable_matches_once(
             )
             == 2
         )
+
+
+def test_actionable_notification_without_email_delivery_remains_eligible(
+    session_factory: sessionmaker[Session],
+) -> None:
+    with session_factory() as session:
+        _seed_candidate(session)
+        search_id = _search(session)
+        job = JobLeadModel(
+            id=new_uuid(),
+            source="manual",
+            source_url="https://example.test/jobs/1",
+            external_id=None,
+            company_name="Acme",
+            title="Director, Platform Engineering",
+            location_text="Remote United States",
+            workplace_type="remote",
+            description_raw="Lead platform engineering.",
+            description_normalized="Lead platform engineering.",
+            compensation_text=None,
+        )
+        run = JobSearchRunModel(
+            id=new_uuid(),
+            search_definition_id=search_id,
+            status="completed",
+            completed_at=utc_now(),
+        )
+        session.add_all(
+            [
+                job,
+                run,
+                JobSearchMatchModel(
+                    id=new_uuid(),
+                    search_definition_id=search_id,
+                    search_run_id=run.id,
+                    job_lead_id=job.id,
+                    job_evaluation_id=None,
+                    recommendation_at_match_time="recommend",
+                    score_at_match_time=90.0,
+                    matched=True,
+                ),
+            ]
+        )
+        session.commit()
+
+        unavailable_count = deliver_newly_actionable_notifications(session, search_run_id=run.id)
+
+        sent_emails: list[ActionableMatchEmail] = []
+
+        class CapturingEmailDelivery:
+            def deliver(
+                self,
+                notification: JobSearchActionableNotificationModel,
+                email: ActionableMatchEmail,
+            ) -> None:
+                sent_emails.append(email)
+
+        available_count = deliver_newly_actionable_notifications(
+            session,
+            search_run_id=run.id,
+            deliver_email_notification=CapturingEmailDelivery(),
+            email_recipient_address="alerts@example.test",
+        )
+        notification = session.scalar(select(JobSearchActionableNotificationModel))
+
+        assert unavailable_count == 0
+        assert available_count == 1
+        assert notification is not None
+        assert notification.channel == "email"
+        assert notification.delivery_status == "succeeded"
+        assert notification.sent_at is not None
+        assert notification.failure_message is None
+        assert len(sent_emails) == 1
+
+
+def test_actionable_notification_with_blank_recipient_remains_eligible(
+    session_factory: sessionmaker[Session],
+) -> None:
+    with session_factory() as session:
+        _seed_candidate(session)
+        search_id = _search(session)
+        job = JobLeadModel(
+            id=new_uuid(),
+            source="manual",
+            source_url="https://example.test/jobs/1",
+            external_id=None,
+            company_name="Acme",
+            title="Director, Platform Engineering",
+            location_text="Remote United States",
+            workplace_type="remote",
+            description_raw="Lead platform engineering.",
+            description_normalized="Lead platform engineering.",
+            compensation_text=None,
+        )
+        run = JobSearchRunModel(
+            id=new_uuid(),
+            search_definition_id=search_id,
+            status="completed",
+            completed_at=utc_now(),
+        )
+        session.add_all(
+            [
+                job,
+                run,
+                JobSearchMatchModel(
+                    id=new_uuid(),
+                    search_definition_id=search_id,
+                    search_run_id=run.id,
+                    job_lead_id=job.id,
+                    job_evaluation_id=None,
+                    recommendation_at_match_time="recommend",
+                    score_at_match_time=90.0,
+                    matched=True,
+                ),
+            ]
+        )
+        session.commit()
+
+        class CapturingEmailDelivery:
+            def deliver(
+                self,
+                notification: JobSearchActionableNotificationModel,
+                email: ActionableMatchEmail,
+            ) -> None:
+                raise AssertionError("Delivery must not be called without a recipient.")
+
+        count = deliver_newly_actionable_notifications(
+            session,
+            search_run_id=run.id,
+            deliver_email_notification=CapturingEmailDelivery(),
+            email_recipient_address="   ",
+        )
+
+        assert count == 0
+        assert session.scalar(select(JobSearchActionableNotificationModel)) is None
