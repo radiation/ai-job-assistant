@@ -175,3 +175,15 @@ class InvalidJobDiscoveryUrlError(DomainError):
 
 class JobDiscoveryQueryGenerationError(DomainError):
     code = "job_discovery_query_generation_failed"
+
+
+class AuthenticationRequiredError(DomainError):
+    code = "authentication_required"
+
+
+class CsrfValidationError(DomainError):
+    code = "csrf_validation_failed"
+
+
+class IdentityProviderUnavailableError(DomainError):
+    code = "identity_provider_unavailable"

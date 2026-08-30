@@ -41,7 +41,6 @@ services:
       - ./src:/app/src
       - ./alembic:/app/alembic
       - ./alembic.ini:/app/alembic.ini:ro
-      - app-venv:/app/.venv
     command: ["/app/.venv/bin/alembic", "upgrade", "head"]
     restart: "no"
 
@@ -90,6 +89,13 @@ services:
       JOB_DISCOVERY_BRAVE_API_KEY: ${JOB_DISCOVERY_BRAVE_API_KEY:-}
       JOB_DISCOVERY_MAX_QUERIES_PER_RUN: ${JOB_DISCOVERY_MAX_QUERIES_PER_RUN:-12}
       JOB_DISCOVERY_MAX_TOTAL_CANDIDATES: ${JOB_DISCOVERY_MAX_TOTAL_CANDIDATES:-60}
+      IDENTITY_PLATFORM_PROJECT_ID: ${IDENTITY_PLATFORM_PROJECT_ID:-}
+      IDENTITY_PLATFORM_TENANT_ID: ${IDENTITY_PLATFORM_TENANT_ID:-}
+      FIREBASE_WEB_API_KEY: ${FIREBASE_WEB_API_KEY:-}
+      FIREBASE_WEB_AUTH_DOMAIN: ${FIREBASE_WEB_AUTH_DOMAIN:-}
+      FIREBASE_WEB_APP_ID: ${FIREBASE_WEB_APP_ID:-}
+      AUTH_COOKIE_SECURE: ${AUTH_COOKIE_SECURE:-false}
+      CSRF_COOKIE_SECURE: ${CSRF_COOKIE_SECURE:-false}
     ports:
       - "8000:8000"
     volumes:
@@ -97,7 +103,6 @@ services:
       - ./alembic:/app/alembic
       - ./alembic.ini:/app/alembic.ini:ro
       - ~/.config/gcloud:/root/.config/gcloud:ro
-      - app-venv:/app/.venv
       - document-storage:/app/.local/document-storage
     command:
       [
@@ -114,5 +119,4 @@ services:
 
 volumes:
   postgres-data:
-  app-venv:
   document-storage:

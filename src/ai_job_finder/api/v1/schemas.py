@@ -38,6 +38,20 @@ from ai_job_finder.domain.job_searches import (
 )
 
 
+class AuthSessionCreateRequest(BaseModel):
+    id_token: str = Field(min_length=1)
+
+
+class CurrentUserResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    identity_provider: str
+    external_subject: str
+    created_at: datetime
+    updated_at: datetime
+
+
 class CandidateProfileCreateRequest(BaseModel):
     full_name: str = Field(min_length=1, max_length=200)
     preferred_locations: list[str] = Field(default_factory=list)

@@ -115,6 +115,17 @@ class Settings(BaseSettings):
     email_alert_recipient: str | None = None
     public_application_base_url: str = "http://127.0.0.1:8000"
     smtp_timeout_seconds: float = 10.0
+    identity_platform_project_id: str | None = None
+    identity_platform_tenant_id: str | None = None
+    firebase_web_api_key: str | None = None
+    firebase_web_auth_domain: str | None = None
+    firebase_web_app_id: str | None = None
+    auth_session_cookie_name: str = "ai_job_finder_session"
+    auth_session_duration_seconds: int = 60 * 60 * 24 * 5
+    auth_recent_authentication_max_age_seconds: int = 5 * 60
+    auth_cookie_secure: bool = True
+    csrf_cookie_name: str = "ai_job_finder_csrf"
+    csrf_cookie_secure: bool = True
 
     @field_validator("job_discovery_fake_fixture_path", mode="before")
     @classmethod

@@ -126,6 +126,10 @@ button,
   max-width: 760px;
 }
 
+.sign-in-panel {
+  margin: 5rem auto;
+}
+
 .flash-stack {
   display: grid;
   gap: 0.75rem;

@@ -9,6 +9,7 @@ import pytest
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
 
+from ai_job_finder.application.authentication import AuthenticatedIdentity, resolve_or_create_user
 from ai_job_finder.application.job_discovery.scheduling import _claim_scheduled_discovery
 from ai_job_finder.application.job_searches import create_job_search_definition
 from ai_job_finder.application.job_sources import (
@@ -51,6 +52,7 @@ from ai_job_finder.infrastructure.database.models import (
     JobSearchRunModel,
     JobSourceConfigurationModel,
     JobSourceObservationModel,
+    UserModel,
 )
 from ai_job_finder.infrastructure.job_sources.fake import FakeJobSourceConnector
 
@@ -168,6 +170,55 @@ def test_candidate_single_active_constraint(session_factory: sessionmaker[Sessio
         with pytest.raises(IntegrityError):
             session.commit()
         session.rollback()
+        session.add(UserModel(id=new_uuid(), identity_provider="", external_subject="subject-2"))
+        with pytest.raises(IntegrityError):
+            session.commit()
+        session.rollback()
+
+
+def test_user_identity_uniqueness_and_nonblank_constraints(
+    session_factory: sessionmaker[Session],
+) -> None:
+    with session_factory() as session:
+        session.add(
+            UserModel(
+                id=new_uuid(),
+                identity_provider="google_identity_platform",
+                external_subject="subject-1",
+            )
+        )
+        session.commit()
+        session.add(
+            UserModel(
+                id=new_uuid(),
+                identity_provider="google_identity_platform",
+                external_subject="subject-1",
+            )
+        )
+        with pytest.raises(IntegrityError):
+            session.commit()
+        session.rollback()
+
+
+def test_concurrent_user_provisioning_reuses_the_unique_identity(
+    session_factory: sessionmaker[Session],
+) -> None:
+    with session_factory() as session:
+        if session.get_bind().dialect.name != "postgresql":
+            pytest.skip("Requires PostgreSQL concurrent transaction semantics.")
+
+    barrier = Barrier(2)
+    identity = AuthenticatedIdentity("google_identity_platform", "concurrent-subject")
+
+    def provision_in_separate_session() -> UUID:
+        with session_factory() as session:
+            barrier.wait()
+            return resolve_or_create_user(session, identity=identity).id
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        user_ids = list(executor.map(lambda _: provision_in_separate_session(), range(2)))
+
+    assert user_ids[0] == user_ids[1]
 
 
 def test_foreign_key_behavior_on_missing_candidate(session_factory: sessionmaker[Session]) -> None:

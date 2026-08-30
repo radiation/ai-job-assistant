@@ -1,16 +1,24 @@
 from __future__ import annotations
 
 from collections.abc import Iterator
+from datetime import timedelta
 from typing import Annotated
 
-from fastapi import Depends
+from fastapi import Depends, Request
 from sqlalchemy.orm import Session
 
+from ai_job_finder.application.authentication import (
+    IdentitySessionError,
+    IdentitySessionProvider,
+    get_user_by_identity,
+)
 from ai_job_finder.application.extraction import CareerFactExtractor
 from ai_job_finder.application.job_discovery.ports import JobDiscoveryProvider
 from ai_job_finder.domain.enums import JobSourceProvider
 from ai_job_finder.domain.errors import (
+    AuthenticationRequiredError,
     ExtractionProviderUnavailableError,
+    IdentityProviderUnavailableError,
     JobDiscoveryProviderUnavailableError,
 )
 from ai_job_finder.domain.job_sources import JobSourceConnector
@@ -18,6 +26,10 @@ from ai_job_finder.domain.source_detection import (
     JobSourceBoardValidator,
     PublicPageFetcher,
 )
+from ai_job_finder.infrastructure.authentication.identity_platform import (
+    FirebaseIdentityPlatformSessionProvider,
+)
+from ai_job_finder.infrastructure.database.models import UserModel
 from ai_job_finder.infrastructure.database.session import get_db_session
 from ai_job_finder.infrastructure.job_discovery import (
     BraveSearchJobDiscoveryProvider,
@@ -48,6 +60,42 @@ def db_session_dependency() -> Iterator[Session]:
 
 def settings_dependency() -> Settings:
     return get_settings()
+
+
+def identity_session_provider_dependency(
+    settings: Annotated[Settings, Depends(settings_dependency)],
+) -> IdentitySessionProvider:
+    if not settings.identity_platform_project_id:
+        raise IdentityProviderUnavailableError("Identity Platform project ID is not configured.")
+    return FirebaseIdentityPlatformSessionProvider(
+        project_id=settings.identity_platform_project_id,
+        tenant_id=settings.identity_platform_tenant_id,
+        recent_authentication_max_age=timedelta(
+            seconds=settings.auth_recent_authentication_max_age_seconds
+        ),
+    )
+
+
+def current_user_dependency(
+    request: Request,
+    session: Annotated[Session, Depends(db_session_dependency)],
+    identity_session_provider: Annotated[
+        IdentitySessionProvider, Depends(identity_session_provider_dependency)
+    ],
+    settings: Annotated[Settings, Depends(settings_dependency)],
+) -> UserModel:
+    session_cookie = request.cookies.get(settings.auth_session_cookie_name)
+    if not session_cookie:
+        raise AuthenticationRequiredError("Authentication is required.")
+    try:
+        identity = identity_session_provider.verify_session(session_cookie)
+    except IdentitySessionError as exc:
+        raise AuthenticationRequiredError("Authentication is required.") from exc
+    user = get_user_by_identity(session, identity=identity)
+    if user is None:
+        raise AuthenticationRequiredError("Authentication is required.")
+    request.state.current_user = user
+    return user
 
 
 def document_storage_dependency(

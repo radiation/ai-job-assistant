@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterator
+from datetime import timedelta
 from typing import Any, cast
 from uuid import UUID
 
@@ -13,8 +14,10 @@ from ai_job_finder.api.dependencies import (
     career_fact_extractor_dependency,
     db_session_dependency,
     document_storage_dependency,
+    identity_session_provider_dependency,
     settings_dependency,
 )
+from ai_job_finder.application.authentication import AuthenticatedIdentity, resolve_or_create_user
 from ai_job_finder.application.documents import (
     extract_document_text,
     start_extraction_run,
@@ -38,6 +41,7 @@ from ai_job_finder.domain.enums import (
     EvidenceTag,
     ProvenanceType,
 )
+from ai_job_finder.infrastructure.authentication.fake import FakeIdentitySessionProvider
 from ai_job_finder.infrastructure.database.base import Base
 from ai_job_finder.infrastructure.database.models import (
     CareerFactModel,
@@ -141,6 +145,12 @@ def _document_client(
     raise_server_exceptions: bool = True,
 ) -> TestClient:
     app = create_app()
+    fake_identity_provider = FakeIdentitySessionProvider(
+        {"test-id-token": AuthenticatedIdentity("google_identity_platform", "test-user")}
+    )
+    established_session = fake_identity_provider.establish_session(
+        "test-id-token", max_age=timedelta(days=1)
+    )
     storage = InMemoryDocumentStorage()
     settings_kwargs: dict[str, Any] = {
         "database_url": "sqlite+pysqlite:///:memory:",
@@ -159,12 +169,23 @@ def _document_client(
     app.dependency_overrides[db_session_dependency] = override_db
     app.dependency_overrides[document_storage_dependency] = lambda: storage
     app.dependency_overrides[settings_dependency] = lambda: settings
+    app.dependency_overrides[identity_session_provider_dependency] = lambda: fake_identity_provider
     app.dependency_overrides[career_fact_extractor_dependency] = (
         (lambda: extractor) if extractor is not None else (lambda: FakeCareerFactExtractor())
     )
     if not extraction_enabled:
         app.dependency_overrides.pop(career_fact_extractor_dependency)
-    return TestClient(app, raise_server_exceptions=raise_server_exceptions)
+    with session_factory() as session:
+        resolve_or_create_user(session, identity=established_session.identity)
+    client = TestClient(
+        app,
+        base_url="https://testserver",
+        raise_server_exceptions=raise_server_exceptions,
+    )
+    client.cookies.set("ai_job_finder_session", established_session.session_cookie)
+    client.cookies.set("ai_job_finder_csrf", "test-csrf-token")
+    client.headers["X-CSRF-Token"] = "test-csrf-token"
+    return client
 
 
 def _create_candidate(client: TestClient) -> str:

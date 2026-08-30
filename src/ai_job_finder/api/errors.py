@@ -2,10 +2,10 @@ from __future__ import annotations
 
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import JSONResponse, Response
+from fastapi.responses import JSONResponse, RedirectResponse, Response
 from sqlalchemy.exc import IntegrityError
 
-from ai_job_finder.domain.errors import DomainError
+from ai_job_finder.domain.errors import AuthenticationRequiredError, DomainError
 from ai_job_finder.web.dependencies import render_template
 
 
@@ -16,7 +16,12 @@ def _is_api_request(request: Request) -> bool:
 def install_error_handlers(app: FastAPI) -> None:
     @app.exception_handler(DomainError)
     async def handle_domain_error(request: Request, exc: DomainError) -> Response:
+        if isinstance(exc, AuthenticationRequiredError) and not _is_api_request(request):
+            return RedirectResponse(url="/sign-in", status_code=303)
         status_code_by_code = {
+            "authentication_required": 401,
+            "csrf_validation_failed": 403,
+            "identity_provider_unavailable": 503,
             "not_found": 404,
             "unsupported_document_type": 415,
             "document_too_large": 413,
