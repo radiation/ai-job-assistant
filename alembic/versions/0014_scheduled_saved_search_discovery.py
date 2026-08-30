@@ -1,7 +1,7 @@
 """add scheduled saved-search discovery and actionable notification state
 
 Revision ID: 0014_scheduled_discovery
-Revises: 0013_career_fact_prose
+Revises: 0013_career_fact_prose_text
 Create Date: 2026-08-29 00:00:00.000000
 
 """

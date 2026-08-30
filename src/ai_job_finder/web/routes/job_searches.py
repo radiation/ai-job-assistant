@@ -419,7 +419,7 @@ async def job_searches_update_discovery_schedule(
         session,
         search_definition_id=search_definition_id,
         enabled=str(form.get("enabled", "false")).casefold() == "true",
-        cadence=str(form.get("cadence", DAILY_DISCOVERY_CADENCE)),
+        cadence=DAILY_DISCOVERY_CADENCE,
     )
     return RedirectResponse(
         url=f"/job-searches/{search_definition_id}",

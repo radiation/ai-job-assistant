@@ -140,6 +140,23 @@ def test_saved_search_detail_configures_and_displays_daily_discovery_schedule(
     assert "Stop daily discovery" in detail_response.text
 
 
+def test_saved_search_schedule_ignores_crafted_cadence_value(client: TestClient) -> None:
+    create_response = client.post(
+        "/job-searches",
+        data=_saved_search_form_data(),
+        follow_redirects=False,
+    )
+    assert create_response.status_code == 303
+
+    schedule_response = client.post(
+        f"{create_response.headers['location']}/discovery-schedule",
+        data={"enabled": "true", "cadence": "hourly"},
+        follow_redirects=False,
+    )
+
+    assert schedule_response.status_code == 303
+
+
 def test_saved_search_creation_with_rendered_canonical_values_succeeds(
     client: TestClient,
     session_factory: sessionmaker[Session],

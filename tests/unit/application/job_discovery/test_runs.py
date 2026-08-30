@@ -68,6 +68,7 @@ from ai_job_finder.infrastructure.database.models import (
     JobEvaluationModel,
     JobLeadModel,
     JobSearchActionableNotificationModel,
+    JobSearchDefinitionModel,
     JobSearchMatchModel,
     JobSourceConfigurationModel,
 )
@@ -2375,6 +2376,63 @@ def test_scheduled_discovery_failure_leaves_schedule_recoverable(
         assert _as_utc_timestamp(search.last_scheduled_discovery_attempted_at) == now
         assert search.last_scheduled_discovery_completed_at is None
         assert _as_utc_timestamp(search.next_scheduled_discovery_at) == now + timedelta(days=1)
+
+
+def test_scheduled_discovery_rolls_back_failed_session_before_next_search(
+    session_factory: sessionmaker[Session],
+) -> None:
+    now = datetime(2026, 8, 29, tzinfo=UTC)
+    with session_factory() as session:
+        first_search_id = _search(session)
+        second_search_id = create_job_search_definition(
+            session,
+            name="Second scheduled roles",
+            title_include_patterns=[],
+            title_exclude_patterns=[],
+            target_domains=[],
+            target_seniority_levels=[],
+            allowed_locations=[],
+            allowed_remote_geographies=[],
+            allowed_workplace_types=[],
+            minimum_score_threshold=0,
+        ).id
+        for search_id in (first_search_id, second_search_id):
+            configure_scheduled_discovery(
+                session,
+                search_definition_id=search_id,
+                enabled=True,
+                cadence="daily",
+                now=now,
+            )
+        calls: list[UUID] = []
+
+        def runner(search_id: UUID) -> JobDiscoveryRunModel:
+            calls.append(search_id)
+            if len(calls) == 1:
+                session.add(
+                    JobSearchDefinitionModel(
+                        id=new_uuid(),
+                        name="Platform roles",
+                        enabled=True,
+                        title_include_patterns=[],
+                        title_exclude_patterns=[],
+                        target_domains=[],
+                        target_seniority_levels=[],
+                        allowed_locations=[],
+                        allowed_remote_geographies=[],
+                        allowed_workplace_types=[],
+                        minimum_score_threshold=0,
+                    )
+                )
+                session.flush()
+            return _completed_scheduled_run(session, search_id, [], now)
+
+        results = run_due_scheduled_discoveries(session, now=now, run_discovery=runner)
+
+        assert len(calls) == 2
+        assert [result.search_definition_id for result in results] == [calls[1]]
+        completed_search = get_job_search_definition(session, calls[1])
+        assert _as_utc_timestamp(completed_search.last_scheduled_discovery_completed_at) == now
 
 
 def _completed_scheduled_run(

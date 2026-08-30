@@ -78,7 +78,9 @@ class JobSearchDefinitionModel(Base):
     scheduled_discovery_enabled: Mapped[bool] = mapped_column(
         Boolean, default=False, nullable=False
     )
-    scheduled_discovery_cadence: Mapped[str] = mapped_column(String(30), default="daily")
+    scheduled_discovery_cadence: Mapped[str] = mapped_column(
+        String(30), default="daily", nullable=False
+    )
     next_scheduled_discovery_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     last_scheduled_discovery_attempted_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True)
@@ -259,7 +261,7 @@ class JobSearchActionableNotificationModel(Base):
         ForeignKey("job_search_matches.id", ondelete="CASCADE")
     )
     channel: Mapped[str] = mapped_column(String(30), default="in_app")
-    delivery_status: Mapped[str] = mapped_column(String(30), default="pending")
+    delivery_status: Mapped[str] = mapped_column(String(30), default="pending", nullable=False)
     attempted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     failure_message: Mapped[str | None] = mapped_column(Text)

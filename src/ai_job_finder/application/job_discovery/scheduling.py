@@ -101,6 +101,7 @@ def run_due_scheduled_discoveries(
         try:
             run = run_discovery(due_search.id)
         except Exception:
+            session.rollback()
             continue
 
         _record_scheduled_completion(
