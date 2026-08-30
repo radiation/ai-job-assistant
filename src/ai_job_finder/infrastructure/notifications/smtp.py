@@ -73,22 +73,33 @@ class SmtpEmailNotificationDelivery(EmailNotificationDelivery):
 
 
 def smtp_email_notification_delivery(settings: Settings) -> SmtpEmailNotificationDelivery | None:
-    password = settings.smtp_password.get_secret_value() if settings.smtp_password else None
-    has_credentials = (settings.smtp_username is None) == (password is None)
+    host = _normalized_optional_value(settings.smtp_host)
+    sender_address = _normalized_optional_value(settings.email_alert_sender)
+    recipient_address = _normalized_optional_value(settings.email_alert_recipient)
+    username = _normalized_optional_value(settings.smtp_username)
+    password = _normalized_optional_value(
+        settings.smtp_password.get_secret_value() if settings.smtp_password else None
+    )
+    has_credentials = (username is None) == (password is None)
     if (
         not settings.email_alerts_enabled
-        or settings.smtp_host is None
-        or settings.email_alert_sender is None
-        or settings.email_alert_recipient is None
+        or host is None
+        or sender_address is None
+        or recipient_address is None
         or not has_credentials
     ):
         return None
     return SmtpEmailNotificationDelivery(
-        host=settings.smtp_host,
+        host=host,
         port=settings.smtp_port,
         tls_mode=settings.smtp_tls_mode,
-        username=settings.smtp_username,
+        username=username,
         password=password,
-        sender_address=settings.email_alert_sender,
+        sender_address=sender_address,
         timeout_seconds=settings.smtp_timeout_seconds,
     )
+
+
+def _normalized_optional_value(value: str | None) -> str | None:
+    normalized = value.strip() if value is not None else ""
+    return normalized or None

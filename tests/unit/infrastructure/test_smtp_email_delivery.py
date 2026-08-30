@@ -5,6 +5,7 @@ from types import SimpleNamespace
 from typing import cast
 
 import pytest
+from pydantic import SecretStr
 
 from ai_job_finder.application.job_discovery import ActionableMatchEmail
 from ai_job_finder.infrastructure.database.models import JobSearchActionableNotificationModel
@@ -88,3 +89,45 @@ def test_smtp_delivery_factory_requires_enabled_complete_configuration() -> None
         )
         is not None
     )
+
+
+@pytest.mark.parametrize(
+    "settings_kwargs",
+    [
+        {"smtp_host": "  "},
+        {"email_alert_sender": "  "},
+        {"email_alert_recipient": "  "},
+        {"smtp_username": "  ", "smtp_password": SecretStr("password")},
+        {"smtp_username": "mailer", "smtp_password": SecretStr("  ")},
+    ],
+)
+def test_smtp_delivery_factory_treats_blank_configuration_as_missing(
+    settings_kwargs: dict[str, str | SecretStr],
+) -> None:
+    settings = Settings(
+        email_alerts_enabled=True,
+        smtp_host="smtp.example.test",
+        email_alert_sender="sender@example.test",
+        email_alert_recipient="alerts@example.test",
+    ).model_copy(update=settings_kwargs)
+
+    assert smtp_email_notification_delivery(settings) is None
+
+
+def test_smtp_delivery_factory_normalizes_nonblank_configuration() -> None:
+    delivery = smtp_email_notification_delivery(
+        Settings(
+            email_alerts_enabled=True,
+            smtp_host=" smtp.example.test ",
+            smtp_username=" mailer ",
+            smtp_password=SecretStr(" password "),
+            email_alert_sender=" sender@example.test ",
+            email_alert_recipient=" alerts@example.test ",
+        )
+    )
+
+    assert delivery is not None
+    assert delivery.host == "smtp.example.test"
+    assert delivery.username == "mailer"
+    assert delivery.password == "password"
+    assert delivery.sender_address == "sender@example.test"
