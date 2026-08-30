@@ -33,6 +33,7 @@ from ai_job_finder.infrastructure.database.models.jobs import (
     JobEvaluationModel,
     JobLeadModel,
 )
+from ai_job_finder.infrastructure.database.models.users import UserModel
 
 __all__ = [
     "CandidateProfileModel",
@@ -53,6 +54,7 @@ __all__ = [
     "JobSourceObservationModel",
     "SourceDetectionRunModel",
     "SourceDocumentModel",
+    "UserModel",
     "serialize_model",
 ]
 

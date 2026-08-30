@@ -40,7 +40,7 @@ gcloud run deploy "$SERVICE" \
   --region="$REGION" \
   --service-account="$RUNTIME_SA" \
   --set-cloudsql-instances="$CLOUD_SQL" \
-  --set-env-vars="DB_USER=job_finder_app,DB_NAME=job_finder,INSTANCE_UNIX_SOCKET=/cloudsql/${CLOUD_SQL},ENABLE_DEV_RESET_API=false" \
+  --set-env-vars="DB_USER=job_finder_app,DB_NAME=job_finder,INSTANCE_UNIX_SOCKET=/cloudsql/${CLOUD_SQL},ENABLE_DEV_RESET_API=false,IDENTITY_PLATFORM_PROJECT_ID=${PROJECT},IDENTITY_PLATFORM_TENANT_ID=${IDENTITY_PLATFORM_TENANT_ID:-},FIREBASE_WEB_API_KEY=${FIREBASE_WEB_API_KEY:?Set FIREBASE_WEB_API_KEY},FIREBASE_WEB_AUTH_DOMAIN=${FIREBASE_WEB_AUTH_DOMAIN:?Set FIREBASE_WEB_AUTH_DOMAIN},FIREBASE_WEB_APP_ID=${FIREBASE_WEB_APP_ID:?Set FIREBASE_WEB_APP_ID},AUTH_COOKIE_SECURE=true,CSRF_COOKIE_SECURE=true" \
   --set-secrets="DB_PASSWORD=job-finder-db-password:latest" \
   --allow-unauthenticated \
   --min=0 \

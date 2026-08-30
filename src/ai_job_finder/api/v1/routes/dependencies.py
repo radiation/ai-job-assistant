@@ -7,14 +7,17 @@ from sqlalchemy.orm import Session
 
 from ai_job_finder.api.dependencies import (
     career_fact_extractor_dependency,
+    current_user_dependency,
     db_session_dependency,
     document_storage_dependency,
+    identity_session_provider_dependency,
     job_discovery_provider_dependency,
     job_source_board_validator_dependency,
     job_source_connector_dependency,
     public_page_fetcher_dependency,
     settings_dependency,
 )
+from ai_job_finder.application.authentication import IdentitySessionProvider
 from ai_job_finder.application.extraction import CareerFactExtractor
 from ai_job_finder.application.job_discovery.ports import JobDiscoveryProvider
 from ai_job_finder.domain.job_sources import JobSourceConnector
@@ -22,10 +25,15 @@ from ai_job_finder.domain.source_detection import (
     JobSourceBoardValidator,
     PublicPageFetcher,
 )
+from ai_job_finder.infrastructure.database.models import UserModel
 from ai_job_finder.infrastructure.storage import DocumentStorage
 from ai_job_finder.settings import Settings
 
 DbSession = Annotated[Session, Depends(db_session_dependency)]
+CurrentUser = Annotated[UserModel, Depends(current_user_dependency)]
+IdentitySessionProviderDependency = Annotated[
+    IdentitySessionProvider, Depends(identity_session_provider_dependency)
+]
 DocumentStorageDependency = Annotated[DocumentStorage, Depends(document_storage_dependency)]
 SettingsDependency = Annotated[Settings, Depends(settings_dependency)]
 ExtractorDependency = Annotated[CareerFactExtractor, Depends(career_fact_extractor_dependency)]

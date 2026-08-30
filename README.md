@@ -115,6 +115,29 @@ The main manual workflow is:
 
 HTMX is used only for job status updates, evaluation refresh on the detail page, and career-fact lifecycle actions. Normal navigation and form submission still render correctly without HTMX.
 
+## Authentication Setup
+
+The application exchanges a Firebase/Identity Platform ID token for an HttpOnly server session cookie. The Firebase Web SDK uses `Persistence.NONE` before Google sign-in, then signs out after the session cookie is established; Firebase client authentication is not used as a durable browser session.
+
+Configure Identity Platform Google sign-in and authorized domains, then provide the following runtime values:
+
+```bash
+IDENTITY_PLATFORM_PROJECT_ID=your-gcp-project
+FIREBASE_WEB_API_KEY=your-browser-api-key
+FIREBASE_WEB_AUTH_DOMAIN=your-gcp-project.firebaseapp.com
+FIREBASE_WEB_APP_ID=your-firebase-web-app-id
+```
+
+Set `IDENTITY_PLATFORM_TENANT_ID` only when using an Identity Platform tenant. Cloud Run uses Application Default Credentials through its configured runtime service account. Creating a session cookie requires the Identity Platform permission `firebaseauth.users.createSession`. Grant the runtime service account the predefined Firebase Authentication Admin role (`roles/firebaseauth.admin`), which includes that permission, or an equivalent custom least-privilege role:
+
+```bash
+gcloud projects add-iam-policy-binding "$PROJECT_ID" \
+	--member="serviceAccount:$CLOUD_RUN_SERVICE_ACCOUNT" \
+	--role="roles/firebaseauth.admin"
+```
+
+This IAM binding is a manual deployment prerequisite; `deploy.sh` does not modify project IAM policy. The Firebase Admin Python implementation calls Identity Toolkit's `createSessionCookie` endpoint and does not use IAM remote blob signing, so `iam.serviceAccounts.signBlob` and `roles/iam.serviceAccountTokenCreator` are not required for this session-cookie flow.
+
 ## Greenhouse Job Discovery
 
 This slice supports only deterministic Greenhouse public source detection and the official public Greenhouse Job Board API. It does not use Harvest APIs, customer credentials, application submission endpoints, broad crawling, search engines, LinkedIn, browser automation, JavaScript execution, scheduling, referrals, resume generation, or application submission.
@@ -589,7 +612,7 @@ The web console is served at `http://127.0.0.1:8000/jobs` and the JSON API is se
 
 ## Expected Local Workflow
 
-1. Run `docker compose up`.
+1. Run `docker compose up --build` after dependency changes, or `docker compose up` for source-only changes.
 2. Edit Python files locally.
 3. Let the Compose-backed app reload automatically.
 4. Let pre-commit run on commit.

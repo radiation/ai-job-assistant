@@ -15,6 +15,7 @@ dependencies = [
 	"psycopg[binary]>=3.3.4",
 	"sqlalchemy>=2.0.42",
 	"uvicorn>=0.52.1",
+	"firebase-admin>=7.5.0",
 ]
 
 [dependency-groups]
@@ -69,5 +70,5 @@ plugins = ["pydantic.mypy", "sqlalchemy.ext.mypy.plugin"]
 mypy_path = ["src"]
 
 [[tool.mypy.overrides]]
-module = ["alembic.*"]
+module = ["alembic.*", "firebase_admin.*"]
 ignore_missing_imports = true
