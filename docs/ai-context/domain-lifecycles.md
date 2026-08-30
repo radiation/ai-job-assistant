@@ -88,6 +88,8 @@ Saved searches are persisted, provider-neutral definitions. `enabled` is operati
 
 Definitions contain deterministic title patterns, target domains, target seniority levels, location/workplace rules, and a minimum score threshold.
 
+Daily scheduled discovery is opt-in. It claims due saved searches atomically and records its attempted and completed timestamps without changing manual discovery behavior.
+
 ## Job Search Run
 
 ```text
@@ -103,3 +105,5 @@ Every manual run is persisted before evaluation begins. Historical runs remain. 
 ## Job Search Match
 
 One persisted match record exists per job lead per run. Matches retain score-at-run-time, matched criteria, exclusion reasons, inferred domain and seniority, and threshold outcome.
+
+An actionable canonical job may create one in-app alert per saved search. The alert is deduplicated by saved search and canonical job lead, rather than discovery run; therefore, an existing actionable job can alert once on the first scheduled run after scheduling is enabled if no prior alert exists.

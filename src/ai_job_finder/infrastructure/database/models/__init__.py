@@ -18,6 +18,7 @@ from ai_job_finder.infrastructure.database.models.job_discovery import (
     JobDiscoveryRunModel,
 )
 from ai_job_finder.infrastructure.database.models.job_searches import (
+    JobSearchActionableNotificationModel,
     JobSearchDefinitionModel,
     JobSearchMatchModel,
     JobSearchRunModel,
@@ -44,6 +45,7 @@ __all__ = [
     "JobEvaluationModel",
     "JobImportRunModel",
     "JobLeadModel",
+    "JobSearchActionableNotificationModel",
     "JobSearchDefinitionModel",
     "JobSearchMatchModel",
     "JobSearchRunModel",

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Iterator
 from dataclasses import replace
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, cast
 from urllib.parse import urlsplit
@@ -14,14 +14,19 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from ai_job_finder.application.job_discovery import (
     JobDiscoveryConfig,
+    configure_scheduled_discovery,
+    deliver_newly_actionable_notifications,
     get_job_discovery_run_detail,
+    list_due_scheduled_discoveries,
     list_job_discovery_observations,
+    run_due_scheduled_discoveries,
     run_job_discovery,
 )
 from ai_job_finder.application.job_discovery.query_generation import generate_job_discovery_queries
 from ai_job_finder.application.job_searches import (
     create_job_search_definition,
     get_job_search_definition,
+    run_job_search,
 )
 from ai_job_finder.application.job_sources import (
     create_job_source_configuration,
@@ -62,6 +67,8 @@ from ai_job_finder.infrastructure.database.models import (
     JobDiscoveryRunModel,
     JobEvaluationModel,
     JobLeadModel,
+    JobSearchActionableNotificationModel,
+    JobSearchDefinitionModel,
     JobSearchMatchModel,
     JobSourceConfigurationModel,
 )
@@ -2249,4 +2256,352 @@ def test_run_job_discovery_import_failure_isolated_to_one_supported_source(
         assert any(
             record.observation.processing_status == JobDiscoveryObservationStatus.FAILED.value
             for record in observations
+        )
+
+
+def test_scheduled_discovery_selects_due_enabled_searches_and_skips_overlaps(
+    session_factory: sessionmaker[Session],
+) -> None:
+    now = datetime(2026, 8, 29, tzinfo=UTC)
+    with session_factory() as session:
+        due_search_id = _search(session)
+        disabled_search_id = create_job_search_definition(
+            session,
+            name="Disabled scheduled roles",
+            title_include_patterns=[],
+            title_exclude_patterns=[],
+            target_domains=[],
+            target_seniority_levels=[],
+            allowed_locations=[],
+            allowed_remote_geographies=[],
+            allowed_workplace_types=[],
+            minimum_score_threshold=0,
+            enabled=False,
+        ).id
+        future_search_id = create_job_search_definition(
+            session,
+            name="Future scheduled roles",
+            title_include_patterns=[],
+            title_exclude_patterns=[],
+            target_domains=[],
+            target_seniority_levels=[],
+            allowed_locations=[],
+            allowed_remote_geographies=[],
+            allowed_workplace_types=[],
+            minimum_score_threshold=0,
+        ).id
+        overlapping_search_id = create_job_search_definition(
+            session,
+            name="Overlapping scheduled roles",
+            title_include_patterns=[],
+            title_exclude_patterns=[],
+            target_domains=[],
+            target_seniority_levels=[],
+            allowed_locations=[],
+            allowed_remote_geographies=[],
+            allowed_workplace_types=[],
+            minimum_score_threshold=0,
+        ).id
+        for search_id in (
+            due_search_id,
+            disabled_search_id,
+            future_search_id,
+            overlapping_search_id,
+        ):
+            configure_scheduled_discovery(
+                session,
+                search_definition_id=search_id,
+                enabled=True,
+                cadence="daily",
+                now=now,
+            )
+        disabled = get_job_search_definition(session, disabled_search_id)
+        disabled.enabled = False
+        future = get_job_search_definition(session, future_search_id)
+        future.next_scheduled_discovery_at = now + timedelta(days=1)
+        session.add_all([disabled, future])
+        session.add(
+            JobDiscoveryRunModel(
+                id=new_uuid(),
+                search_definition_id=overlapping_search_id,
+                provider="fake",
+                status="running",
+                started_at=now,
+            )
+        )
+        session.commit()
+
+        calls: list[UUID] = []
+        results = run_due_scheduled_discoveries(
+            session,
+            now=now,
+            run_discovery=lambda search_id: _completed_scheduled_run(
+                session, search_id, calls, now
+            ),
+        )
+
+        assert {search.id for search in list_due_scheduled_discoveries(session, now=now)} == {
+            overlapping_search_id
+        }
+        assert calls == [due_search_id]
+        assert [result.search_definition_id for result in results] == [due_search_id]
+        due_search = get_job_search_definition(session, due_search_id)
+        assert _as_utc_timestamp(due_search.last_scheduled_discovery_attempted_at) == now
+        assert _as_utc_timestamp(due_search.last_scheduled_discovery_completed_at) == now
+        assert _as_utc_timestamp(due_search.next_scheduled_discovery_at) == now + timedelta(days=1)
+
+
+def test_scheduled_discovery_failure_leaves_schedule_recoverable(
+    session_factory: sessionmaker[Session],
+) -> None:
+    now = datetime(2026, 8, 29, tzinfo=UTC)
+    with session_factory() as session:
+        search_id = _search(session)
+        configure_scheduled_discovery(
+            session,
+            search_definition_id=search_id,
+            enabled=True,
+            cadence="daily",
+            now=now,
+        )
+
+        results = run_due_scheduled_discoveries(
+            session,
+            now=now,
+            run_discovery=lambda _: (_ for _ in ()).throw(RuntimeError("provider unavailable")),
+        )
+
+        assert results == []
+        search = get_job_search_definition(session, search_id)
+        assert _as_utc_timestamp(search.last_scheduled_discovery_attempted_at) == now
+        assert search.last_scheduled_discovery_completed_at is None
+        assert _as_utc_timestamp(search.next_scheduled_discovery_at) == now + timedelta(days=1)
+
+
+def test_scheduled_discovery_rolls_back_failed_session_before_next_search(
+    session_factory: sessionmaker[Session],
+) -> None:
+    now = datetime(2026, 8, 29, tzinfo=UTC)
+    with session_factory() as session:
+        first_search_id = _search(session)
+        second_search_id = create_job_search_definition(
+            session,
+            name="Second scheduled roles",
+            title_include_patterns=[],
+            title_exclude_patterns=[],
+            target_domains=[],
+            target_seniority_levels=[],
+            allowed_locations=[],
+            allowed_remote_geographies=[],
+            allowed_workplace_types=[],
+            minimum_score_threshold=0,
+        ).id
+        for search_id in (first_search_id, second_search_id):
+            configure_scheduled_discovery(
+                session,
+                search_definition_id=search_id,
+                enabled=True,
+                cadence="daily",
+                now=now,
+            )
+        calls: list[UUID] = []
+
+        def runner(search_id: UUID) -> JobDiscoveryRunModel:
+            calls.append(search_id)
+            if len(calls) == 1:
+                session.add(
+                    JobSearchDefinitionModel(
+                        id=new_uuid(),
+                        name="Platform roles",
+                        enabled=True,
+                        title_include_patterns=[],
+                        title_exclude_patterns=[],
+                        target_domains=[],
+                        target_seniority_levels=[],
+                        allowed_locations=[],
+                        allowed_remote_geographies=[],
+                        allowed_workplace_types=[],
+                        minimum_score_threshold=0,
+                    )
+                )
+                session.flush()
+            return _completed_scheduled_run(session, search_id, [], now)
+
+        results = run_due_scheduled_discoveries(session, now=now, run_discovery=runner)
+
+        assert len(calls) == 2
+        assert [result.search_definition_id for result in results] == [calls[1]]
+        completed_search = get_job_search_definition(session, calls[1])
+        assert _as_utc_timestamp(completed_search.last_scheduled_discovery_completed_at) == now
+
+
+def _completed_scheduled_run(
+    session: Session,
+    search_definition_id: UUID,
+    calls: list[UUID],
+    completed_at: datetime,
+) -> JobDiscoveryRunModel:
+    calls.append(search_definition_id)
+    run = JobDiscoveryRunModel(
+        id=new_uuid(),
+        search_definition_id=search_definition_id,
+        provider="fake",
+        status="completed",
+        started_at=completed_at,
+        completed_at=completed_at,
+    )
+    session.add(run)
+    session.commit()
+    return run
+
+
+def _as_utc_timestamp(value: datetime | None) -> datetime | None:
+    return value.replace(tzinfo=UTC) if value is not None and value.tzinfo is None else value
+
+
+def test_scheduled_discovery_delivers_new_actionable_matches_once(
+    session_factory: sessionmaker[Session],
+) -> None:
+    now = datetime(2026, 8, 29, tzinfo=UTC)
+    with session_factory() as session:
+        _seed_candidate(session)
+        search_id = _search(session)
+        configure_scheduled_discovery(
+            session,
+            search_definition_id=search_id,
+            enabled=True,
+            cadence="daily",
+            now=now,
+        )
+        create_job_source_configuration(
+            session,
+            provider=JobSourceProvider.GREENHOUSE.value,
+            display_name="Acme Greenhouse",
+            company_name="Acme",
+            board_token="acme",
+            source_url="https://boards.greenhouse.io/acme",
+        )
+        search = get_job_search_definition(session, search_id)
+        query = generate_job_discovery_queries(search.to_snapshot(), max_queries=4, result_limit=5)[
+            0
+        ]
+        provider = FakeJobDiscoveryProvider(
+            results_by_query={
+                query.rendered_query: [
+                    DiscoveredJobCandidate(
+                        discovered_url="https://boards.greenhouse.io/acme/jobs/strong-one",
+                        provider_name="fake",
+                        query_identifier=query.stable_query_id,
+                        rank=1,
+                        title_hint="Director, Platform Engineering",
+                        company_hint="Acme",
+                    ),
+                    DiscoveredJobCandidate(
+                        discovered_url="https://boards.greenhouse.io/acme/jobs/strong-two",
+                        provider_name="fake",
+                        query_identifier=query.stable_query_id,
+                        rank=2,
+                        title_hint="Director, Platform Engineering",
+                        company_hint="Acme",
+                    ),
+                ]
+            }
+        )
+        connector = FakeJobSourceConnector(
+            jobs=[
+                _posting("strong-one", "Director, Platform Engineering"),
+                _posting("strong-two", "Director, Platform Engineering"),
+            ],
+            valid_tokens={"acme"},
+        )
+        validation = JobSourceBoardValidation(
+            token="acme",
+            status="valid",
+            valid=True,
+            job_count=2,
+            sample_titles=["Director, Platform Engineering"],
+            company_name="Acme",
+        )
+
+        def runner(definition_id: UUID) -> JobDiscoveryRunModel:
+            return run_job_discovery(
+                session,
+                search_definition_id=definition_id,
+                provider_name="fake",
+                provider=provider,
+                fetcher=FakeFetcher({}),
+                board_validator=FakeValidator({"acme": validation}),
+                connector=connector,
+                config=_config(),
+            )
+
+        first_results = run_due_scheduled_discoveries(session, now=now, run_discovery=runner)
+        notifications = list(session.scalars(select(JobSearchActionableNotificationModel)))
+
+        assert first_results[0].notification_count == 2
+        assert len(notifications) == 2
+        assert {notification.delivery_status for notification in notifications} == {"succeeded"}
+        repeated_run = session.get(JobDiscoveryRunModel, first_results[0].discovery_run_id)
+        assert repeated_run is not None
+        repeated_results = run_due_scheduled_discoveries(
+            session,
+            now=now + timedelta(days=1),
+            run_discovery=lambda _: repeated_run,
+        )
+        assert repeated_results[0].notification_count == 0
+        assert len(list(session.scalars(select(JobSearchActionableNotificationModel)))) == 2
+
+        alternate_search = create_job_search_definition(
+            session,
+            name="Alternate platform roles",
+            title_include_patterns=["Director Platform Engineering"],
+            title_exclude_patterns=["finance"],
+            target_domains=["platform_engineering"],
+            target_seniority_levels=["director"],
+            allowed_locations=[],
+            allowed_remote_geographies=["United States"],
+            allowed_workplace_types=["remote"],
+            minimum_score_threshold=70,
+        )
+        alternate_run = run_job_search(session, search_definition_id=alternate_search.id)
+        failure_count = deliver_newly_actionable_notifications(
+            session,
+            search_run_id=alternate_run.id,
+            deliver_in_app_notification=lambda _: (_ for _ in ()).throw(
+                RuntimeError("delivery down")
+            ),
+        )
+        failed_notifications = list(
+            session.scalars(
+                select(JobSearchActionableNotificationModel).where(
+                    JobSearchActionableNotificationModel.search_definition_id == alternate_search.id
+                )
+            )
+        )
+
+        assert failure_count == 2
+        assert len(failed_notifications) == 2
+        assert {notification.delivery_status for notification in failed_notifications} == {"failed"}
+        assert all(notification.sent_at is None for notification in failed_notifications)
+        assert {notification.failure_message for notification in failed_notifications} == {
+            "delivery down"
+        }
+        retry_count = deliver_newly_actionable_notifications(
+            session,
+            search_run_id=alternate_run.id,
+        )
+
+        assert retry_count == 0
+        assert (
+            len(
+                list(
+                    session.scalars(
+                        select(JobSearchActionableNotificationModel).where(
+                            JobSearchActionableNotificationModel.search_definition_id
+                            == alternate_search.id
+                        )
+                    )
+                )
+            )
+            == 2
         )

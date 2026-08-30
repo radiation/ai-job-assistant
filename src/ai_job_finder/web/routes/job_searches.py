@@ -18,8 +18,11 @@ from ai_job_finder.api.v1.routes.dependencies import (
 )
 from ai_job_finder.api.v1.schemas import JobSearchDefinitionCreateRequest
 from ai_job_finder.application.job_discovery import (
+    DAILY_DISCOVERY_CADENCE,
     JobDiscoveryConfig,
+    configure_scheduled_discovery,
     get_job_discovery_run_detail,
+    list_actionable_notifications,
     list_job_discovery_runs,
     run_job_discovery,
 )
@@ -308,6 +311,7 @@ def job_searches_detail(
             "search": search,
             "runs": list_job_search_runs(session, search_definition_id=search.id),
             "discovery_runs": list_job_discovery_runs(session, search_definition_id=search.id),
+            "notifications": list_actionable_notifications(session, search_definition_id=search.id),
             **_form_context(page_title=search.name, values=_values_from_search(search)),
         },
     )
@@ -334,6 +338,9 @@ async def job_searches_update(
                 "search": search,
                 "runs": list_job_search_runs(session, search_definition_id=search.id),
                 "discovery_runs": list_job_discovery_runs(session, search_definition_id=search.id),
+                "notifications": list_actionable_notifications(
+                    session, search_definition_id=search.id
+                ),
                 **_form_context(page_title=search.name, values=values, errors=errors),
             },
             status_code=422,
@@ -362,6 +369,9 @@ async def job_searches_update(
                 "search": search,
                 "runs": list_job_search_runs(session, search_definition_id=search.id),
                 "discovery_runs": list_job_discovery_runs(session, search_definition_id=search.id),
+                "notifications": list_actionable_notifications(
+                    session, search_definition_id=search.id
+                ),
                 **_form_context(page_title=search.name, values=values, errors={"name": str(exc)}),
             },
             status_code=409,
@@ -391,6 +401,25 @@ def job_searches_disable(search_definition_id: UUID, session: DbSession) -> Resp
         session,
         search_definition_id=search_definition_id,
         enabled=False,
+    )
+    return RedirectResponse(
+        url=f"/job-searches/{search_definition_id}",
+        status_code=status.HTTP_303_SEE_OTHER,
+    )
+
+
+@router.post("/job-searches/{search_definition_id}/discovery-schedule")
+async def job_searches_update_discovery_schedule(
+    request: Request,
+    search_definition_id: UUID,
+    session: DbSession,
+) -> Response:
+    form = await request.form()
+    configure_scheduled_discovery(
+        session,
+        search_definition_id=search_definition_id,
+        enabled=str(form.get("enabled", "false")).casefold() == "true",
+        cadence=DAILY_DISCOVERY_CADENCE,
     )
     return RedirectResponse(
         url=f"/job-searches/{search_definition_id}",

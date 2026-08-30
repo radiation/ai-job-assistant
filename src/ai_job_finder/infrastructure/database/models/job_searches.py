@@ -38,6 +38,7 @@ if TYPE_CHECKING:
     )
 
 __all__ = [
+    "JobSearchActionableNotificationModel",
     "JobSearchDefinitionModel",
     "JobSearchMatchModel",
     "JobSearchRunModel",
@@ -55,6 +56,11 @@ class JobSearchDefinitionModel(Base):
         UniqueConstraint("name", name="uq_job_search_definitions_name"),
         Index("ix_job_search_definitions_enabled", "enabled"),
         Index("ix_job_search_definitions_last_run_at", "last_run_at"),
+        Index(
+            "ix_job_search_definitions_scheduled_discovery_due",
+            "scheduled_discovery_enabled",
+            "next_scheduled_discovery_at",
+        ),
     )
 
     id: Mapped[UUID] = mapped_column(Uuid, primary_key=True)
@@ -69,6 +75,19 @@ class JobSearchDefinitionModel(Base):
     allowed_workplace_types: Mapped[list[str]] = mapped_column(JSON, default=list)
     minimum_score_threshold: Mapped[float] = mapped_column(Float, default=0.0)
     last_run_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    scheduled_discovery_enabled: Mapped[bool] = mapped_column(
+        Boolean, default=False, nullable=False
+    )
+    scheduled_discovery_cadence: Mapped[str] = mapped_column(
+        String(30), default="daily", nullable=False
+    )
+    next_scheduled_discovery_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_scheduled_discovery_attempted_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True)
+    )
+    last_scheduled_discovery_completed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True)
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utc_now, onupdate=utc_now
@@ -81,6 +100,11 @@ class JobSearchDefinitionModel(Base):
     )
     matches: Mapped[list[JobSearchMatchModel]] = relationship(
         "JobSearchMatchModel",
+        back_populates="search_definition",
+        cascade="all, delete-orphan",
+    )
+    actionable_notifications: Mapped[list[JobSearchActionableNotificationModel]] = relationship(
+        "JobSearchActionableNotificationModel",
         back_populates="search_definition",
         cascade="all, delete-orphan",
     )
@@ -208,3 +232,46 @@ class JobSearchMatchModel(Base):
     )
     job_lead: Mapped[JobLeadModel] = relationship("JobLeadModel")
     job_evaluation: Mapped[JobEvaluationModel | None] = relationship("JobEvaluationModel")
+
+
+class JobSearchActionableNotificationModel(Base):
+    __tablename__ = "job_search_actionable_notifications"
+    __table_args__ = (
+        CheckConstraint(
+            "delivery_status IN ('pending', 'succeeded', 'failed')",
+            name="job_search_actionable_notifications_delivery_status_valid",
+        ),
+        UniqueConstraint(
+            "search_definition_id",
+            "job_lead_id",
+            name="uq_job_search_actionable_notifications_search_job_lead",
+        ),
+        Index(
+            "ix_job_search_actionable_notifications_delivery_status",
+            "delivery_status",
+        ),
+    )
+
+    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True)
+    search_definition_id: Mapped[UUID] = mapped_column(
+        ForeignKey("job_search_definitions.id", ondelete="CASCADE")
+    )
+    job_lead_id: Mapped[UUID] = mapped_column(ForeignKey("job_leads.id", ondelete="CASCADE"))
+    job_search_match_id: Mapped[UUID] = mapped_column(
+        ForeignKey("job_search_matches.id", ondelete="CASCADE")
+    )
+    channel: Mapped[str] = mapped_column(String(30), default="in_app")
+    delivery_status: Mapped[str] = mapped_column(String(30), default="pending", nullable=False)
+    attempted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    failure_message: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utc_now, onupdate=utc_now
+    )
+
+    search_definition: Mapped[JobSearchDefinitionModel] = relationship(
+        "JobSearchDefinitionModel", back_populates="actionable_notifications"
+    )
+    job_lead: Mapped[JobLeadModel] = relationship("JobLeadModel")
+    job_search_match: Mapped[JobSearchMatchModel] = relationship("JobSearchMatchModel")

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -312,8 +312,18 @@ class JobSearchDefinitionResponse(BaseModel):
     allowed_workplace_types: list[WorkplaceType]
     minimum_score_threshold: float
     last_run_at: datetime | None = None
+    scheduled_discovery_enabled: bool
+    scheduled_discovery_cadence: Literal["daily"]
+    next_scheduled_discovery_at: datetime | None = None
+    last_scheduled_discovery_attempted_at: datetime | None = None
+    last_scheduled_discovery_completed_at: datetime | None = None
     created_at: datetime
     updated_at: datetime
+
+
+class ScheduledDiscoveryUpdateRequest(BaseModel):
+    enabled: bool
+    cadence: Literal["daily"] = "daily"
 
 
 class JobSearchRunResponse(BaseModel):

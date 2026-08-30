@@ -1,12 +1,16 @@
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from concurrent.futures import ThreadPoolExecutor
+from datetime import UTC, datetime, timedelta
+from threading import Barrier
 from uuid import UUID
 
 import pytest
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
 
+from ai_job_finder.application.job_discovery.scheduling import _claim_scheduled_discovery
+from ai_job_finder.application.job_searches import create_job_search_definition
 from ai_job_finder.application.job_sources import (
     create_job_source_configuration,
     run_job_source_import,
@@ -49,6 +53,57 @@ from ai_job_finder.infrastructure.database.models import (
     JobSourceObservationModel,
 )
 from ai_job_finder.infrastructure.job_sources.fake import FakeJobSourceConnector
+
+
+def test_scheduled_discovery_claim_is_atomic_across_postgres_sessions(
+    session_factory: sessionmaker[Session],
+) -> None:
+    now = datetime(2026, 8, 29, tzinfo=UTC)
+    with session_factory() as session:
+        if session.get_bind().dialect.name != "postgresql":
+            pytest.skip("Requires PostgreSQL row-update concurrency semantics.")
+        search = create_job_search_definition(
+            session,
+            name="Atomic scheduled search",
+            title_include_patterns=[],
+            title_exclude_patterns=[],
+            target_domains=[],
+            target_seniority_levels=[],
+            allowed_locations=[],
+            allowed_remote_geographies=[],
+            allowed_workplace_types=[],
+            minimum_score_threshold=0,
+        )
+        search.scheduled_discovery_enabled = True
+        search.next_scheduled_discovery_at = now
+        session.add(search)
+        session.commit()
+        search_id = search.id
+
+    barrier = Barrier(2)
+
+    def claim_in_separate_session() -> bool:
+        with session_factory() as session:
+            barrier.wait()
+            return _claim_scheduled_discovery(
+                session,
+                search_definition_id=search_id,
+                attempted_at=now,
+            )
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        claim_results = list(executor.map(lambda _: claim_in_separate_session(), range(2)))
+
+    assert claim_results.count(True) == 1
+    assert claim_results.count(False) == 1
+    with session_factory() as session:
+        claimed_search = session.get(JobSearchDefinitionModel, search_id)
+        assert claimed_search is not None
+        assert claimed_search.last_scheduled_discovery_attempted_at is not None
+        assert claimed_search.next_scheduled_discovery_at is not None
+        assert claimed_search.next_scheduled_discovery_at.replace(tzinfo=UTC) == now + timedelta(
+            days=1
+        )
 
 
 def test_job_lead_uniqueness_constraint(session_factory: sessionmaker[Session]) -> None:
