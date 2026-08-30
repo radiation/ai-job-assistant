@@ -11,6 +11,7 @@ from ai_job_finder.application.job_discovery.runs import (
 )
 from ai_job_finder.application.job_discovery.scheduling import (
     DAILY_DISCOVERY_CADENCE,
+    ActionableMatchEmail,
     ScheduledDiscoveryResult,
     configure_scheduled_discovery,
     deliver_newly_actionable_notifications,
@@ -21,6 +22,7 @@ from ai_job_finder.application.job_discovery.scheduling import (
 
 __all__ = [
     "DAILY_DISCOVERY_CADENCE",
+    "ActionableMatchEmail",
     "JobDiscoveryConfig",
     "JobDiscoveryObservationRecord",
     "JobDiscoveryRunDetail",
